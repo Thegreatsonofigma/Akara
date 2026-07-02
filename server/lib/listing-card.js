@@ -142,12 +142,12 @@ function listingCardSvg(listing) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
   <style>
-    ${fontFace("CoolveticaCard", fontFiles.coolvetica, 900)}
+    ${fontFace("CoolveticaCompressedHeavy", fontFiles.coolvetica, 900)}
     ${fontFace("CamptonCard", fontFiles.camptonBook, 400)}
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCard', Impact, sans-serif; font-weight: 900; fill: #fff; letter-spacing: -8px; }
+    .amount { font-family: 'CoolveticaCompressedHeavy', Impact, sans-serif; font-weight: 900; fill: #fff; letter-spacing: -8px; }
     .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 52px; fill: #fff; letter-spacing: 18px; }
     .header-strong { font-weight: 900; letter-spacing: 14px; }
     .label-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 58px; font-weight: 700; fill: #E9EBED; letter-spacing: 22px; }
@@ -213,23 +213,22 @@ function exchangeCompletionSvg(deal, role) {
   const completedAt = compactDay(deal.completed_at || new Date());
   const receiveAmount = numberText(youReceive.amount);
   const receiveSize = amountFontSize(receiveAmount) + 130;
-  const sendLine = `${numberText(youSend.amount)} ${String(youSend.currency || "").toUpperCase()}`;
-  const receiveLine = `${numberText(youReceive.amount)} ${String(youReceive.currency || "").toUpperCase()}`;
   const stamp = assetDataUri("success-stamp.png");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
   <style>
-    ${fontFace("CoolveticaCard", fontFiles.coolvetica, 900)}
+    ${fontFace("CoolveticaCompressedHeavy", fontFiles.coolvetica, 900)}
     ${fontFace("CamptonCard", fontFiles.camptonBook, 400)}
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCard', Impact, sans-serif; font-weight: 900; fill: #fff; letter-spacing: -10px; }
+    .amount { font-family: 'CoolveticaCompressedHeavy', Impact, sans-serif; font-weight: 900; fill: #fff; letter-spacing: -10px; }
     .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 54px; fill: #fff; letter-spacing: 18px; }
     .header-strong { font-weight: 900; letter-spacing: 12px; }
     .meta { font-family: 'CamptonCard', Arial, sans-serif; font-size: 46px; fill: #fff; letter-spacing: 8px; }
     .meta-strong { font-weight: 900; letter-spacing: 4px; }
+    .meta-number { font-family: 'CoolveticaCompressedHeavy', Impact, sans-serif; font-weight: 900; letter-spacing: -1px; }
     .site { font-family: 'CamptonCard', Arial, sans-serif; font-size: 80px; fill: #fff; font-weight: 900; letter-spacing: 5px; }
     .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-weight: 900; letter-spacing: -2px; }
   </style>
@@ -245,8 +244,12 @@ function exchangeCompletionSvg(deal, role) {
   ${stamp ? `<image href="${stamp}" x="2320" y="220" width="600" height="600" opacity="0.9"/>` : ""}
 
   <text x="565" y="1320" class="meta">EXCHANGED</text>
-  <text x="565" y="1378" class="meta meta-strong">${escapeXml(sendLine)}</text>
-  <text x="565" y="1438" class="meta">FOR <tspan class="meta-strong">${escapeXml(receiveLine)}</tspan></text>
+  <text x="565" y="1378" class="meta">
+    <tspan class="meta-number">${escapeXml(numberText(youSend.amount))}</tspan><tspan dx="14" class="meta-strong">${escapeXml(String(youSend.currency || "").toUpperCase())}</tspan>
+  </text>
+  <text x="565" y="1438" class="meta">
+    <tspan>FOR</tspan><tspan dx="18" class="meta-number">${escapeXml(numberText(youReceive.amount))}</tspan><tspan dx="14" class="meta-strong">${escapeXml(String(youReceive.currency || "").toUpperCase())}</tspan>
+  </text>
 
   <text x="1470" y="1320" text-anchor="middle" class="meta">${escapeXml(timeLabel(completedAt))}</text>
   <text x="1470" y="1438" text-anchor="middle" class="meta">${escapeXml(dateLabel(completedAt))}</text>
