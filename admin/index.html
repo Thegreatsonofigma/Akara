@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Akara Admin</title>
+    <link rel="stylesheet" href="/admin/styles.css" />
+  </head>
+  <body>
+    <div class="app-frame">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark"><span></span></div>
+          <div>
+            <div class="brand-name">Akara</div>
+          </div>
+        </div>
+
+        <div class="corridor-card">
+          <span>Corridor</span>
+          <strong>NGN <b></b> RWF</strong>
+        </div>
+
+        <nav class="nav" aria-label="Admin sections">
+          <button class="nav-item is-active" data-view="overview"><span class="nav-icon nav-overview"></span>Overview</button>
+          <button class="nav-item" data-view="users"><span class="nav-icon nav-users"></span>Users</button>
+          <button class="nav-item" data-view="verifications"><span class="nav-icon nav-verify"></span>Verifications</button>
+          <button class="nav-item" data-view="listings"><span class="nav-icon nav-offers"></span>Offers</button>
+          <button class="nav-item" data-view="deals"><span class="nav-icon nav-deals"></span>Deals</button>
+          <button class="nav-item" data-view="disputes"><span class="nav-icon nav-reports"></span>Reports</button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="operator">
+            <div class="avatar">S</div>
+            <div>
+              <strong>Steven</strong>
+              <span>Admin</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="operator-heading">
+            <div class="avatar is-large">A</div>
+            <div>
+              <h1 id="view-title">Overview</h1>
+              <p class="microcopy" id="view-subtitle">Corridor operations</p>
+            </div>
+          </div>
+
+          <div class="admin-auth">
+            <span class="mode-pill">Pilot live</span>
+            <input id="admin-token" type="password" autocomplete="off" placeholder="Admin token" />
+            <button id="save-token" type="button">Save</button>
+            <button id="refresh" type="button">Refresh</button>
+          </div>
+        </header>
+
+        <section id="notice" class="notice" hidden></section>
+
+        <section id="overview" class="view is-active">
+          <div class="status-strip">
+            <div>
+              <span>Mode</span>
+              <strong>Pilot</strong>
+            </div>
+            <div>
+              <span>Fee</span>
+              <strong>100</strong>
+            </div>
+            <div>
+              <span>Reserve</span>
+              <strong>15m</strong>
+            </div>
+            <div>
+              <span>Custody</span>
+              <strong>Off</strong>
+            </div>
+          </div>
+
+          <div class="metrics">
+            <div class="metric metric-primary">
+              <div class="metric-top"><span>Users</span><small>7d</small></div>
+              <div class="metric-value"><strong id="metric-users">0</strong></div>
+              <div class="chart line-chart" id="activity-chart" aria-label="Seven day activity chart"></div>
+            </div>
+            <div class="metric">
+              <div class="metric-top"><span>Offers</span><small>Status</small></div>
+              <div class="metric-value"><strong id="metric-listings">0</strong></div>
+              <div class="chart donut-chart" id="offer-status-chart" aria-label="Offer status chart"></div>
+            </div>
+            <div class="metric">
+              <div class="metric-top"><span>Deals</span><small>Status</small></div>
+              <div class="metric-value"><strong id="metric-deals">0</strong></div>
+              <div class="chart bar-chart" id="deal-status-chart" aria-label="Deal status chart"></div>
+            </div>
+            <div class="metric">
+              <div class="metric-top"><span>Completed</span><small>Route</small></div>
+              <div class="metric-value"><strong id="metric-completed">0</strong></div>
+              <div class="chart corridor-chart" id="corridor-chart" aria-label="Corridor chart"></div>
+            </div>
+            <div class="metric">
+              <div class="metric-top"><span>Verifications</span><small>Queue</small></div>
+              <div class="metric-value"><strong id="metric-verifications">0</strong></div>
+              <div class="chart horizontal-chart" id="verification-chart" aria-label="Verification status chart"></div>
+            </div>
+            <div class="metric">
+              <div class="metric-top"><span>Reports</span><small>Open</small></div>
+              <div class="metric-value"><strong id="metric-disputes">0</strong></div>
+              <div class="chart report-chart" id="report-chart" aria-label="Report status chart"></div>
+            </div>
+          </div>
+
+          <div class="ledger-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Recent Deals</h2>
+              </div>
+              <div id="recent-deals" class="list"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Recent Offers</h2>
+              </div>
+              <div id="recent-listings" class="list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="users" class="view">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Users</h2>
+              <input class="filter" data-filter="users-table" placeholder="Filter users" />
+            </div>
+            <div class="table-wrap">
+              <table id="users-table"></table>
+            </div>
+          </div>
+        </section>
+
+        <section id="verifications" class="view">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Verification Queue</h2>
+              <input class="filter" data-filter="verifications-table" placeholder="Filter verifications" />
+            </div>
+            <div class="table-wrap">
+              <table id="verifications-table"></table>
+            </div>
+          </div>
+        </section>
+
+        <section id="listings" class="view">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Offers</h2>
+              <input class="filter" data-filter="listings-table" placeholder="Filter offers" />
+            </div>
+            <div class="table-wrap">
+              <table id="listings-table"></table>
+            </div>
+          </div>
+        </section>
+
+        <section id="deals" class="view">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Deals</h2>
+              <input class="filter" data-filter="deals-table" placeholder="Filter deals" />
+            </div>
+            <div class="table-wrap">
+              <table id="deals-table"></table>
+            </div>
+          </div>
+        </section>
+
+        <section id="disputes" class="view">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Reports</h2>
+              <input class="filter" data-filter="disputes-table" placeholder="Filter reports" />
+            </div>
+            <div class="table-wrap">
+              <table id="disputes-table"></table>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/admin/app.js"></script>
+  </body>
+</html>
