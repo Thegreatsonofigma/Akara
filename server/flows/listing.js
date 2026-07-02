@@ -19,6 +19,7 @@ const {
 const { getUserById, isVerified, tierLimitBlockForAmount, tierLimitBlockForListing } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { getDefaultPaymentProfile, formatPaymentProfile, paymentDestinationTitle, paymentExpectationLine } = require("../db/payments");
+const { sendListingCard } = require("../lib/listing-card");
 const {
   displayReference,
   generateReferenceCode,
@@ -131,6 +132,14 @@ async function publishListing(user, context) {
 
     await clearSession(user, user.whatsapp_phone);
     const shareUrl = listingShareUrl(listing.listing_code || context.listing_code);
+    sendListingCard(
+      user.whatsapp_phone,
+      listing,
+      `Listing card for ${displayReference(listing.listing_code || context.listing_code, "listing")}`
+    ).catch((error) => {
+      console.error(`[listing] card send failed for ${listing.listing_code || context.listing_code}: ${error.message}`);
+    });
+
     return [
       "Listing updated ✅",
       "",
@@ -167,6 +176,14 @@ async function publishListing(user, context) {
 
   await clearSession(user, user.whatsapp_phone);
   const shareUrl = listingShareUrl(listingCode);
+  sendListingCard(
+    user.whatsapp_phone,
+    listing,
+    `Listing card for ${displayReference(listingCode, "listing")}`
+  ).catch((error) => {
+    console.error(`[listing] card send failed for ${listingCode}: ${error.message}`);
+  });
+
   return [
     `Your listing is live ✅`,
     "",

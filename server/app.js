@@ -4,6 +4,7 @@ const { config, setRuntimePublicUrl } = require("./config");
 const { jsonResponse, textResponse, readJsonBody, serveFile } = require("./lib/http");
 const { extractMessages, sendWhatsAppText, sendWhatsAppTyping, getOutboundTextByMessageId } = require("./lib/whatsapp");
 const { handleReceiptRedirect } = require("./lib/receipts");
+const { handleListingCardRoute } = require("./lib/listing-card");
 const { findOrCreateUser } = require("./db/users");
 const { getSession } = require("./db/sessions");
 const { buildReply } = require("./router");
@@ -101,6 +102,10 @@ const server = http.createServer(async (req, res) => {
     const receiptMatch = url.pathname.match(/^\/r\/([0-9a-f]{8}|[0-9a-f-]{36})$/i);
     if (req.method === "GET" && receiptMatch) {
       return await handleReceiptRedirect(res, receiptMatch[1]);
+    }
+
+    if (req.method === "GET" && await handleListingCardRoute(req, res, url)) {
+      return;
     }
 
     if (req.method === "POST" && url.pathname === "/dev/message") {

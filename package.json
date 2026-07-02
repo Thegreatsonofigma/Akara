@@ -1,0 +1,15 @@
+{
+  "name": "akara",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WhatsApp-first peer-to-peer FX matching assistant.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node server/test/run-tests.js",
+    "check": "node --check server/index.js && node --check server/app.js && node --check server/lib/listing-card.js"
+  },
+  "dependencies": {
+    "sharp": "^0.33.5"
+  }
+}

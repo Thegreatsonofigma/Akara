@@ -1,4 +1,4 @@
-const { config } = require("../config");
+const { config, getPublicUrl } = require("../config");
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { moneyNumber, positiveMoney } = require("../lib/format");
 
@@ -75,9 +75,15 @@ function extractDealCode(input) {
 }
 
 function listingShareUrl(listingCode) {
+  const publicUrl = getPublicUrl();
+  if (publicUrl) return `${publicUrl}/l/${encodeURIComponent(displayReference(listingCode, "listing"))}`;
+  return listingWaOpenUrl(listingCode);
+}
+
+function listingWaOpenUrl(listingCode) {
   const phone = String(config.akaraWhatsappNumber || "").replace(/[^\d]/g, "");
   if (!phone) return "";
-  return `https://wa.me/${phone}?text=${encodeURIComponent(`open ${listingCode}`)}`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(`open ${displayReference(listingCode, "listing")}`)}`;
 }
 
 function listingTypeLabel(value) {
@@ -142,6 +148,7 @@ module.exports = {
   extractListingCode,
   extractDealCode,
   listingShareUrl,
+  listingWaOpenUrl,
   listingTypeLabel,
   listingStatusLabel,
   getUserListings,
