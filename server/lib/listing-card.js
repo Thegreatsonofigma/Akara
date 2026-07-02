@@ -15,7 +15,11 @@ const fontDir = path.join(rootDir, "server", "assets", "fonts");
 const cardAssetDir = path.join(rootDir, "server", "assets", "cards");
 
 const fontFiles = {
-  coolvetica: "CoolveticaCompressedHeavy.otf",
+  coolveticaCompressedHeavy: "coolvetica-compressed-hv.otf",
+  coolveticaCrammedRegular: "coolvetica-crammed-rg.otf",
+  coolveticaCondensedRegular: "coolvetica-condensed-rg.otf",
+  coolveticaRegular: "coolvetica-rg.otf",
+  coolveticaRegularItalic: "coolvetica-rg-it.otf",
   camptonBook: "CamptonBook.otf",
   camptonSemiBold: "CamptonSemiBold.otf",
   camptonBold: "CamptonBold.otf",
@@ -155,12 +159,16 @@ function listingCardSvg(listing) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
   <style>
-    ${fontFace("CoolveticaCompressedHeavy", fontFiles.coolvetica, 900)}
+    ${fontFace("CoolveticaCompressedHeavy", fontFiles.coolveticaCompressedHeavy, 900)}
+    ${fontFace("CoolveticaCrammedRegular", fontFiles.coolveticaCrammedRegular, 400)}
+    ${fontFace("CoolveticaCondensedRegular", fontFiles.coolveticaCondensedRegular, 400)}
+    ${fontFace("CoolveticaRegular", fontFiles.coolveticaRegular, 400)}
+    ${fontFace("CoolveticaRegularItalic", fontFiles.coolveticaRegularItalic, 400)}
     ${fontFace("CamptonCard", fontFiles.camptonBook, 400)}
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCompressedHeavy', Impact, sans-serif; font-weight: 900; fill: #fff; letter-spacing: -8px; }
+    .amount { font-family: 'CoolveticaCompressedHeavy', 'CoolveticaCrammedRegular', 'CoolveticaCondensedRegular', 'CoolveticaRegular'; font-weight: 900; fill: #fff; letter-spacing: -8px; }
     .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 52px; fill: #fff; letter-spacing: 18px; }
     .header-strong { font-weight: 900; letter-spacing: 14px; }
     .label-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 58px; font-weight: 700; fill: #E9EBED; letter-spacing: 22px; }
@@ -232,17 +240,21 @@ function exchangeCompletionSvg(deal, role) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
   <style>
-    ${fontFace("CoolveticaCompressedHeavy", fontFiles.coolvetica, 900)}
+    ${fontFace("CoolveticaCompressedHeavy", fontFiles.coolveticaCompressedHeavy, 900)}
+    ${fontFace("CoolveticaCrammedRegular", fontFiles.coolveticaCrammedRegular, 400)}
+    ${fontFace("CoolveticaCondensedRegular", fontFiles.coolveticaCondensedRegular, 400)}
+    ${fontFace("CoolveticaRegular", fontFiles.coolveticaRegular, 400)}
+    ${fontFace("CoolveticaRegularItalic", fontFiles.coolveticaRegularItalic, 400)}
     ${fontFace("CamptonCard", fontFiles.camptonBook, 400)}
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCompressedHeavy', Impact, sans-serif; font-weight: 900; fill: #fff; letter-spacing: -10px; }
+    .amount { font-family: 'CoolveticaCompressedHeavy', 'CoolveticaCrammedRegular', 'CoolveticaCondensedRegular', 'CoolveticaRegular'; font-weight: 900; fill: #fff; letter-spacing: -10px; }
     .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 54px; fill: #fff; letter-spacing: 18px; }
     .header-strong { font-weight: 900; letter-spacing: 12px; }
     .meta { font-family: 'CamptonCard', Arial, sans-serif; font-size: 46px; fill: #fff; letter-spacing: 8px; }
     .meta-strong { font-weight: 900; letter-spacing: 4px; }
-    .meta-number { font-family: 'CoolveticaCompressedHeavy', Impact, sans-serif; font-weight: 900; letter-spacing: -1px; }
+    .meta-number { font-family: 'CoolveticaCompressedHeavy', 'CoolveticaCrammedRegular', 'CoolveticaCondensedRegular', 'CoolveticaRegular'; font-weight: 900; letter-spacing: -1px; }
     .site { font-family: 'CamptonCard', Arial, sans-serif; font-size: 80px; fill: #fff; font-weight: 900; letter-spacing: 5px; }
     .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-weight: 900; letter-spacing: -2px; }
   </style>
