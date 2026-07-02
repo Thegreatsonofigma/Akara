@@ -82,6 +82,13 @@ function amountFontSize(text) {
   return 196;
 }
 
+function completionAmountFontSize(text) {
+  if (text.length <= 8) return 620;
+  if (text.length <= 10) return 520;
+  if (text.length <= 12) return 460;
+  return 390;
+}
+
 function pillWidth(currency) {
   return Math.max(340, Math.min(470, 170 + String(currency || "").length * 72));
 }
@@ -131,6 +138,12 @@ function cardBackground() {
   return `<image href="${background}" x="0" y="0" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" preserveAspectRatio="xMidYMid slice"/>`;
 }
 
+function akaraLogo({ x, y, size = 220, opacity = 1 }) {
+  const logo = assetDataUri("akara-logo-mark.png");
+  if (!logo) return "";
+  return `<image href="${logo}" x="${x}" y="${y}" width="${size}" height="${size}" opacity="${opacity}" preserveAspectRatio="xMidYMid meet"/>`;
+}
+
 function listingCardSvg(listing) {
   const code = displayReference(listing.listing_code, "listing");
   const haveAmount = numberText(listing.have_amount);
@@ -173,6 +186,7 @@ function listingCardSvg(listing) {
 
   ${labelPill({ x: 800, y: 920, label: "I HAVE:", currency: listing.have_currency })}
   ${labelPill({ x: 2400, y: 920, label: "I NEED:", currency: listing.want_currency })}
+  ${akaraLogo({ x: 1490, y: 852, size: 220, opacity: 0.96 })}
 
   <rect y="1312" width="${CARD_WIDTH}" height="203" fill="#0F1012"/>
   <text x="1600" y="1432" text-anchor="middle" class="footer">
@@ -204,7 +218,7 @@ function timeLabel(date) {
 function dateLabel(date) {
   const day = String(date.getDate()).padStart(2, "0");
   const month = new Intl.DateTimeFormat("en-US", { month: "short" }).format(date).toUpperCase();
-  return `${day} ${month} ${date.getFullYear()}`;
+  return `${day} - ${month} - ${date.getFullYear()}`;
 }
 
 function exchangeCompletionSvg(deal, role) {
@@ -212,7 +226,7 @@ function exchangeCompletionSvg(deal, role) {
   const { youSend, youReceive } = dealPartySummary(role, deal);
   const completedAt = compactDay(deal.completed_at || new Date());
   const receiveAmount = numberText(youReceive.amount);
-  const receiveSize = amountFontSize(receiveAmount) + 130;
+  const receiveSize = completionAmountFontSize(receiveAmount);
   const stamp = assetDataUri("success-stamp.png");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -234,13 +248,14 @@ function exchangeCompletionSvg(deal, role) {
   </style>
 
   ${cardBackground()}
+  ${akaraLogo({ x: 510, y: 60, size: 220, opacity: 0.96 })}
 
   <text x="1600" y="178" text-anchor="middle" class="header">
     <tspan>EXCHANGE</tspan><tspan dx="34" class="header-strong">COMPLETED</tspan>
   </text>
 
-  <text x="1600" y="1050" text-anchor="middle" class="amount" font-size="${receiveSize}">${escapeXml(receiveAmount)}</text>
-  ${currencyChip({ x: 690, y: 640, currency: youReceive.currency, width: 340, height: 170, fontSize: 88 })}
+  <text x="1600" y="1054" text-anchor="middle" class="amount" font-size="${receiveSize}">${escapeXml(receiveAmount)}</text>
+  ${currencyChip({ x: 690, y: 632, currency: youReceive.currency, width: 340, height: 170, fontSize: 88 })}
   ${stamp ? `<image href="${stamp}" x="2320" y="220" width="600" height="600" opacity="0.9"/>` : ""}
 
   <text x="565" y="1320" class="meta">EXCHANGED</text>
