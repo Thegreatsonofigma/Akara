@@ -5,6 +5,7 @@ const { compactText } = require("../nlp/slang");
 const { getUserById, updateUser, latestVerificationRequest } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { mainMenu } = require("../messages/copy");
+const { sendVerificationSuccessCard } = require("../lib/listing-card");
 const {
   paymentChoicePrompt,
   maybeHandlePaymentEdit,
@@ -96,6 +97,9 @@ async function finishVerificationSubmission(user, requestId) {
 
   await clearSession(user, user.whatsapp_phone);
   if (isTierOneReady) {
+    sendVerificationSuccessCard(user.whatsapp_phone).catch((error) => {
+      console.error(`[verification] success card failed for ${user.whatsapp_phone}: ${error.message}`);
+    });
     return [
       "Verification submitted ✅",
       "",

@@ -3,6 +3,7 @@ const { rootDir, config } = require("./config");
 const { jsonResponse, readJsonBody } = require("./lib/http");
 const { supabaseRequest, filterValue, createStorageSignedUrl } = require("./lib/supabase");
 const { sendWhatsAppText } = require("./lib/whatsapp");
+const { sendVerificationSuccessCard } = require("./lib/listing-card");
 const { updateUser } = require("./db/users");
 const { mainMenu } = require("./messages/copy");
 
@@ -195,6 +196,11 @@ async function handleAdminApi(req, res, url) {
     sendWhatsAppText(user.whatsapp_phone, notice).catch((error) => {
       console.error(`[admin] verification notice failed for ${user.whatsapp_phone}: ${error.message}`);
     });
+    if (approved) {
+      sendVerificationSuccessCard(user.whatsapp_phone).catch((error) => {
+        console.error(`[admin] verification card failed for ${user.whatsapp_phone}: ${error.message}`);
+      });
+    }
 
     return jsonResponse(res, 200, { ok: true, data: rows[0] });
   }

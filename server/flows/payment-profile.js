@@ -7,6 +7,7 @@ const { isEditIntent, isCancelIntent, isDeclineIntent } = require("../nlp/intent
 const { getUserById, updateUser, latestVerificationRequest } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { mainMenu } = require("../messages/copy");
+const { sendVerificationSuccessCard } = require("../lib/listing-card");
 
 function paymentMethodForCurrency(currency) {
   return currency === "NGN" ? "bank" : "momo";
@@ -437,7 +438,7 @@ async function resolveAndConfirmAccount(flow, user, context) {
   return promptPaymentProfileConfirmation(user, flow, context);
 }
 
-async function assessPayoutNameTrust(user, payoutName) {
+async function assessPayoutNameTrust(user, payoutName, { notifyVerificationSuccess = true } = {}) {
   const freshUser = await getUserById(user.id);
   if (!freshUser) return { status: "unknown", reason: "User not found." };
 
@@ -457,11 +458,17 @@ async function assessPayoutNameTrust(user, payoutName) {
       });
     }
 
+    const shouldNotifySuccess = notifyVerificationSuccess && ["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status);
     if (["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status)) {
       await updateUser(user.id, {
         verification_status: "verified_auto",
         verification_score: Math.max(Number(freshUser.verification_score || 0), 65),
         risk_status: "normal",
+      });
+    }
+    if (shouldNotifySuccess) {
+      sendVerificationSuccessCard(freshUser.whatsapp_phone || user.whatsapp_phone).catch((error) => {
+        console.error(`[kyc] verification card failed for ${user.id}: ${error.message}`);
       });
     }
 
@@ -489,7 +496,7 @@ async function assessPayoutNameTrust(user, payoutName) {
   return { status: "mismatch", reason: "Payout name does not match KYC name." };
 }
 
-async function savePaymentProfile(user, context) {
+async function savePaymentProfile(user, context, { notifyVerificationSuccess = true } = {}) {
   const currency = context.payment_currency;
   const method = paymentMethodForCurrency(currency);
   const body = {
@@ -531,7 +538,7 @@ async function savePaymentProfile(user, context) {
       }
     );
     const profile = rows[0] || null;
-    await assessPayoutNameTrust(user, context.payment_account_name).catch((error) => {
+    await assessPayoutNameTrust(user, context.payment_account_name, { notifyVerificationSuccess }).catch((error) => {
       console.error(`[kyc] payout name check failed for ${user.id}: ${error.message}`);
     });
     return profile;
@@ -542,7 +549,7 @@ async function savePaymentProfile(user, context) {
     body: JSON.stringify(body),
   });
   const profile = rows[0] || null;
-  await assessPayoutNameTrust(user, context.payment_account_name).catch((error) => {
+  await assessPayoutNameTrust(user, context.payment_account_name, { notifyVerificationSuccess }).catch((error) => {
     console.error(`[kyc] payout name check failed for ${user.id}: ${error.message}`);
   });
   return profile;
@@ -551,7 +558,7 @@ async function savePaymentProfile(user, context) {
 async function finishPaymentProfileSave(user, flow, context) {
   // Lazy requires: these flows also route back into payment profile setup, so
   // requiring them at the top would create circular imports.
-  await savePaymentProfile(user, context);
+  await savePaymentProfile(user, context, { notifyVerificationSuccess: flow !== "verification" });
 
   if (flow === "verification") {
     const paymentCount = Number(context.payment_count || 0) + 1;

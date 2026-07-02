@@ -19,7 +19,7 @@ const {
   isDeclineIntent,
   isCancelTradeIntent,
 } = require("../nlp/intents");
-const { updateUser } = require("../db/users");
+const { updateUser, getUserById } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { getDefaultPaymentProfile, formatPaymentProfile, paymentDestinationTitle, paymentExpectationLine } = require("../db/payments");
 const { displayReference } = require("../db/listings");
@@ -38,6 +38,7 @@ const {
   notifyDealUser,
 } = require("../db/deals");
 const { storeDealProof, dealUserHasProof, sendDealProofToUser } = require("../lib/receipts");
+const { sendExchangeCompletionCard } = require("../lib/listing-card");
 const { feeIncludedNote } = require("../messages/copy");
 
 const REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
@@ -227,11 +228,22 @@ async function recordReminderSent(dealId, actorUserId, targetUserId) {
 }
 
 async function notifyExchangeCompleteForOtherUser(otherUserId, deal, otherRole) {
+  const target = await getUserById(otherUserId);
   await notifyDealUser(otherUserId, [
     exchangeCompleteMessage(deal, otherRole),
     "",
     feeIncludedNote(),
   ].join("\n"));
+  if (target?.whatsapp_phone) {
+    sendExchangeCompletionCard(
+      target.whatsapp_phone,
+      deal,
+      otherRole,
+      `Exchange receipt for ${displayReference(deal.deal_code, "deal")}`
+    ).catch((error) => {
+      console.error(`[deal] completion card failed for ${target.whatsapp_phone}: ${error.message}`);
+    });
+  }
 }
 
 function isDealRoomCommand(text, incoming = {}) {
@@ -285,8 +297,17 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
 
   const otherRole = otherDealRole(role);
   const dealCode = displayReference(deal.deal_code, "deal");
-  await notifyExchangeCompleteForOtherUser(otherUserId, updatedDeal || deal, otherRole).catch((error) => {
+  const completedDeal = await getDealById(dealId) || updatedDeal || deal;
+  await notifyExchangeCompleteForOtherUser(otherUserId, completedDeal, otherRole).catch((error) => {
     console.error(`[deal] completion notice failed for ${dealCode}: ${error.message}`);
+  });
+  sendExchangeCompletionCard(
+    user.whatsapp_phone,
+    completedDeal,
+    role,
+    `Exchange receipt for ${dealCode}`
+  ).catch((error) => {
+    console.error(`[deal] completion card failed for ${user.whatsapp_phone}: ${error.message}`);
   });
   await clearSession(user, user.whatsapp_phone);
 
@@ -294,7 +315,7 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
   return {
     completed: true,
     reply: [
-      exchangeCompleteMessage(updatedDeal || deal, role),
+      exchangeCompleteMessage(completedDeal, role),
       ...extraLines,
       "",
       feeIncludedNote(youSend.currency),

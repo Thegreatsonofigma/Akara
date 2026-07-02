@@ -29,6 +29,17 @@ This keeps the first version lighter while leaving room for a regulated wallet o
 4. Secure web verification form for ID upload.
 5. Lightweight admin dashboard for review, override, disputes, and transaction monitoring.
 
+## Local Setup
+
+Install the server dependency before running Akara:
+
+```bash
+npm install
+npm start
+```
+
+`sharp` is used to render dynamic listing cards as PNG images for WhatsApp and link previews. The SVG preview pages still work without it, but PNG delivery needs `npm install` or a system SVG renderer such as `librsvg`.
+
 ## Important Guardrails
 
 - Do not ask users to send full identity documents directly inside WhatsApp.
