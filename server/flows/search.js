@@ -28,10 +28,10 @@ const LISTING_SEARCH_SELECT = "listings?select=id,listing_code,owner_user_id,hav
 
 function searchPromptForStep(step, details = {}) {
   if (step === "have_currency") {
-    return [title("What currency do you have?"), caption(currencyHelpLine())].join("\n");
+    return [title("What currency do you have?"), currencyHelpLine()].join("\n\n");
   }
   if (step === "want_currency") {
-    return [title("What currency do you need?"), caption(currencyHelpLine(details.have_currency))].join("\n");
+    return [title("What currency do you need?"), currencyHelpLine(details.have_currency)].join("\n\n");
   }
   if (step === "have_amount") {
     return [
@@ -113,7 +113,7 @@ async function showOfferMatches(user, context) {
     if (draft) {
       return prepareListingPreview(user, draft, [
         title("No current offer"),
-        caption("No live listing fits that request right now. I prepared yours for review."),
+        "No live listing fits that request right now. I prepared yours for review.",
       ].join("\n"));
     }
 
@@ -129,7 +129,7 @@ async function showOfferMatches(user, context) {
       await upsertSession(user, user.whatsapp_phone, "create_listing", missing[0], partialDraft);
       return [
         title("No current offer"),
-        caption("No live listing fits that request right now."),
+        "No live listing fits that request right now.",
         "",
         "If you want to list yours, I need one more detail:",
         "",
@@ -341,7 +341,7 @@ async function handleFindOffer(text, user, session) {
 
   if (step === "have_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return [title("Choose what you have"), caption(currencyHelpLine())].join("\n");
+    if (!currency) return [title("Choose what you have"), currencyHelpLine()].join("\n\n");
 
     context.have_currency = currency;
     return continueSearchOrShowMatches(user, context);
@@ -349,7 +349,7 @@ async function handleFindOffer(text, user, session) {
 
   if (step === "want_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return [title("Choose what you need"), caption(currencyHelpLine(context.have_currency))].join("\n");
+    if (!currency) return [title("Choose what you need"), currencyHelpLine(context.have_currency)].join("\n\n");
     if (currency === context.have_currency) return "Choose a different currency from the one you have.";
 
     context.want_currency = currency;

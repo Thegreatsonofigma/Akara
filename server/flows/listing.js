@@ -1,5 +1,6 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { sendWhatsAppText } = require("../lib/whatsapp");
+const { config } = require("../config");
 const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { normalizeCurrency, parseAmount, currencyHelpLine } = require("../nlp/currency");
@@ -39,22 +40,43 @@ function listingLiveMessage(heading, listingCode, listing, shareUrl) {
   const code = displayReference(listingCode, "listing");
   return [
     title(heading),
-    caption("Your swap card is attached in this chat."),
+    "Your swap card is attached.",
     "",
-    fieldBlock("Reference", code),
+    `*Reference:* ${action(code)}`,
     "",
-    fieldBlock("You send", formatMoney(listing.have_amount, listing.have_currency)),
+    `*You send:* ${title(formatMoney(listing.have_amount, listing.have_currency))}`,
     "",
-    fieldBlock("You receive", formatMoney(listing.want_amount, listing.want_currency)),
+    `*You receive:* ${title(formatMoney(listing.want_amount, listing.want_currency))}`,
     "",
-    fieldBlock("Offer terms", listingTypeLabel(listing.listing_type || "fixed")),
+    `*Terms:* ${listingTypeLabel(listing.listing_type || "fixed")}`,
     "",
-    fieldBlock("Service fee", feeIncludedText()),
+    `*Service fee:* ${feeIncludedText()}`,
     "",
     title("Share"),
     shareUrl ? shareUrl : action(`open ${code}`),
-    caption(listingShareCopy()),
+    listingShareCopy(),
   ].filter(Boolean).join("\n");
+}
+
+async function deliverListingLive(user, listing, listingCode, message) {
+  if (config.sendMode === "log") {
+    sendListingCard(
+      user.whatsapp_phone,
+      listing,
+      `Listing card for ${displayReference(listingCode, "listing")}`
+    ).catch((error) => {
+      console.error(`[listing] card send failed for ${listingCode}: ${error.message}`);
+    });
+    return message;
+  }
+
+  try {
+    await sendListingCard(user.whatsapp_phone, listing, message);
+    return "";
+  } catch (error) {
+    console.error(`[listing] card send failed for ${listingCode}: ${error.message}`);
+    return message;
+  }
 }
 
 function tradeOpenedMessage({
@@ -199,15 +221,8 @@ async function publishListing(user, context) {
 
     await clearSession(user, user.whatsapp_phone);
     const shareUrl = listingShareUrl(listing.listing_code || context.listing_code);
-    sendListingCard(
-      user.whatsapp_phone,
-      listing,
-      `Listing card for ${displayReference(listing.listing_code || context.listing_code, "listing")}`
-    ).catch((error) => {
-      console.error(`[listing] card send failed for ${listing.listing_code || context.listing_code}: ${error.message}`);
-    });
-
-    return listingLiveMessage("Listing updated ✅", listing.listing_code || context.listing_code, listing, shareUrl);
+    const liveMessage = listingLiveMessage("Listing updated ✅", listing.listing_code || context.listing_code, listing, shareUrl);
+    return deliverListingLive(user, listing, listing.listing_code || context.listing_code, liveMessage);
   }
 
   const listingCode = context.listing_code || await generateReferenceCode("listing");
@@ -231,15 +246,8 @@ async function publishListing(user, context) {
 
   await clearSession(user, user.whatsapp_phone);
   const shareUrl = listingShareUrl(listingCode);
-  sendListingCard(
-    user.whatsapp_phone,
-    listing,
-    `Listing card for ${displayReference(listingCode, "listing")}`
-  ).catch((error) => {
-    console.error(`[listing] card send failed for ${listingCode}: ${error.message}`);
-  });
-
-  return listingLiveMessage("Your listing is live ✅", listingCode, listing, shareUrl);
+  const liveMessage = listingLiveMessage("Your listing is live ✅", listingCode, listing, shareUrl);
+  return deliverListingLive(user, listing, listingCode, liveMessage);
 }
 
 async function findReciprocalListing(user, listing) {
@@ -584,7 +592,13 @@ async function handleCreateListing(text, user, session) {
         ...(context.previous_listing_status ? { previous_listing_status: context.previous_listing_status } : {}),
       };
       await upsertSession(user, user.whatsapp_phone, "create_listing", "have_currency", editContext);
-      return "No problem. What currency do you have?";
+      return [
+        title("Edit listing"),
+        "",
+        "What currency do you have?",
+        "",
+        currencyHelpLine(),
+      ].join("\n");
     }
 
     if (!isListingPublishIntent(command)) {

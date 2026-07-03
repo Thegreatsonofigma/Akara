@@ -264,11 +264,23 @@ async function run() {
 
   reply = await send(ALICE, "publish");
   check("publish makes listing live", reply.includes("live ✅"), reply);
-  check("live copy shows free service fee", reply.includes("*Free*"), reply);
+  check("live copy shows free service fee", reply.includes("*Service fee:* Free"), reply);
   check("session cleared after publish", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "my listings");
   check("listing appears in scoped view", reply.includes("AKR-LIST-001"), reply);
+
+  reply = await send(ALICE, "hi, I want to convert 16,728 naira for 18,500 RWF. Is there any available offer that is within around this rate?", {
+    interpret: { action: "find_offer", have_currency: "NGN", have_amount: 16728, want_currency: "RWF", want_amount: 18500 },
+  });
+  check("rate-shaped request prepares listing when no offer fits", reply.includes("*Review listing*"), reply);
+  check("rate-shaped request keeps extracted send amount", reply.includes("16,728 NGN"), reply);
+  check("rate-shaped request keeps extracted receive amount", reply.includes("18,500 RWF"), reply);
+
+  reply = await send(ALICE, "edit", { interpret: { action: "settings_action" } });
+  check("review edit stays in listing flow", reply.includes("*Edit listing*") && reply.includes("What currency do you have?"), reply);
+  check("review edit shows currency options", reply.includes("Available:"), reply);
+  await send(ALICE, "cancel");
 
   // ---------- browse + orphaned search_results flow fix
   scenario("search results selection");

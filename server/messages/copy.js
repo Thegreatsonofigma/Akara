@@ -131,7 +131,7 @@ function feeIncludedNote() {
 }
 
 function listingShareCopy() {
-  return "Share the card or link with someone who wants the swap or might be interested. They will land on your listing, review the terms, and open the Akara Trade from their own chat.";
+  return "Share this with anyone interested. They can review it and open the Akara Trade from their own chat.";
 }
 
 function explainMissingListing(fields, context = {}) {

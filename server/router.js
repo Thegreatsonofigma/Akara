@@ -25,6 +25,7 @@ const {
   isRateQuestion,
   isBrowseAllOffersIntent,
   isListingPublishIntent,
+  isEditIntent,
   isDeclineIntent,
   isCancelIntent,
   selectedOptionNumber,
@@ -366,6 +367,10 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     }
   }
 
+  if (session?.current_flow === "create_listing" && session.current_step === "confirm" && isEditIntent(text)) {
+    return handleCreateListing(text, user, session);
+  }
+
   if (session?.current_flow === "find_offer" && hasFreshCompleteListing && freshDirectional) {
     if (isOnHold(user)) return accountOnHoldReply(user);
     await clearSession(user, user.whatsapp_phone);
@@ -464,10 +469,6 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return startPaymentProfileFlow(user);
   }
 
-  if (isRateQuestion(text)) {
-    return scopedAssistantReply(text, user);
-  }
-
   // The model's classification leads; the loose keyword intent regex only
   // weighs in when the interpretation came back empty-handed.
   const intent = ["unknown", "flow_reply"].includes(interpretedAction) ? inferIntent(text) : null;
@@ -475,6 +476,22 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const hasCompleteListing = hasFreshCompleteListing;
   const settingsAction = interpretedAction === "settings_action"
     || /\b(edit|update|change|delete|remove|pause|reopen|resume|activate|close)\b.*\b(payout|payment|bank|momo|details?|offer|listing)\b/.test(command);
+
+  if (hasCompleteListing && (
+    interpretedAction === "create_listing"
+    || interpretedAction === "find_offer"
+    || intent === "create_listing"
+    || /\b(for|to|want|need|convert|change|swap|around|within|rate)\b/i.test(text)
+  )) {
+    if (isOnHold(user)) return accountOnHoldReply(user);
+    const explicitSearch = interpretedAction === "find_offer"
+      || /\b(find|search|show|browse|available|offers?|deals?|trades?|matches|around|within|rate)\b/.test(command)
+      || isRateQuestion(text);
+
+    return explicitSearch
+      ? showOfferMatches(user, listingDetails)
+      : prepareListingPreview(user, listingDetails);
+  }
 
   if (settingsAction) {
     await profileSettingsReply(user);
@@ -486,14 +503,8 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return viewProfileReply(user);
   }
 
-  if (hasCompleteListing && (interpretedAction === "create_listing" || interpretedAction === "find_offer" || intent === "create_listing" || /\b(for|to|want|need)\b/i.test(text))) {
-    if (isOnHold(user)) return accountOnHoldReply(user);
-    const explicitSearch = interpretedAction === "find_offer"
-      || /\b(find|search|show|browse|available|offers?|deals?|trades?|matches)\b/.test(command);
-
-    return explicitSearch
-      ? showOfferMatches(user, listingDetails)
-      : prepareListingPreview(user, listingDetails);
+  if (isRateQuestion(text)) {
+    return scopedAssistantReply(text, user);
   }
 
   // Loose intent words like "trades" and "get" appear in ordinary questions,

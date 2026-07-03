@@ -463,7 +463,7 @@ function listingCardSvg(listing) {
     fontSize: 94,
     centerX: 1088,
     centerY: 967,
-    fill: currencyColors[String(listing.have_currency || "").toUpperCase()]?.text || "#000000",
+    fill: "#FFFFFF",
     targetWidth: listingCurrencyTextWidth(listing.have_currency),
   })}
   ${textOutlineGroup({
@@ -472,7 +472,7 @@ function listingCardSvg(listing) {
     fontSize: 94,
     centerX: 2584,
     centerY: 967,
-    fill: currencyColors[String(listing.want_currency || "").toUpperCase()]?.text || "#000000",
+    fill: "#000000",
     targetWidth: listingCurrencyTextWidth(listing.want_currency),
   })}
 
