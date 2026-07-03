@@ -62,6 +62,47 @@ async function recordOutboundText(to, message, response) {
   });
 }
 
+async function sendWhatsAppList(to, { body, button = "Click to Select", sections = [] }) {
+  if (config.sendMode === "log") {
+    console.log(`\nAkara list -> ${to}\n${body}\n${button}\n${JSON.stringify(sections, null, 2)}\n`);
+    return { logged: true };
+  }
+
+  if (!config.whatsappAccessToken || !config.whatsappPhoneNumberId) {
+    throw new Error("WhatsApp credentials are required unless AKARA_SEND_MODE=log");
+  }
+
+  const url = `https://graph.facebook.com/${config.whatsappGraphVersion}/${config.whatsappPhoneNumberId}/messages`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.whatsappAccessToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: body },
+        action: {
+          button,
+          sections,
+        },
+      },
+    }),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`WhatsApp list ${response.status}: ${text}`);
+  }
+
+  return text ? JSON.parse(text) : null;
+}
+
 async function getOutboundTextByMessageId(messageId) {
   if (!messageId) return "";
   const rows = await supabaseRequest(
@@ -289,6 +330,7 @@ function getMessageText(message) {
 
 module.exports = {
   sendWhatsAppText,
+  sendWhatsAppList,
   getOutboundTextByMessageId,
   sendWhatsAppMedia,
   sendWhatsAppTyping,

@@ -4,8 +4,8 @@ const { formatMoney, moneyNumber } = require("../lib/format");
 
 async function findOrCreateUser(whatsappPhone, displayName) {
   const encodedPhone = filterValue(whatsappPhone);
-  const existing = await supabaseRequest(`users?whatsapp_phone=eq.${encodedPhone}&limit=1`);
-  if (existing.length > 0) return existing[0];
+  const existing = await supabaseRequest(`users?whatsapp_phone=eq.${encodedPhone}`);
+  if (existing.length > 0) return existing[existing.length - 1];
 
   const created = await supabaseRequest("users", {
     method: "POST",
