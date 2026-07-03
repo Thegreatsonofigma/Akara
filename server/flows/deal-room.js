@@ -235,7 +235,7 @@ async function notifyExchangeCompleteForOtherUser(otherUserId, deal, otherRole) 
     feeIncludedNote(),
   ].join("\n"));
   if (target?.whatsapp_phone) {
-    sendExchangeCompletionCard(
+    await sendExchangeCompletionCard(
       target.whatsapp_phone,
       deal,
       otherRole,
@@ -301,14 +301,16 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
   await notifyExchangeCompleteForOtherUser(otherUserId, completedDeal, otherRole).catch((error) => {
     console.error(`[deal] completion notice failed for ${dealCode}: ${error.message}`);
   });
-  sendExchangeCompletionCard(
-    user.whatsapp_phone,
-    completedDeal,
-    role,
-    `Exchange receipt for ${dealCode}`
-  ).catch((error) => {
-    console.error(`[deal] completion card failed for ${user.whatsapp_phone}: ${error.message}`);
-  });
+  if (user.whatsapp_phone) {
+    await sendExchangeCompletionCard(
+      user.whatsapp_phone,
+      completedDeal,
+      role,
+      `Exchange receipt for ${dealCode}`
+    ).catch((error) => {
+      console.error(`[deal] completion card failed for ${user.whatsapp_phone}: ${error.message}`);
+    });
+  }
   await clearSession(user, user.whatsapp_phone);
 
   const { youSend } = dealPartySummary(role, deal);
@@ -594,6 +596,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
 
   if (incoming.media?.id || isSentIntent(command)) {
     const userAlreadyReceived = Boolean(deal[dealReceivedField(role)]);
+    const otherAlreadySent = Boolean(deal[dealSentField(otherRole)]);
     let proof = null;
     let proofDelivery = { sent: false, url: "" };
     if (incoming.media?.id) {
@@ -625,7 +628,9 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       `Payment marked sent ✅ ${dealCode}`,
       "",
       `Expected amount: ${formatMoney(otherSummary.youReceive.amount, otherSummary.youReceive.currency)}`,
-      "Check your bank or MoMo app before sending your side.",
+      otherAlreadySent
+        ? "Your side is already marked paid. Check your bank or MoMo app, then reply received once the funds land."
+        : "Check your bank or MoMo app before sending your side.",
       proofDelivery.sent ? "Receipt attached in this chat." : "",
       proofDelivery.url ? `View receipt: ${proofDelivery.url}` : "",
       "",

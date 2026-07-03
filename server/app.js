@@ -9,6 +9,39 @@ const { findOrCreateUser } = require("./db/users");
 const { getSession } = require("./db/sessions");
 const { buildReply } = require("./router");
 const { handleAdminApi, adminFilePath } = require("./admin");
+const { supabaseRequest, filterValue } = require("./lib/supabase");
+
+const activeInboundMessageIds = new Set();
+
+async function isInboundMessageProcessed(messageId) {
+  if (!messageId) return false;
+  const rows = await supabaseRequest(
+    [
+      "audit_events?select=id",
+      `entity_type=eq.${filterValue(`whatsapp_inbound:${messageId}`)}`,
+      "event_name=eq.inbound_processed",
+      "limit=1",
+    ].join("&")
+  );
+  return rows.length > 0;
+}
+
+async function markInboundMessageProcessed(incoming) {
+  if (!incoming.messageId) return;
+  await supabaseRequest("audit_events", {
+    method: "POST",
+    body: JSON.stringify({
+      actor_type: "system",
+      entity_type: `whatsapp_inbound:${incoming.messageId}`,
+      event_name: "inbound_processed",
+      event_payload: {
+        from: incoming.from,
+        message_id: incoming.messageId,
+        type: incoming.type,
+      },
+    }),
+  });
+}
 
 async function handleWebhookPost(req, res) {
   const payload = await readJsonBody(req);
@@ -27,6 +60,18 @@ async function handleWebhookPost(req, res) {
     try {
       console.log(`[webhook] incoming ${incoming.type} message from ${incoming.from}`);
 
+      if (incoming.messageId && activeInboundMessageIds.has(incoming.messageId)) {
+        console.log(`[webhook] duplicate message already processing: ${incoming.messageId}`);
+        continue;
+      }
+
+      if (await isInboundMessageProcessed(incoming.messageId)) {
+        console.log(`[webhook] duplicate message skipped: ${incoming.messageId}`);
+        continue;
+      }
+
+      if (incoming.messageId) activeInboundMessageIds.add(incoming.messageId);
+
       if (process.env.AKARA_TYPING_INDICATOR === "true") {
         sendWhatsAppTyping(incoming.messageId).catch((error) => {
           console.error(`[webhook] typing indicator failed for ${incoming.from}: ${error.message}`);
@@ -43,6 +88,9 @@ async function handleWebhookPost(req, res) {
       const session = await getSession(incoming.from);
       const reply = await buildReply(incoming.text, user, session, incoming);
       await sendWhatsAppText(incoming.from, reply);
+      await markInboundMessageProcessed(incoming).catch((error) => {
+        console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
+      });
       console.log(`[webhook] reply sent to ${incoming.from}`);
     } catch (error) {
       failedMessages += 1;
@@ -57,6 +105,8 @@ async function handleWebhookPost(req, res) {
       } catch (sendError) {
         console.error(`[webhook] fallback reply failed for ${incoming.from}: ${sendError.message}`);
       }
+    } finally {
+      if (incoming.messageId) activeInboundMessageIds.delete(incoming.messageId);
     }
   }
 
