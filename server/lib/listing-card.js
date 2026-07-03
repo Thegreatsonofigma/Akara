@@ -61,14 +61,19 @@ function fontData(fileName) {
   return fs.readFileSync(fontPath).toString("base64");
 }
 
-let numberFontCache = null;
+const fontCache = new Map();
+
+function parsedFont(fileName) {
+  if (fontCache.has(fileName)) return fontCache.get(fileName);
+  const fontPath = path.join(fontDir, fileName);
+  const buffer = fs.readFileSync(fontPath);
+  const font = opentype.parse(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
+  fontCache.set(fileName, font);
+  return font;
+}
 
 function numberFont() {
-  if (numberFontCache) return numberFontCache;
-  const fontPath = path.join(fontDir, fontFiles.coolveticaCompressedHeavy);
-  const buffer = fs.readFileSync(fontPath);
-  numberFontCache = opentype.parse(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
-  return numberFontCache;
+  return parsedFont(fontFiles.coolveticaCompressedHeavy);
 }
 
 function appendPath(target, source) {
@@ -78,7 +83,10 @@ function appendPath(target, source) {
 }
 
 function trackedTextPath(text, fontSize, tracking) {
-  const font = numberFont();
+  return trackedTextPathForFont(numberFont(), text, fontSize, tracking);
+}
+
+function trackedTextPathForFont(font, text, fontSize, tracking) {
   const output = new opentype.Path();
   let x = 0;
   const chars = [...String(text || "")];
@@ -94,7 +102,10 @@ function trackedTextPath(text, fontSize, tracking) {
 }
 
 function trackedGlyphPaths(text, fontSize, tracking) {
-  const font = numberFont();
+  return trackedGlyphPathsForFont(numberFont(), text, fontSize, tracking);
+}
+
+function trackedGlyphPathsForFont(font, text, fontSize, tracking) {
   let x = 0;
   const chars = [...String(text || "")];
 
@@ -144,6 +155,32 @@ function listingAmountPath(text, { centerX, topY }) {
     .join("");
 
   return `<g fill="#FFFFFF" transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${CARD_SCALE})">${glyphs}</g>`;
+}
+
+function textOutlineGroup({ text, fontFile, fontSize, centerX, centerY, fill, tracking = 0, targetWidth = null, strokeWidth = 0 }) {
+  const value = String(text || "");
+  const font = parsedFont(fontFile);
+  if (targetWidth && value.length > 1) {
+    const untrackedBox = trackedTextPathForFont(font, value, fontSize, 0).getBoundingBox();
+    tracking = (targetWidth - (untrackedBox.x2 - untrackedBox.x1)) / (value.length - 1);
+  }
+  const outline = trackedTextPathForFont(font, value, fontSize, tracking);
+  const box = outline.getBoundingBox();
+  const x = centerX - (box.x1 + box.x2) / 2;
+  const y = centerY - (box.y1 + box.y2) / 2;
+  const glyphs = trackedGlyphPathsForFont(font, value, fontSize, tracking)
+    .map((glyphPath) => `<path d="${closedPathData(glyphPath)}"/>`)
+    .join("");
+  const stroke = strokeWidth > 0 ? ` stroke="${fill}" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill"` : "";
+
+  return `<g fill="${fill}"${stroke} transform="translate(${x.toFixed(3)} ${y.toFixed(3)})">${glyphs}</g>`;
+}
+
+function listingCurrencyTextWidth(currency) {
+  const code = String(currency || "").toUpperCase();
+  if (code === "NGN") return 202;
+  if (code === "RWF") return 206;
+  return 206;
 }
 
 function fontFace(name, fileName, weight = 700) {
@@ -314,7 +351,6 @@ function listingCardSvg(listing) {
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 100px; font-weight: 900; letter-spacing: -2px; }
     .footer-code { font-family: 'CamptonCard', Arial, sans-serif; font-size: 50px; font-weight: 900; fill: #fff; letter-spacing: 7px; }
   </style>
 
@@ -323,8 +359,24 @@ function listingCardSvg(listing) {
   ${listingAmountPath(haveAmount, { centerX: 860, topY: 464 })}
   ${listingAmountPath(wantAmount, { centerX: 2356.5, topY: 464 })}
 
-  <text x="1088" y="1000" text-anchor="middle" class="currency-text" fill="${currencyColors[String(listing.have_currency || "").toUpperCase()]?.text || "#000000"}">${escapeXml(String(listing.have_currency || "").toUpperCase())}</text>
-  <text x="2584" y="1000" text-anchor="middle" class="currency-text" fill="${currencyColors[String(listing.want_currency || "").toUpperCase()]?.text || "#000000"}">${escapeXml(String(listing.want_currency || "").toUpperCase())}</text>
+  ${textOutlineGroup({
+    text: String(listing.have_currency || "").toUpperCase(),
+    fontFile: fontFiles.camptonBlack,
+    fontSize: 94,
+    centerX: 1088,
+    centerY: 967,
+    fill: currencyColors[String(listing.have_currency || "").toUpperCase()]?.text || "#000000",
+    targetWidth: listingCurrencyTextWidth(listing.have_currency),
+  })}
+  ${textOutlineGroup({
+    text: String(listing.want_currency || "").toUpperCase(),
+    fontFile: fontFiles.camptonBlack,
+    fontSize: 94,
+    centerX: 2584,
+    centerY: 967,
+    fill: currencyColors[String(listing.want_currency || "").toUpperCase()]?.text || "#000000",
+    targetWidth: listingCurrencyTextWidth(listing.want_currency),
+  })}
 
   <text x="2220" y="1396" class="footer-code">${escapeXml(openCode)}</text>
 </svg>`;
