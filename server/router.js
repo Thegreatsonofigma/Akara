@@ -39,7 +39,7 @@ const { extractListingCode, extractDealCode } = require("./db/listings");
 const { getDealByCodeForUser, getLatestOpenDealForUser } = require("./db/deals");
 const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply, explainMissingListing } = require("./messages/copy");
 const { scopedAssistantReply } = require("./messages/assistant");
-const { startVerification, handleVerification } = require("./flows/verification");
+const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
 const { prepareListingPreview, reserveListingByCode, handleCreateListing, handleNegotiation } = require("./flows/listing");
 const {
@@ -191,6 +191,16 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
       return viewProfileReply(user);
     }
 
+    // "verify" must always be able to start or resume the flow — checked
+    // before the status intros so a user who cancelled mid-verification is
+    // never trapped on the "reply with the next detail" screen. Submitted
+    // (pending_review) and suspended profiles keep their intro instead.
+    const wantsVerify = interpretedAction === "verify" || command === "verify" || command === "verify me"
+      || command === "1" || inferIntent(text) === "verify";
+    if (wantsVerify && !["pending_review", "suspended"].includes(user.verification_status)) {
+      return startVerification(user);
+    }
+
     if (["pending_input", "pending_review", "rejected", "suspended"].includes(user.verification_status)) {
       if (interpretedAction === "question" || isAssistantQuestion(text)) return scopedAssistantReply(text, user);
       return verificationIntro(user);
@@ -198,10 +208,6 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
     if (interpretedAction === "greeting" || isGreeting(text)) {
       return verificationIntro(user);
-    }
-
-    if (command === "verify" || command === "verify me" || command === "1" || interpretedAction === "verify" || inferIntent(text) === "verify") {
-      return startVerification(user);
     }
 
     if (interpretedAction === "question" || isAssistantQuestion(text)) {
@@ -659,26 +665,42 @@ async function routeMessage(text, user, session, incoming = {}) {
   // it becomes the reply's caption (or head text) so every message opens with
   // language fitted to the conversation. Question/unknown answers are already
   // full replies on their own, so they are never woven into another reply.
-  // An unverified user's fresh request is answered by the verification gate,
-  // so an acknowledgement of the request would contradict the reply.
+  // Unverified users and the verification flow only ever get predetermined
+  // copy — never a model-written caption or heading.
   const skipAnswer = ANSWER_ACTIONS.has(interpreted.action)
-    || (!isVerified(user) && isFreshRequestAction(interpreted.action));
+    || !isVerified(user)
+    || session?.current_flow === "verification";
   return skipAnswer ? reply : applyInterpretedAnswer(reply, interpreted.answer);
 }
 
 async function routeInterpreted(interpreted, text, user, session, incoming = {}) {
-  // Verification collects answers to direct prompts (names, ID photos), so
-  // replies stay in the flow — but a question still gets a real answer, and a
-  // clear outside request is explained instead of being saved as an answer
-  // ("find offers" must never become someone's nationality).
+  // Verification is fully scripted: the model only classifies messages here,
+  // and nothing it writes is ever sent. Questions and outside requests get
+  // predetermined walls that repeat the current step's prompt, so "find
+  // offers" is never saved as someone's nationality and no AI-written answer
+  // can replace or decorate a verification reply.
   if (session?.current_flow === "verification") {
-    if (interpreted.answer && ANSWER_ACTIONS.has(interpreted.action)) return interpreted.answer;
+    const stepPrompt = verificationStepPrompt(session.current_step, session.context_json || {});
+    if (!incoming.media?.id && interpreted.action === "question") {
+      return [
+        "Verification first 🔐",
+        "",
+        "I will answer questions properly once your verification is done. For now:",
+        "",
+        stepPrompt,
+        "",
+        "Type cancel to pause.",
+      ].join("\n");
+    }
     if (!incoming.media?.id && isFreshRequestAction(interpreted.action) && interpreted.action !== "verify") {
       return [
         "Verification comes first 🔐",
         "",
         "I can do that as soon as your verification is complete.",
-        "Reply with the detail I asked for above to continue, or type cancel to pause.",
+        "",
+        stepPrompt,
+        "",
+        "Type cancel to pause.",
       ].join("\n");
     }
     return handleVerification(text, user, session, incoming);

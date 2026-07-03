@@ -267,7 +267,7 @@ function formatPayoutReview(context) {
         labeled("Bank", context.payment_bank_name),
         labeled("Account", context.payment_account_number),
         labeled("Name", context.payment_account_name),
-        ...(context.payment_account_resolved ? [caption("Account name confirmed by the bank ✅")] : []),
+        // ...(context.payment_account_resolved ? [caption("Account name confirmed by the bank ✅")] : []),
       ]
     : [
         labeled("Type", `${currency} mobile money`),
@@ -448,6 +448,10 @@ async function assessPayoutNameTrust(user, payoutName, { notifyVerificationSucce
   const kycName = freshUser.legal_name || request?.extracted_name || "";
   if (!kycName || !payoutName) return { status: "unknown", reason: "KYC name or payout name is missing." };
 
+  // Payout details alone never complete a verification: auto-verifying also
+  // requires the identity documents already collected on the request.
+  const hasIdentityEvidence = Boolean(request?.document_front_path && request?.selfie_path);
+
   const matched = namesLikelyMatch(kycName, payoutName);
   if (matched) {
     if (request?.id) {
@@ -460,8 +464,10 @@ async function assessPayoutNameTrust(user, payoutName, { notifyVerificationSucce
       });
     }
 
-    const shouldNotifySuccess = notifyVerificationSuccess && ["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status);
-    if (["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status)) {
+    const canAutoVerify = hasIdentityEvidence
+      && ["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status);
+    const shouldNotifySuccess = notifyVerificationSuccess && canAutoVerify;
+    if (canAutoVerify) {
       await updateUser(user.id, {
         verification_status: "verified_auto",
         verification_score: Math.max(Number(freshUser.verification_score || 0), 65),
@@ -487,7 +493,7 @@ async function assessPayoutNameTrust(user, payoutName, { notifyVerificationSucce
     });
   }
 
-  if (["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status)) {
+  if (hasIdentityEvidence && ["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status)) {
     await updateUser(user.id, {
       verification_status: "pending_review",
       verification_score: Math.max(Number(freshUser.verification_score || 0), 45),
@@ -573,7 +579,7 @@ async function finishPaymentProfileSave(user, flow, context) {
       "Payout detail saved ✅",
       "",
       "Add another payout method?",
-      "Reply another, or submit.",
+      `Reply ${action("another")}, or ${action("submit")}.`,
     ].join("\n");
   }
 
@@ -650,7 +656,7 @@ async function handlePaymentSteps(flow, text, user, session, context, { onDeclin
       return paymentEditMenuPrompt(context);
     }
 
-    if (isDeclineIntent(command) || isCancelIntent(command)) {
+    if (isDeclineIntent(command) || isCancelIntent(command) || /^(no|nope)$/.test(command)) {
       return onDecline(context);
     }
 
@@ -812,11 +818,13 @@ async function handlePaymentProfile(text, user, session) {
 module.exports = {
   paymentMethodForCurrency,
   paymentChoicePrompt,
+  paymentStepPrompt,
   startPaymentProfileForCurrency,
   startPaymentProfileFlow,
   paymentEditMenuPrompt,
   paymentContextFromProfile,
   formatPayoutReview,
+  namesLikelyMatch,
   maybeHandlePaymentEdit,
   handlePaymentSteps,
   handlePaymentProfile,

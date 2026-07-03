@@ -6,7 +6,8 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node server/test/run-tests.js",
+    "test": "node server/test/run-tests.js && node server/test/verification-test.js",
+    "test:verification": "node server/test/verification-test.js",
     "check": "node --check server/index.js && node --check server/app.js && node --check server/lib/listing-card.js"
   },
   "dependencies": {
