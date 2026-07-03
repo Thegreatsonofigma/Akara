@@ -1,5 +1,5 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
-const { title, caption, action, formatMoney, formatCooldown } = require("../lib/format");
+const { title, caption, action, fieldBlock, formatMoney, formatCooldown } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { parseCurrencyAmountPairs } = require("../nlp/currency");
 const { hasDirectionalExchangeText } = require("../nlp/exchange");
@@ -86,6 +86,37 @@ async function openMissingReceiptDispute(dealId, userId, reason = "Payment was m
   return rows[0] || null;
 }
 
+async function getOpenDisputeForDeal(dealId) {
+  const rows = await supabaseRequest(
+    [
+      "disputes?select=id,deal_id,opened_by_user_id,category,description,status,created_at",
+      `deal_id=eq.${filterValue(dealId)}`,
+      "status=in.(open,waiting_for_user,under_review)",
+      "order=created_at.desc",
+      "limit=1",
+    ].join("&")
+  );
+  return rows[0] || null;
+}
+
+function isDisputeCloseIntent(text) {
+  return /\b(close|cancel|withdraw|drop)\b.*\b(dispute|report|issue|problem|wahala|palava|kasala)\b/.test(text)
+    || /\b(dispute|report|issue|problem|wahala|palava|kasala)\b.*\b(close|cancel|withdraw|drop)\b/.test(text);
+}
+
+function isDisputeConfirmIntent(text) {
+  return /\b(confirm|approve|accept)\b.*\b(dispute|report|issue|problem|wahala|palava|kasala)\b/.test(text)
+    || /\b(dispute|report|issue|problem|wahala|palava|kasala)\b.*\b(confirm|approve|accept)\b/.test(text);
+}
+
+function statusAfterDisputeWithdrawal(deal) {
+  if (deal.maker_received_at && deal.taker_received_at) return "closed";
+  if (deal.maker_sent_at && deal.taker_sent_at) return "partially_confirmed";
+  if (deal.maker_sent_at) return "maker_sent";
+  if (deal.taker_sent_at) return "taker_sent";
+  return "reserved";
+}
+
 function scheduleReceiptDeadline(dealId, userId, otherUserId, dealCode, dueAt) {
   const key = receiptDeadlineKey(dealId, userId);
   if (receiptDeadlineTimers.has(key)) clearTimeout(receiptDeadlineTimers.get(key));
@@ -130,27 +161,102 @@ function disputeReasonPrompt(dealCode) {
     title(`Open dispute ${dealCode}`),
     caption("Tell me why this trade needs review."),
     "",
-    "Send a short reason, like:",
+    title("Reason examples"),
     action("I paid but have not received"),
     action("The receipt looks wrong"),
     action("The amount is incorrect"),
     "",
-    caption("You can upload a receipt or screenshot after the reason is saved."),
+    title("Supporting proof"),
+    caption("After the reason, upload a receipt, screenshot, or image that can help admin review it."),
   ].join("\n");
 }
 
-function disputeGuidance(role, dealCode) {
+function dealSafetyLine() {
+  return "Akara records the exchange trail and keeps both sides aligned. Funds still move directly through bank or mobile money, so confirm details before moving money.";
+}
+
+function paymentAlreadyMovedCaution(role, deal) {
+  if (!deal) return "Pause new payments until admin shares the review outcome.";
+  const otherRole = otherDealRole(role);
+  const youSent = Boolean(deal[dealSentField(role)]);
+  const youReceived = Boolean(deal[dealReceivedField(role)]);
+  const otherSent = Boolean(deal[dealSentField(otherRole)]);
+  const otherReceived = Boolean(deal[dealReceivedField(otherRole)]);
+
+  if (youReceived && !youSent) {
+    return "You have confirmed incoming value. Do not send or refund anything until admin confirms the next step.";
+  }
+  if (youSent && !youReceived) {
+    return "You have already sent value. Keep your receipt ready and do not repeat the transfer.";
+  }
+  if (otherSent && !youReceived) {
+    return "The other party marked payment as sent. Check your payment app, but wait for admin before releasing your side.";
+  }
+  if (otherReceived && !youSent) {
+    return "The other party says your value landed. Wait for admin before sending, refunding, or closing this trade.";
+  }
+  return "Pause new payments until admin shares the review outcome.";
+}
+
+function disputeGuidance(role, dealCode, deal = null, reason = "") {
   return [
     title(`Dispute review ${dealCode}`),
+    caption("This trade is paused while Akara reviews it."),
     "",
-    "This trade is paused while Akara reviews it.",
-    "Do not send a new payment unless Akara confirms the next step.",
-    "Keep your receipt, payment alert, bank or MoMo history, and chat trail ready.",
-    role === "maker"
-      ? "Because this is your listing, do not release or resend value unless Akara confirms the review outcome."
-      : "Because you opened or joined this trade, do not repeat the transfer unless Akara confirms the review outcome.",
+    fieldBlock("Status", "Open"),
     "",
-    caption("Admin will compare the transaction reference, receipts, payout names, amounts, and timestamps."),
+    reason ? fieldBlock("Reason", reason) : "",
+    reason ? "" : "",
+    title("Caution"),
+    paymentAlreadyMovedCaution(role, deal),
+    "",
+    title("Admin checks"),
+    caption("Receipts, payout names, amounts, references, timestamps, and the chat trail."),
+    "",
+    title("Actions"),
+    `${action("add proof")} upload a receipt or screenshot`,
+    `${action("close dispute")} only if you opened it`,
+  ].filter(Boolean).join("\n");
+}
+
+function paymentNoticeForOther(dealCode, expectedAmount, alreadyPaid, proofDelivery) {
+  return [
+    title("Payment marked sent ✅"),
+    "",
+    fieldBlock("Transaction ref", dealCode),
+    "",
+    fieldBlock("Expected incoming", expectedAmount),
+    "",
+    title("Next"),
+    alreadyPaid
+      ? "Your side is already marked paid. Check your bank or MoMo app, then reply received once the funds land."
+      : "Check your bank or MoMo app before sending your side.",
+    proofDelivery.sent ? "Receipt attached in this chat." : "",
+    proofDelivery.url ? `View receipt: ${proofDelivery.url}` : "",
+    "",
+    title("Actions"),
+    `${action("received")} when the money lands`,
+    `${action("dispute")} if anything looks wrong`,
+    "",
+    dealSafetyLine(),
+  ].filter(Boolean).join("\n");
+}
+
+function paymentNotedReply(dealCode, youSend, youReceive, proof, sideComplete = false) {
+  return [
+    title(sideComplete ? "Your side is complete ✅" : "Payment noted ✅"),
+    "",
+    fieldBlock("Transaction ref", dealCode),
+    "",
+    fieldBlock("You sent", formatMoney(youSend.amount, youSend.currency)),
+    "",
+    fieldBlock("Receipt", proof ? "Saved and sent" : "Needed"),
+    "",
+    fieldBlock("You are waiting for", formatMoney(youReceive.amount, youReceive.currency)),
+    "",
+    sideComplete
+      ? "I will confirm the exchange after the other party confirms receipt."
+      : `${action("received")} when it lands, ${action("remind")} if it drags, or ${action("dispute")} if something is wrong.`,
   ].join("\n");
 }
 
@@ -199,7 +305,7 @@ async function openUserDispute(user, deal, role, reason) {
     body: JSON.stringify({ status: "disputed" }),
   });
 
-  await supabaseRequest("disputes", {
+  const rows = await supabaseRequest("disputes", {
     method: "POST",
     body: JSON.stringify({
       deal_id: deal.id,
@@ -210,23 +316,31 @@ async function openUserDispute(user, deal, role, reason) {
     }),
   });
 
+  const dispute = rows[0] || null;
+
   await notifyDealUser(otherUserId, [
-    `Dispute opened for ${dealCode}`,
+    title(`Dispute opened ${dealCode}`),
     "",
-    `Reason shared: ${reason}`,
+    fieldBlock("Reason", reason),
     "",
-    disputeGuidance(otherRole, dealCode),
+    disputeGuidance(otherRole, dealCode, deal, reason),
   ].join("\n")).catch((error) => {
     console.error(`[deal] dispute notice failed for ${dealCode}: ${error.message}`);
   });
 
-  return [
-    `Dispute opened for ${dealCode}.`,
-    "",
-    `Reason saved: ${reason}`,
-    "",
-    disputeGuidance(role, dealCode),
-  ].join("\n");
+  return {
+    dispute,
+    reply: [
+      title(`Dispute opened ${dealCode}`),
+      caption("Admin can now review this trade."),
+      "",
+      fieldBlock("Reason", reason),
+      "",
+      disputeGuidance(role, dealCode, deal, reason),
+      "",
+      caption("Upload a receipt, screenshot, or supporting image if you have one."),
+    ].join("\n"),
+  };
 }
 
 async function reminderCooldownRemainingMs(dealId, userId) {
@@ -411,10 +525,6 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     ].join("\n");
   }
 
-  if (deal.status === "disputed") {
-    return disputeGuidance(role, dealCode);
-  }
-
   if (deal.status === "closed") {
     await clearSession(user, user.whatsapp_phone);
     return [
@@ -431,6 +541,121 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       `Transaction ref: ${dealCode}`,
       feeIncludedNote(),
     ].join("\n");
+  }
+
+  if (isDisputeConfirmIntent(command)) {
+    return [
+      title("Dispute review"),
+      caption("A dispute cannot be confirmed from chat."),
+      "",
+      "Akara admin reviews the evidence and shares the outcome.",
+      "",
+      `${action("add proof")} upload supporting evidence`,
+      `${action("close dispute")} if you opened it and no longer need review`,
+    ].join("\n");
+  }
+
+  if (session.current_step === "awaiting_dispute_proof") {
+    if (incoming.media?.id) {
+      const proof = await storeDealProof(user, dealId, incoming);
+      await upsertSession(user, user.whatsapp_phone, "deal_room", "reserved", {
+        deal_id: dealId,
+        deal_code: deal.deal_code || context.deal_code,
+      });
+      return [
+        title("Proof added ✅"),
+        "",
+        fieldBlock("Transaction ref", dealCode),
+        "",
+        proof?.public_url ? `View proof: ${proof.public_url}` : "The supporting file is saved for admin review.",
+        "",
+        disputeGuidance(role, dealCode, deal),
+      ].filter(Boolean).join("\n");
+    }
+
+    if (isCancelIntent(command) || isDeclineIntent(command) || /\b(skip|later)\b/.test(command)) {
+      await upsertSession(user, user.whatsapp_phone, "deal_room", "reserved", {
+        deal_id: dealId,
+        deal_code: deal.deal_code || context.deal_code,
+      });
+      return disputeGuidance(role, dealCode, deal);
+    }
+  }
+
+  if (isDisputeCloseIntent(command)) {
+    const dispute = await getOpenDisputeForDeal(dealId);
+    if (!dispute) {
+      return [
+        title("No open dispute"),
+        "",
+        `Transaction ref: ${dealCode}`,
+        "There is no active dispute to close for this trade.",
+      ].join("\n");
+    }
+
+    if (dispute.opened_by_user_id !== user.id) {
+      return [
+        title("Dispute stays open"),
+        caption("Only the person who opened this dispute can withdraw it."),
+        "",
+        fieldBlock("Transaction ref", dealCode),
+        "",
+        "Admin can still resolve it after reviewing the evidence.",
+      ].join("\n");
+    }
+
+    await supabaseRequest(`disputes?id=eq.${filterValue(dispute.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "resolved",
+        resolution: "Withdrawn by the user who opened the dispute.",
+        resolved_at: now,
+      }),
+    });
+
+    const resumedStatus = statusAfterDisputeWithdrawal(deal);
+    await supabaseRequest(`deals?id=eq.${filterValue(dealId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: resumedStatus }),
+    });
+
+    await notifyDealUser(otherUserId, [
+      title(`Dispute withdrawn ${dealCode}`),
+      "",
+      "The user who opened the dispute has withdrawn it.",
+      resumedStatus === "closed"
+        ? "This exchange is now complete."
+        : "The Akara Trade can continue from its last recorded step.",
+    ].join("\n")).catch((error) => {
+      console.error(`[deal] dispute withdrawal notice failed for ${dealCode}: ${error.message}`);
+    });
+
+    return [
+      title("Dispute withdrawn ✅"),
+      "",
+      fieldBlock("Transaction ref", dealCode),
+      "",
+      resumedStatus === "closed"
+        ? "This exchange is now complete."
+        : "The trade has returned to its last recorded step.",
+    ].join("\n");
+  }
+
+  if (deal.status === "disputed") {
+    if (incoming.media?.id) {
+      const proof = await storeDealProof(user, dealId, incoming);
+      return [
+        title("Proof added ✅"),
+        "",
+        fieldBlock("Transaction ref", dealCode),
+        "",
+        proof?.public_url ? `View proof: ${proof.public_url}` : "The supporting file is saved for admin review.",
+        "",
+        disputeGuidance(role, dealCode, deal),
+      ].filter(Boolean).join("\n");
+    }
+
+    return disputeGuidance(role, dealCode, deal);
   }
 
   if (isCancelTradeIntent(command)) {
@@ -499,8 +724,13 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     const reason = disputeReasonFromText(text);
     if (!reason) return disputeReasonPrompt(dealCode);
 
-    await clearSession(user, user.whatsapp_phone);
-    return openUserDispute(user, deal, role, reason);
+    const result = await openUserDispute(user, deal, role, reason);
+    await upsertSession(user, user.whatsapp_phone, "deal_room", "awaiting_dispute_proof", {
+      deal_id: dealId,
+      deal_code: deal.deal_code || context.deal_code,
+      opened_dispute_id: result.dispute?.id || null,
+    });
+    return result.reply;
   }
 
   if (isDisputeIntent(command)) {
@@ -513,8 +743,13 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       return disputeReasonPrompt(dealCode);
     }
 
-    await clearSession(user, user.whatsapp_phone);
-    return openUserDispute(user, deal, role, reason);
+    const result = await openUserDispute(user, deal, role, reason);
+    await upsertSession(user, user.whatsapp_phone, "deal_room", "awaiting_dispute_proof", {
+      deal_id: dealId,
+      deal_code: deal.deal_code || context.deal_code,
+      opened_dispute_id: result.dispute?.id || null,
+    });
+    return result.reply;
   }
 
   if (session.current_step === "awaiting_receipt" && context.awaiting_receipt_user_id === user.id && !incoming.media?.id) {
@@ -522,7 +757,9 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     if (dueAt && dueAt.getTime() <= Date.now()) {
       await openMissingReceiptDispute(dealId, user.id);
       return [
-        `Receipt review opened for ${dealCode}.`,
+        title("Receipt review opened"),
+        "",
+        fieldBlock("Transaction ref", dealCode),
         "",
         "You marked this trade as paid, but no receipt was uploaded within the payment window.",
         "Admin will review the trade trail.",
@@ -530,9 +767,10 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     }
 
     return [
-      "Receipt needed.",
+      title("Receipt needed"),
       "",
-      `Transaction ref: ${dealCode}`,
+      fieldBlock("Transaction ref", dealCode),
+      "",
       `Upload the receipt for ${formatMoney(youSend.amount, youSend.currency)} so I can notify your trade partner.`,
       "",
       "If you have not sent the money, reply cancel trade.",
@@ -546,9 +784,10 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       deal_code: deal.deal_code || context.deal_code,
     });
     return [
-      "Payment already noted ✅",
+      title("Payment already noted ✅"),
       "",
-      `Transaction ref: ${dealCode}`,
+      fieldBlock("Transaction ref", dealCode),
+      "",
       "I will not create another payment update for the same side of this trade.",
       deal[dealReceivedField(role)]
         ? "Your side is complete. I will confirm the exchange after the other party confirms receipt."
@@ -570,9 +809,10 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     scheduleReceiptDeadline(dealId, user.id, otherUserId, dealCode, receiptDueAt);
 
     return [
-      "Receipt needed.",
+      title("Receipt needed"),
       "",
-      `Transaction ref: ${dealCode}`,
+      fieldBlock("Transaction ref", dealCode),
+      "",
       `Upload the receipt for ${formatMoney(youSend.amount, youSend.currency)}.`,
       "",
       "Once it arrives, I will mark your payment as sent and forward it to your trade partner.",
@@ -612,21 +852,25 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     if (completion.completed) return completion.reply;
 
     await notifyDealUser(otherUserId, [
-      `Exchange update ✅ ${dealCode}`,
+      title("Exchange update ✅"),
       "",
-      `Your trade partner marked payment sent and receipt confirmed.`,
+      fieldBlock("Transaction ref", dealCode),
+      "",
+      "Your trade partner marked payment sent and receipt confirmed.",
       proofDelivery.sent ? "Receipt attached in this chat." : "",
       proofDelivery.url ? `View receipt: ${proofDelivery.url}` : "",
       "",
-      "Reply received once your own funds land, or dispute if anything looks wrong.",
+      `${action("received")} once your own funds land`,
+      `${action("dispute")} if anything looks wrong`,
     ].filter(Boolean).join("\n")).catch((error) => {
       console.error(`[deal] combined confirmation notice failed for ${dealCode}: ${error.message}`);
     });
 
     return [
-      "Your side is updated ✅",
+      title("Your side is updated ✅"),
       "",
-      `Transaction ref: ${dealCode}`,
+      fieldBlock("Transaction ref", dealCode),
+      "",
       "I will confirm the exchange after your trade partner also confirms receipt.",
       proof ? "Receipt saved and sent to your trade partner." : "",
     ].filter(Boolean).join("\n");
@@ -662,18 +906,12 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       deal_code: deal.deal_code || context.deal_code,
     });
 
-    await notifyDealUser(otherUserId, [
-      `Payment marked sent ✅ ${dealCode}`,
-      "",
-      `Expected amount: ${formatMoney(otherSummary.youReceive.amount, otherSummary.youReceive.currency)}`,
-      otherAlreadySent
-        ? "Your side is already marked paid. Check your bank or MoMo app, then reply received once the funds land."
-        : "Check your bank or MoMo app before sending your side.",
-      proofDelivery.sent ? "Receipt attached in this chat." : "",
-      proofDelivery.url ? `View receipt: ${proofDelivery.url}` : "",
-      "",
-      "Reply received once the money lands, or dispute if anything looks wrong.",
-    ].filter(Boolean).join("\n")).catch((error) => {
+    await notifyDealUser(otherUserId, paymentNoticeForOther(
+      dealCode,
+      formatMoney(otherSummary.youReceive.amount, otherSummary.youReceive.currency),
+      otherAlreadySent,
+      proofDelivery
+    )).catch((error) => {
       console.error(`[deal] payment notice failed for ${dealCode}: ${error.message}`);
     });
 
@@ -683,25 +921,10 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       ]);
       if (completion.completed) return completion.reply;
 
-      return [
-        "Payment noted ✅",
-        "",
-        `Transaction ref: ${dealCode}`,
-        "Your side is complete. I will confirm the exchange after your trade partner confirms receipt.",
-        proof ? "Receipt saved and sent to your trade partner." : "",
-      ].filter(Boolean).join("\n");
+      return paymentNotedReply(dealCode, youSend, youReceive, proof, true);
     }
 
-    return [
-      "Payment noted ✅",
-      "",
-      `Transaction ref: ${dealCode}`,
-      `You sent: ${formatMoney(youSend.amount, youSend.currency)}`,
-      proof ? "Receipt saved and sent to your trade partner." : "Receipt required before this payment can be confirmed.",
-      "",
-      `Now wait for: ${formatMoney(youReceive.amount, youReceive.currency)}`,
-      "Reply remind if it drags, received when it lands, or dispute if something is wrong.",
-    ].join("\n");
+    return paymentNotedReply(dealCode, youSend, youReceive, proof, false);
   }
 
   if (isReceivedIntent(command)) {
@@ -718,9 +941,12 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     const updatedDeal = completion.updatedDeal;
 
     await notifyDealUser(otherUserId, [
-      `Receipt confirmed ✅ ${dealCode}`,
+      title("Receipt confirmed ✅"),
       "",
-      `${formatMoney(otherSummary.youSend.amount, otherSummary.youSend.currency)} has been confirmed by your trade partner.`,
+      fieldBlock("Transaction ref", dealCode),
+      "",
+      fieldBlock("Confirmed amount", formatMoney(otherSummary.youSend.amount, otherSummary.youSend.currency)),
+      "",
       userAlreadySent
         ? "Your trade partner's side is complete. Confirm your own receipt when your funds land."
         : "Your trade partner has confirmed receipt. Wait for their payment update or raise a dispute if something looks wrong.",
@@ -730,9 +956,10 @@ async function handleDealRoom(text, user, session, incoming = {}) {
 
     if (userAlreadySent) {
       return [
-        "Receipt confirmed ✅",
+        title("Receipt confirmed ✅"),
         "",
-        `Transaction ref: ${dealCode}`,
+        fieldBlock("Transaction ref", dealCode),
+        "",
         "Your side is complete. I will confirm the exchange after your trade partner confirms receipt.",
       ].join("\n");
     }
@@ -748,10 +975,10 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     const cooldownMs = await reminderCooldownRemainingMs(dealId, user.id);
     if (cooldownMs > 0) {
       return [
-        "Reminder already sent.",
+        title("Reminder already sent"),
         "",
         `You can send another reminder in ${formatCooldown(cooldownMs)}.`,
-        "If something feels wrong, reply dispute.",
+        `If something feels wrong, reply ${action("dispute")}.`,
       ].join("\n");
     }
 
@@ -773,10 +1000,10 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     }
 
     return [
-      "Reminder sent.",
+      title("Reminder sent"),
       "",
       "You can send another reminder in 10 minutes.",
-      "Keep your receipt handy. If something feels wrong, reply dispute.",
+      `Keep your receipt handy. If something feels wrong, reply ${action("dispute")}.`,
     ].join("\n");
   }
 
@@ -791,7 +1018,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       paymentBlock,
       deal[dealReceivedField(role)] ? "" : caption(paymentExpectationLine(youReceive.amount, youReceive.currency, await getDefaultPaymentProfile(user.id, youReceive.currency))),
       "",
-      "Akara does not hold the money. It keeps the trail clear so both sides know what happened.",
+      dealSafetyLine(),
     ].filter(Boolean).join("\n");
   }
 

@@ -1,5 +1,5 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
-const { formatMoney } = require("../lib/format");
+const { caption, fieldBlock, formatMoney, title } = require("../lib/format");
 const { displayReference } = require("./listings");
 const { getUserById } = require("./users");
 const { getDefaultPaymentProfile } = require("./payments");
@@ -159,24 +159,29 @@ function dealNextStepCopy(deal, role) {
 function dealMiniSummary(deal, role) {
   const { youSend, youReceive } = dealPartySummary(role, deal);
   return [
-    `Transaction ref: ${displayReference(deal.deal_code, "deal")}`,
-    `You send: ${formatMoney(youSend.amount, youSend.currency)}`,
-    `You receive: ${formatMoney(youReceive.amount, youReceive.currency)}`,
-    `Status: ${readableDealStatus(deal, role)}`,
-    `Next: ${dealNextStepCopy(deal, role)}`,
+    fieldBlock("Transaction ref", displayReference(deal.deal_code, "deal")),
+    "",
+    fieldBlock("You send", formatMoney(youSend.amount, youSend.currency)),
+    "",
+    fieldBlock("You receive", formatMoney(youReceive.amount, youReceive.currency)),
+    "",
+    fieldBlock("Status", readableDealStatus(deal, role)),
+    "",
+    caption(dealNextStepCopy(deal, role)),
   ].join("\n");
 }
 
 function exchangeCompleteMessage(deal, role) {
   const { youSend, youReceive } = dealPartySummary(role, deal);
   return [
-    `Exchange completed ✅`,
+    title("Exchange completed ✅"),
+    caption("Both sides have confirmed receiving their money."),
     "",
-    `Transaction ref: ${displayReference(deal.deal_code, "deal")}`,
-    `You exchanged: ${formatMoney(youSend.amount, youSend.currency)}`,
-    `You received: ${formatMoney(youReceive.amount, youReceive.currency)}`,
+    fieldBlock("Transaction ref", displayReference(deal.deal_code, "deal")),
     "",
-    "Both sides have confirmed receiving their money. This Akara Trade is now closed.",
+    fieldBlock("You exchanged", formatMoney(youSend.amount, youSend.currency)),
+    "",
+    fieldBlock("You received", formatMoney(youReceive.amount, youReceive.currency)),
     "",
     "Clean exchange, clear trail. Thank you for using Akara.",
   ].join("\n");

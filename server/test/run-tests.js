@@ -224,7 +224,7 @@ async function run() {
   // ---------- scoped views
   scenario("scoped views");
   reply = await send(ALICE, "menu");
-  check("menu shows referral pitch", reply.includes("10 more free trades"), reply);
+  check("menu shows core options", reply.includes("`make offer`") && reply.includes("`find offers`"), reply);
 
   reply = await send(ALICE, "profile");
   check("profile view title", reply.includes("*Your profile*"), reply);
@@ -246,25 +246,25 @@ async function run() {
   reply = await send(ALICE, "5", { quotedText: "*Akara menu*\n1. make offer" });
   check("quoted menu 5 → scoped profile", reply.includes("*Your profile*"), reply);
 
-  // ---------- referral copy replaces free-service copy
-  scenario("referral copy");
+  // ---------- service fee + referral copy
+  scenario("service fee copy");
   reply = await send(ALICE, "how much do you charge?");
-  check("fee answer has referral", reply.includes("10 more free trades"), reply);
+  check("fee answer stays simple", reply.includes("Akara is free to use") && !reply.includes("10 more free trades"), reply);
   check("fee answer not 'free for now'", !reply.toLowerCase().includes("free for now"), reply);
 
   reply = await send(ALICE, "how do i get free trades?");
   check("referral question answered", reply.includes("Invite a friend or refer a friend"), reply);
 
-  // ---------- one-shot listing creation + publish + referral in review
+  // ---------- one-shot listing creation + publish + free service fee in review
   scenario("one-shot listing");
   reply = await send(ALICE, "hello, I have 50k naira and want 55k RWF");
   check("greeting with offer is not welcome", !reply.includes("What would you like Akara to help you move"), reply);
   check("greeting with offer previews listing", reply.includes("*Review listing*"), reply);
-  check("review shows referral fee text", reply.includes("10 more free trades"), reply);
+  check("review shows free service fee", reply.includes("*Service fee:* Free"), reply);
 
   reply = await send(ALICE, "publish");
   check("publish makes listing live", reply.includes("live ✅"), reply);
-  check("live copy shows referral fee text", reply.includes("10 more free trades"), reply);
+  check("live copy shows free service fee", reply.includes("*Free*"), reply);
   check("session cleared after publish", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "my listings");
@@ -291,7 +291,7 @@ async function run() {
   // ---------- deal room actions
   scenario("deal room");
   reply = await send(ALICE, "status");
-  check("status shows summary", reply.includes("Transaction ref: AKR-TXN-001"), reply);
+  check("status shows summary", reply.includes("_Transaction ref_") && reply.includes("*AKR-TXN-001*"), reply);
 
   reply = await send(ALICE, "i don pay");
   check("paid asks for receipt", reply.includes("Receipt needed"), reply);
@@ -311,6 +311,15 @@ async function run() {
   check("active trade cancel stays deal-specific", reply.includes("Cannot close from chat"), reply);
   check("active trade cancel points to dispute", reply.includes("dispute AKR-TXN-001"), reply);
   check("active trade cancel does not show profile actions", !reply.includes("Manage payout details"), reply);
+
+  reply = await send(ALICE, "dispute AKR-TXN-001 because amount did not arrive");
+  check("dispute opens with reason", reply.includes("*Dispute opened AKR-TXN-001*") && reply.includes("amount did not arrive"), reply);
+
+  reply = await send(BOB, "close dispute");
+  check("non opener cannot close dispute", reply.includes("Only the person who opened this dispute"), reply);
+
+  reply = await send(ALICE, "close dispute");
+  check("opener can withdraw dispute", reply.includes("Dispute withdrawn"), reply);
 
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");

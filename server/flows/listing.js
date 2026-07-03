@@ -1,6 +1,6 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { sendWhatsAppText } = require("../lib/whatsapp");
-const { title, caption, action, labeled, formatMoney, moneyNumber } = require("../lib/format");
+const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { normalizeCurrency, parseAmount, currencyHelpLine } = require("../nlp/currency");
 const {
@@ -30,6 +30,73 @@ const {
 } = require("../db/listings");
 const { mainMenu, feeIncludedText, listingShareCopy, explainMissingListing } = require("../messages/copy");
 const { startPaymentProfileForCurrency } = require("./payment-profile");
+
+function fundsDisclaimer() {
+  return "Akara records the exchange trail and keeps both sides aligned. Funds still move directly through bank or mobile money, so confirm the recipient details before sending.";
+}
+
+function listingLiveMessage(heading, listingCode, listing, shareUrl) {
+  const code = displayReference(listingCode, "listing");
+  return [
+    title(heading),
+    caption("Your swap card is attached in this chat."),
+    "",
+    fieldBlock("Reference", code),
+    "",
+    fieldBlock("You send", formatMoney(listing.have_amount, listing.have_currency)),
+    "",
+    fieldBlock("You receive", formatMoney(listing.want_amount, listing.want_currency)),
+    "",
+    fieldBlock("Offer terms", listingTypeLabel(listing.listing_type || "fixed")),
+    "",
+    fieldBlock("Service fee", feeIncludedText()),
+    "",
+    title("Share"),
+    shareUrl ? shareUrl : action(`open ${code}`),
+    caption(listingShareCopy()),
+  ].filter(Boolean).join("\n");
+}
+
+function tradeOpenedMessage({
+  heading,
+  intro,
+  dealCode,
+  youSend,
+  youReceive,
+  paymentProfile,
+  expectedProfile,
+  residualLine = "",
+  firstInstruction,
+}) {
+  return [
+    title(`${heading} ${dealCode}`),
+    intro ? caption(intro) : "",
+    "",
+    fieldBlock("You send", formatMoney(youSend.amount, youSend.currency)),
+    "",
+    fieldBlock("You receive", formatMoney(youReceive.amount, youReceive.currency)),
+    "",
+    fieldBlock("Payment window", "15 minutes"),
+    "",
+    fieldBlock("Service fee", feeIncludedText()),
+    residualLine ? ["", fieldBlock("Still listed", residualLine)].join("\n") : "",
+    "",
+    title("Send to"),
+    caption(paymentDestinationTitle(paymentProfile)),
+    formatPaymentProfile(paymentProfile),
+    "",
+    title("Expect in your account"),
+    caption(paymentExpectationLine(youReceive.amount, youReceive.currency, expectedProfile)),
+    "",
+    title("Actions"),
+    `${action("paid")} after you send`,
+    `${action("received")} when your money lands`,
+    `${action("dispute")} if anything looks wrong`,
+    "",
+    firstInstruction,
+    fundsDisclaimer(),
+  ].filter(Boolean).join("\n");
+}
 
 function formatListingReview(context) {
   const rate = context.want_amount / context.have_amount;
@@ -140,19 +207,7 @@ async function publishListing(user, context) {
       console.error(`[listing] card send failed for ${listing.listing_code || context.listing_code}: ${error.message}`);
     });
 
-    return [
-      "Listing updated ✅",
-      "",
-      `Reference: ${listing.listing_code || context.listing_code}`,
-      `Send: ${formatMoney(context.have_amount, context.have_currency)}`,
-      `Receive: ${formatMoney(context.want_amount, context.want_currency)}`,
-      `Offer terms: ${listingTypeLabel(context.listing_type)}`,
-      `Service fee: ${feeIncludedText()}`,
-      "",
-      shareUrl ? `Share link:\n${shareUrl}` : "Share text: open " + (listing.listing_code || context.listing_code),
-      "",
-      listingShareCopy(),
-    ].join("\n");
+    return listingLiveMessage("Listing updated ✅", listing.listing_code || context.listing_code, listing, shareUrl);
   }
 
   const listingCode = context.listing_code || await generateReferenceCode("listing");
@@ -184,19 +239,7 @@ async function publishListing(user, context) {
     console.error(`[listing] card send failed for ${listingCode}: ${error.message}`);
   });
 
-  return [
-    `Your listing is live ✅`,
-    "",
-    `Reference: ${listingCode}`,
-    `Send: ${formatMoney(context.have_amount, context.have_currency)}`,
-    `Receive: ${formatMoney(context.want_amount, context.want_currency)}`,
-    `Offer terms: ${listingTypeLabel(context.listing_type)}`,
-    `Service fee: ${feeIncludedText()}`,
-    "",
-    shareUrl ? `Share link:\n${shareUrl}` : "Share text: open " + listingCode,
-    "",
-    listingShareCopy(),
-  ].join("\n");
+  return listingLiveMessage("Your listing is live ✅", listingCode, listing, shareUrl);
 }
 
 async function findReciprocalListing(user, listing) {
@@ -286,50 +329,34 @@ async function tryAutoMatchListing(user, listing) {
       deal_code: dealCode,
     });
 
-    const makerNotice = [
-      title(`Akara Trade opened ✅ ${dealCode}`),
-      caption("Akara matched your live listing with a compatible reciprocal listing."),
-      "",
-      labeled("You receive", formatMoney(dealWantAmount, match.want_currency)),
-      labeled("You send", formatMoney(dealHaveAmount, match.have_currency)),
-      labeled("Payment window", "15 minutes"),
-      labeled("Service fee", feeIncludedText()),
-      matchResidual ? labeled("Still listed", `${formatMoney(matchResidual.have_amount, matchResidual.have_currency)} for ${formatMoney(matchResidual.want_amount, matchResidual.want_currency)}`) : "",
-      "",
-      title(paymentDestinationTitle(takerReceiveProfile)),
-      formatPaymentProfile(takerReceiveProfile),
-      "",
-      caption(paymentExpectationLine(dealWantAmount, match.want_currency, makerReceiveProfile)),
-      "",
-      "Check your bank or MoMo before sending your side.",
-      "Akara coordinates the trail, but does not hold the funds.",
-    ].filter(Boolean).join("\n");
+    const makerNotice = tradeOpenedMessage({
+      heading: "Akara Trade opened ✅",
+      intro: "Akara matched your live listing with a compatible reciprocal listing.",
+      dealCode,
+      youSend: { amount: dealHaveAmount, currency: match.have_currency },
+      youReceive: { amount: dealWantAmount, currency: match.want_currency },
+      paymentProfile: takerReceiveProfile,
+      expectedProfile: makerReceiveProfile,
+      residualLine: matchResidual ? `${formatMoney(matchResidual.have_amount, matchResidual.have_currency)} for ${formatMoney(matchResidual.want_amount, matchResidual.want_currency)}` : "",
+      firstInstruction: "Check your bank or MoMo before sending your side.",
+    });
 
     sendWhatsAppText(maker.whatsapp_phone, makerNotice).catch((error) => {
       console.error(`[deal] auto-match notice failed for ${maker.whatsapp_phone}: ${error.message}`);
     });
   }
 
-  return [
-    title(`Akara Trade opened ✅ ${dealCode}`),
-    caption("Your listing matched a compatible reciprocal listing, so I opened the trade room."),
-    "",
-    labeled("You send", formatMoney(dealWantAmount, match.want_currency)),
-    labeled("You receive", formatMoney(dealHaveAmount, match.have_currency)),
-    labeled("Payment window", "15 minutes"),
-    labeled("Service fee", feeIncludedText()),
-    listingResidual ? labeled("Still listed", `${formatMoney(listingResidual.have_amount, listingResidual.have_currency)} for ${formatMoney(listingResidual.want_amount, listingResidual.want_currency)}`) : "",
-    "",
-    title(paymentDestinationTitle(makerReceiveProfile)),
-    formatPaymentProfile(makerReceiveProfile),
-    "",
-    caption(paymentExpectationLine(dealHaveAmount, match.have_currency, takerReceiveProfile)),
-    "",
-    "Name check: the account name should match the verified person you are trading with.",
-    "",
-    "Next: send the money, then reply paid or upload your receipt.",
-    "Akara records the steps, but funds move directly between both of you.",
-  ].filter(Boolean).join("\n");
+  return tradeOpenedMessage({
+    heading: "Akara Trade opened ✅",
+    intro: "Your listing matched a compatible reciprocal listing, so I opened the trade room.",
+    dealCode,
+    youSend: { amount: dealWantAmount, currency: match.want_currency },
+    youReceive: { amount: dealHaveAmount, currency: match.have_currency },
+    paymentProfile: makerReceiveProfile,
+    expectedProfile: takerReceiveProfile,
+    residualLine: listingResidual ? `${formatMoney(listingResidual.have_amount, listingResidual.have_currency)} for ${formatMoney(listingResidual.want_amount, listingResidual.want_currency)}` : "",
+    firstInstruction: "Name check: the account name should match the verified person you are trading with.",
+  });
 }
 
 async function reserveListing(user, listing) {
@@ -402,47 +429,30 @@ async function reserveListing(user, listing) {
       deal_code: dealCode,
     });
 
-    const makerNotice = [
-      `Akara Trade opened ✅ ${dealCode}`,
-      "",
-      `You receive: ${formatMoney(listing.want_amount, listing.want_currency)}`,
-      `You send: ${formatMoney(listing.have_amount, listing.have_currency)}`,
-      "Payment window: 15 minutes",
-      `Service fee: ${feeIncludedText()}`,
-      "",
-      `${paymentDestinationTitle(takerReceiveProfile)}:`,
-      formatPaymentProfile(takerReceiveProfile),
-      "",
-      paymentExpectationLine(listing.want_amount, listing.want_currency, makerReceiveProfile),
-      "",
-      "When their payment is marked sent, check your bank or MoMo before sending your side.",
-      "",
-      "Akara coordinates the trail, but does not hold the funds. Confirm details before moving money.",
-    ].join("\n");
+    const makerNotice = tradeOpenedMessage({
+      heading: "Akara Trade opened ✅",
+      dealCode,
+      youSend: { amount: listing.have_amount, currency: listing.have_currency },
+      youReceive: { amount: listing.want_amount, currency: listing.want_currency },
+      paymentProfile: takerReceiveProfile,
+      expectedProfile: makerReceiveProfile,
+      firstInstruction: "When their payment is marked sent, check your bank or MoMo before sending your side.",
+    });
 
     sendWhatsAppText(maker.whatsapp_phone, makerNotice).catch((error) => {
       console.error(`[deal] maker notice failed for ${maker.whatsapp_phone}: ${error.message}`);
     });
   }
 
-  return [
-    `Akara Trade opened ✅ ${dealCode}`,
-    "",
-    `You send: ${formatMoney(listing.want_amount, listing.want_currency)}`,
-    `You receive: ${formatMoney(listing.have_amount, listing.have_currency)}`,
-    "Payment window: 15 minutes",
-    `Service fee: ${feeIncludedText()}`,
-    "",
-    `${paymentDestinationTitle(makerReceiveProfile)}:`,
-    formatPaymentProfile(makerReceiveProfile),
-    "",
-    paymentExpectationLine(listing.have_amount, listing.have_currency, takerReceiveProfile),
-    "",
-    "Name check: the account name should match the verified person you are trading with.",
-    "",
-    "Next: send the money, then reply paid or upload your receipt.",
-    "Akara records the steps, but funds move directly between both of you.",
-  ].join("\n");
+  return tradeOpenedMessage({
+    heading: "Akara Trade opened ✅",
+    dealCode,
+    youSend: { amount: listing.want_amount, currency: listing.want_currency },
+    youReceive: { amount: listing.have_amount, currency: listing.have_currency },
+    paymentProfile: makerReceiveProfile,
+    expectedProfile: takerReceiveProfile,
+    firstInstruction: "Name check: the account name should match the verified person you are trading with.",
+  });
 }
 
 async function reserveListingByCode(user, listingCode) {

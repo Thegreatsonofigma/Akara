@@ -18,6 +18,10 @@ function labeled(label, value) {
   return `*${label}:* ${value}`;
 }
 
+function fieldBlock(label, value) {
+  return `${caption(label)}\n${title(value)}`;
+}
+
 function normalizeShortText(input, maxLength = 80) {
   const value = String(input || "").trim().replace(/\s+/g, " ");
   if (!value) return null;
@@ -49,6 +53,7 @@ module.exports = {
   caption,
   action,
   labeled,
+  fieldBlock,
   normalizeShortText,
   moneyNumber,
   positiveMoney,
