@@ -1,5 +1,5 @@
 const { title, caption, action, applyInterpretedAnswer } = require("./lib/format");
-const { normalizeCurrency, parsePaymentCurrency, parseCurrencyAmountPairs } = require("./nlp/currency");
+const { normalizeCurrency, currencyHelpLine, parsePaymentCurrency, parseCurrencyAmountPairs } = require("./nlp/currency");
 const {
   parseListingDetails,
   parseSearchDetails,
@@ -71,13 +71,12 @@ function accountOnHoldReply(user) {
 
 function makeOfferPrompt() {
   return [
-    "Make an offer in one line.",
-    "",
-    "Example:",
-    "I have 50k naira and want 55k RWF",
-    "",
-    "You can add fixed or flexible.",
-  ].join("\n");
+      "Tell me what you have.",
+      "",
+      currencyHelpLine(),
+      "",
+      "Example: I have 50k naira and want 55k RWF",
+    ].join("\n");
 }
 
 function findOfferPrompt() {
