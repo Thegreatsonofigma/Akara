@@ -29,18 +29,20 @@ function formatPaymentProfile(profile) {
   if (!profile) return "No payment details saved yet.";
   if (profile.method === "bank") {
     return [
-      `${profile.currency} bank`,
-      `Bank: ${profile.bank_name}`,
-      `Name: ${profile.account_name}`,
-      `Account: ${profile.account_number_encrypted}`,
+      `*${profile.currency} bank account*${profile.is_default ? " ✅" : ""}`,
+      "",
+      `*Bank:* ${profile.bank_name}`,
+      `*Name:* ${profile.account_name}`,
+      `*Account:* ${profile.account_number_encrypted}`,
     ].join("\n");
   }
 
   return [
-    `${profile.currency} mobile money`,
-    `Network: ${profile.momo_network}`,
-    `Name: ${profile.account_name}`,
-    `Number: ${profile.momo_number_encrypted}`,
+    `*${profile.currency} mobile money*${profile.is_default ? " ✅" : ""}`,
+    "",
+    `*Network:* ${profile.momo_network}`,
+    `*Name:* ${profile.account_name}`,
+    `*Number:* ${profile.momo_number_encrypted}`,
   ].join("\n");
 }
 
@@ -63,16 +65,18 @@ function formatPaymentProfileCompact(profile, index = null) {
   const prefix = index ? `${index}. ` : "";
   if (profile.method === "bank") {
     return [
-      `${prefix}${profile.currency} bank${profile.is_default ? " ✅" : ""}`,
-      `${profile.bank_name} · ${profile.account_name}`,
-      `Account: ${profile.account_number_encrypted}`,
+      `*${prefix}${profile.currency} bank account*${profile.is_default ? " ✅" : ""}`,
+      `*Bank:* ${profile.bank_name}`,
+      `*Name:* ${profile.account_name}`,
+      `*Account:* ${profile.account_number_encrypted}`,
     ].join("\n");
   }
 
   return [
-    `${prefix}${profile.currency} mobile money${profile.is_default ? " ✅" : ""}`,
-    `${profile.momo_network} · ${profile.account_name}`,
-    `Number: ${profile.momo_number_encrypted}`,
+    `*${prefix}${profile.currency} mobile money*${profile.is_default ? " ✅" : ""}`,
+    `*Network:* ${profile.momo_network}`,
+    `*Name:* ${profile.account_name}`,
+    `*Number:* ${profile.momo_number_encrypted}`,
   ].join("\n");
 }
 

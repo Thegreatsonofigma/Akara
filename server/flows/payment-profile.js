@@ -263,6 +263,7 @@ function formatPayoutReview(context) {
   const lines = method === "bank"
     ? [
         labeled("Type", `${currency} bank account`),
+        "",
         labeled("Bank", context.payment_bank_name),
         labeled("Account", context.payment_account_number),
         labeled("Name", context.payment_account_name),
@@ -270,6 +271,7 @@ function formatPayoutReview(context) {
       ]
     : [
         labeled("Type", `${currency} mobile money`),
+        "",
         labeled("Network", context.payment_network),
         labeled("Number", context.payment_number),
         labeled("Name", context.payment_account_name),

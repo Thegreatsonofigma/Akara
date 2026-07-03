@@ -247,7 +247,16 @@ function listingCardSvg(listing) {
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCompressedHeavy'; font-weight: 900; fill: #fff; letter-spacing: ${LISTING_NUMBER_LETTER_SPACING}px; }
+    .amount {
+      font-family: 'CoolveticaCompressedHeavy';
+      font-weight: 900;
+      fill: #fff;
+      stroke: #fff;
+      stroke-width: 10px;
+      stroke-linejoin: round;
+      paint-order: stroke fill;
+      letter-spacing: ${LISTING_NUMBER_LETTER_SPACING}px;
+    }
     .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 100px; font-weight: 900; letter-spacing: -2px; }
     .footer-code { font-family: 'CamptonCard', Arial, sans-serif; font-size: 50px; font-weight: 900; fill: #fff; letter-spacing: 7px; }
   </style>
