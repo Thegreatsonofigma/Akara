@@ -18,7 +18,10 @@ const LISTING_NUMBER_TRACKING = 2;
 const RECEIPT_NUMBER_SOURCE_SIZE = 240;
 const RECEIPT_NUMBER_TRACKING = 2;
 const RECEIPT_META_FONT_SIZE = 12 * CARD_SCALE;
+const RECEIPT_CAPTION_FONT_SIZE = 10 * CARD_SCALE;
 const RECEIPT_SITE_FONT_SIZE = 22 * CARD_SCALE;
+const RECEIPT_TEXT_TRACKING = 6;
+const RECEIPT_LINE_HEIGHT = 14 * CARD_SCALE;
 const cacheDir = path.join(rootDir, ".cache", "listing-cards");
 const fontDir = path.join(rootDir, "server", "assets", "fonts");
 const cardAssetDir = path.join(rootDir, "server", "assets", "cards");
@@ -498,10 +501,36 @@ function timeLabel(date) {
   return `${hour} : ${minute} ${dayPeriod.toUpperCase()} - ${weekday.toUpperCase()}`;
 }
 
+function timeLabelParts(date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    weekday: "long",
+  }).formatToParts(date);
+  const hour = parts.find((part) => part.type === "hour")?.value || "00";
+  const minute = parts.find((part) => part.type === "minute")?.value || "00";
+  const dayPeriod = parts.find((part) => part.type === "dayPeriod")?.value || "AM";
+  const weekday = parts.find((part) => part.type === "weekday")?.value || "Today";
+  return {
+    time: `${hour} : ${minute}`,
+    period: dayPeriod.toUpperCase(),
+    weekday: weekday.toUpperCase(),
+  };
+}
+
 function dateLabel(date) {
   const day = String(date.getDate()).padStart(2, "0");
   const month = new Intl.DateTimeFormat("en-US", { month: "short" }).format(date).toUpperCase();
   return `${day} - ${month} - ${date.getFullYear()}`;
+}
+
+function dateLabelParts(date) {
+  return {
+    day: String(date.getDate()).padStart(2, "0"),
+    month: new Intl.DateTimeFormat("en-US", { month: "short" }).format(date).toUpperCase(),
+    year: String(date.getFullYear()),
+  };
 }
 
 function exchangeCompletionSvg(deal, role) {
@@ -512,6 +541,11 @@ function exchangeCompletionSvg(deal, role) {
   const stamp = assetDataUri("success-stamp.png");
   const amountLayout = completionAmountLayout(receiveAmount);
   const chipX = completionCurrencyChipX(amountLayout.bounds);
+  const timeParts = timeLabelParts(completedAt);
+  const dateParts = dateLabelParts(completedAt);
+  const lowerLine1Y = 1280;
+  const lowerLine2Y = lowerLine1Y + RECEIPT_LINE_HEIGHT;
+  const lowerLine3Y = lowerLine2Y + RECEIPT_LINE_HEIGHT;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -527,10 +561,10 @@ function exchangeCompletionSvg(deal, role) {
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
     .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 54px; fill: #fff; letter-spacing: 18px; }
     .header-strong { font-weight: 900; letter-spacing: 12px; }
-    .meta { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_META_FONT_SIZE}px; fill: #fff; letter-spacing: 8px; }
-    .meta-strong { font-weight: 900; letter-spacing: 4px; }
-    .meta-number { font-family: 'CoolveticaCompressedHeavy'; font-weight: 900; letter-spacing: -0.02em; }
-    .site { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_SITE_FONT_SIZE}px; fill: #fff; font-weight: 600; letter-spacing: 5px; }
+    .receipt-meta { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_META_FONT_SIZE}px; fill: #fff; font-weight: 400; letter-spacing: ${RECEIPT_TEXT_TRACKING}px; text-transform: uppercase; }
+    .receipt-strong { font-weight: 700; }
+    .receipt-caption { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_CAPTION_FONT_SIZE}px; fill: #fff; font-weight: 400; letter-spacing: ${RECEIPT_TEXT_TRACKING}px; text-transform: uppercase; }
+    .receipt-site { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_SITE_FONT_SIZE}px; fill: #fff; font-weight: 600; letter-spacing: ${RECEIPT_TEXT_TRACKING}px; text-transform: uppercase; }
   </style>
 
   ${cardBackground()}
@@ -544,19 +578,23 @@ function exchangeCompletionSvg(deal, role) {
   ${currencyChip({ x: chipX, y: 616, currency: youReceive.currency, width: 344, height: 176, fontSize: 92 })}
   ${completionStampImage(stamp, amountLayout.bounds)}
 
-  <text x="565" y="1280" class="meta">EXCHANGED</text>
-  <text x="565" y="1370" class="meta">
-    <tspan class="meta-number">${escapeXml(numberText(youSend.amount))}</tspan><tspan dx="14" class="meta-strong">${escapeXml(String(youSend.currency || "").toUpperCase())}</tspan>
+  <text x="565" y="${lowerLine1Y}" class="receipt-meta">EXCHANGED</text>
+  <text x="565" y="${lowerLine2Y}" class="receipt-meta">
+    <tspan class="receipt-strong">${escapeXml(numberText(youSend.amount))}</tspan><tspan dx="24" class="receipt-strong">${escapeXml(String(youSend.currency || "").toUpperCase())}</tspan>
   </text>
-  <text x="565" y="1438" class="meta">
-    <tspan>FOR</tspan><tspan dx="18" class="meta-number">${escapeXml(numberText(youReceive.amount))}</tspan><tspan dx="14" class="meta-strong">${escapeXml(String(youReceive.currency || "").toUpperCase())}</tspan>
+  <text x="565" y="${lowerLine3Y}" class="receipt-meta">
+    <tspan>FOR</tspan><tspan dx="24" class="receipt-strong">${escapeXml(numberText(youReceive.amount))}</tspan><tspan dx="24" class="receipt-strong">${escapeXml(String(youReceive.currency || "").toUpperCase())}</tspan>
   </text>
 
-  <text x="1195" y="1280" class="meta" textLength="568" lengthAdjust="spacing">${escapeXml(timeLabel(completedAt))}</text>
-  <text x="1195" y="1392" class="meta" textLength="520" lengthAdjust="spacing">${escapeXml(dateLabel(completedAt))}</text>
+  <text x="1195" y="${lowerLine1Y}" class="receipt-meta">
+    <tspan>${escapeXml(timeParts.time)}</tspan><tspan dx="24" class="receipt-strong">${escapeXml(timeParts.period)}</tspan><tspan dx="24">- ${escapeXml(timeParts.weekday)}</tspan>
+  </text>
+  <text x="1195" y="${lowerLine2Y}" class="receipt-meta">
+    <tspan>${escapeXml(dateParts.day)}</tspan><tspan dx="24">-</tspan><tspan dx="24" class="receipt-strong">${escapeXml(dateParts.month)}</tspan><tspan dx="24">- ${escapeXml(dateParts.year)}</tspan>
+  </text>
 
-  <text x="1996" y="1280" class="meta">READY TO SWAP? VISIT AKARA</text>
-  <text x="1996" y="1438" class="site">TRYAKARA.COM</text>
+  <text x="1996" y="${lowerLine1Y}" class="receipt-caption">READY TO SWAP? VISIT AKARA</text>
+  <text x="1996" y="${lowerLine1Y + RECEIPT_CAPTION_FONT_SIZE + 15 * CARD_SCALE}" class="receipt-site">TRYAKARA.COM</text>
 </svg>`;
 }
 
