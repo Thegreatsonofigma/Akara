@@ -21,7 +21,6 @@ const RECEIPT_META_FONT_SIZE = 12 * CARD_SCALE;
 const RECEIPT_CAPTION_FONT_SIZE = 10 * CARD_SCALE;
 const RECEIPT_SITE_FONT_SIZE = 22 * CARD_SCALE;
 const RECEIPT_TEXT_TRACKING = 6;
-const RECEIPT_LINE_HEIGHT = 14 * CARD_SCALE;
 const cacheDir = path.join(rootDir, ".cache", "listing-cards");
 const fontDir = path.join(rootDir, "server", "assets", "fonts");
 const cardAssetDir = path.join(rootDir, "server", "assets", "cards");
@@ -544,8 +543,8 @@ function exchangeCompletionSvg(deal, role) {
   const timeParts = timeLabelParts(completedAt);
   const dateParts = dateLabelParts(completedAt);
   const lowerLine1Y = 1280;
-  const lowerLine2Y = lowerLine1Y + RECEIPT_LINE_HEIGHT;
-  const lowerLine3Y = lowerLine2Y + RECEIPT_LINE_HEIGHT;
+  const lowerLine2Y = 1370;
+  const lowerLine3Y = 1438;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -589,12 +588,12 @@ function exchangeCompletionSvg(deal, role) {
   <text x="1195" y="${lowerLine1Y}" class="receipt-meta">
     <tspan>${escapeXml(timeParts.time)}</tspan><tspan dx="24" class="receipt-strong">${escapeXml(timeParts.period)}</tspan><tspan dx="24">- ${escapeXml(timeParts.weekday)}</tspan>
   </text>
-  <text x="1195" y="${lowerLine2Y}" class="receipt-meta">
-    <tspan>${escapeXml(dateParts.day)}</tspan><tspan dx="24">-</tspan><tspan dx="24" class="receipt-strong">${escapeXml(dateParts.month)}</tspan><tspan dx="24">- ${escapeXml(dateParts.year)}</tspan>
+  <text x="1195" y="${lowerLine3Y}" class="receipt-meta">
+    <tspan class="receipt-strong">${escapeXml(dateParts.day)}</tspan><tspan dx="24">-</tspan><tspan dx="24" class="receipt-strong">${escapeXml(dateParts.month)}</tspan><tspan dx="24">- ${escapeXml(dateParts.year)}</tspan>
   </text>
 
   <text x="1996" y="${lowerLine1Y}" class="receipt-caption">READY TO SWAP? VISIT AKARA</text>
-  <text x="1996" y="${lowerLine1Y + RECEIPT_CAPTION_FONT_SIZE + 15 * CARD_SCALE}" class="receipt-site">TRYAKARA.COM</text>
+  <text x="1996" y="${lowerLine3Y}" class="receipt-site">TRYAKARA.COM</text>
 </svg>`;
 }
 
