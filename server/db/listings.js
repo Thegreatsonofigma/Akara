@@ -74,10 +74,35 @@ function extractDealCode(input) {
   return `AKR-TXN-${String(shortMatch[2]).padStart(3, "0")}`;
 }
 
+function listingVersionQuery(listing) {
+  if (!listing || typeof listing !== "object") return "";
+  const parts = [
+    listing.have_currency,
+    listing.want_currency,
+    moneyNumber(listing.have_amount),
+    moneyNumber(listing.want_amount),
+    listing.listing_type,
+    listing.status,
+    listing.updated_at,
+  ].filter((value) => value !== undefined && value !== null && value !== "");
+  if (!parts.length) return "";
+  const raw = parts.join("-");
+  let hash = 0;
+  for (let index = 0; index < raw.length; index += 1) {
+    hash = ((hash << 5) - hash + raw.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
 function listingShareUrl(listingCode) {
   const publicUrl = getPublicUrl();
-  if (publicUrl) return `${publicUrl}/l/${encodeURIComponent(displayReference(listingCode, "listing"))}`;
-  return listingWaOpenUrl(listingCode);
+  const code = typeof listingCode === "object" ? listingCode.listing_code : listingCode;
+  const version = listingVersionQuery(listingCode);
+  if (publicUrl) {
+    const query = version ? `?v=${encodeURIComponent(version)}` : "";
+    return `${publicUrl}/l/${encodeURIComponent(displayReference(code, "listing"))}${query}`;
+  }
+  return listingWaOpenUrl(code);
 }
 
 function listingWaOpenUrl(listingCode) {

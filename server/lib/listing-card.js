@@ -59,6 +59,24 @@ function safeFileCode(code) {
   return displayReference(code, "listing").replace(/[^A-Z0-9-]/g, "_");
 }
 
+function listingCardVersion(listing) {
+  const parts = [
+    listing?.have_currency,
+    listing?.want_currency,
+    listing?.have_amount,
+    listing?.want_amount,
+    listing?.listing_type,
+    listing?.status,
+    listing?.updated_at,
+  ].filter((value) => value !== undefined && value !== null && value !== "");
+  const raw = parts.join("-");
+  let hash = 0;
+  for (let index = 0; index < raw.length; index += 1) {
+    hash = ((hash << 5) - hash + String(raw).charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
 function fontData(fileName) {
   const fontPath = path.join(fontDir, fileName);
   if (!fs.existsSync(fontPath)) return "";
@@ -720,7 +738,7 @@ async function renderPngWithAvailableTool(svgPath, pngPath) {
 
 async function listingCardPng(listing) {
   fs.mkdirSync(cacheDir, { recursive: true });
-  const fileCode = safeFileCode(listing.listing_code);
+  const fileCode = `${safeFileCode(listing.listing_code)}-${listingCardVersion(listing)}`;
   const svgPath = path.join(cacheDir, `${fileCode}.svg`);
   const pngPath = path.join(cacheDir, `${fileCode}.png`);
   const svg = listingCardSvg(listing);
@@ -745,8 +763,10 @@ async function exchangeCompletionPng(deal, role) {
 function listingSharePage(listing) {
   const code = displayReference(listing.listing_code, "listing");
   const publicUrl = getPublicUrl();
-  const imageUrl = publicUrl ? `${publicUrl}/l/${encodeURIComponent(code)}.png` : `/l/${encodeURIComponent(code)}.svg`;
-  const svgUrl = publicUrl ? `${publicUrl}/l/${encodeURIComponent(code)}.svg` : `/l/${encodeURIComponent(code)}.svg`;
+  const version = listingCardVersion(listing);
+  const versionQuery = version ? `?v=${encodeURIComponent(version)}` : "";
+  const imageUrl = publicUrl ? `${publicUrl}/l/${encodeURIComponent(code)}.png${versionQuery}` : `/l/${encodeURIComponent(code)}.svg${versionQuery}`;
+  const svgUrl = publicUrl ? `${publicUrl}/l/${encodeURIComponent(code)}.svg${versionQuery}` : `/l/${encodeURIComponent(code)}.svg${versionQuery}`;
   const openUrl = listingWaOpenUrl(code) || `https://wa.me/${String(config.akaraWhatsappNumber || "").replace(/[^\d]/g, "")}?text=${encodeURIComponent(`open ${code}`)}`;
   const title = `${numberText(listing.have_amount)} ${listing.have_currency} for ${numberText(listing.want_amount)} ${listing.want_currency} on Akara`;
   return `<!doctype html>
@@ -793,7 +813,7 @@ async function handleListingCardRoute(req, res, url) {
   if (ext === "svg") {
     res.writeHead(200, {
       "content-type": "image/svg+xml; charset=utf-8",
-      "cache-control": "public, max-age=300",
+      "cache-control": "no-store",
     });
     res.end(listingCardSvg(listing));
     return true;
@@ -804,7 +824,7 @@ async function handleListingCardRoute(req, res, url) {
       const png = await listingCardPng(listing);
       res.writeHead(200, {
         "content-type": "image/png",
-        "cache-control": "public, max-age=300",
+        "cache-control": "no-store",
       });
       res.end(png);
     } catch (error) {
@@ -816,7 +836,7 @@ async function handleListingCardRoute(req, res, url) {
 
   res.writeHead(200, {
     "content-type": "text/html; charset=utf-8",
-    "cache-control": "public, max-age=120",
+    "cache-control": "no-store",
   });
   res.end(listingSharePage(listing));
   return true;
@@ -825,7 +845,11 @@ async function handleListingCardRoute(req, res, url) {
 async function sendListingCard(to, listing, caption = "") {
   if (!to) return null;
   const png = await listingCardPng(listing);
-  const mediaId = await uploadWhatsAppMedia(png, "image/png", `${safeFileCode(listing.listing_code)}.png`);
+  const mediaId = await uploadWhatsAppMedia(
+    png,
+    "image/png",
+    `${safeFileCode(listing.listing_code)}-${listingCardVersion(listing)}.png`
+  );
   if (!mediaId) return null;
   return sendWhatsAppMedia(to, "image", mediaId, caption);
 }
@@ -852,6 +876,7 @@ async function sendVerificationSuccessCard(to, caption = "") {
 
 module.exports = {
   listingCardSvg,
+  listingCardVersion,
   listingCardPng,
   exchangeCompletionSvg,
   exchangeCompletionPng,

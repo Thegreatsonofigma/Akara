@@ -259,6 +259,13 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const quotedReply = await resolveQuotedReply(text, user, incoming);
   if (quotedReply) return quotedReply;
 
+  if (["post", "make offer", "create listing", "create offer", "list offer"].includes(command)) {
+    if (isOnHold(user)) return accountOnHoldReply(user);
+    await clearSession(user, user.whatsapp_phone);
+    await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {});
+    return makeOfferPrompt();
+  }
+
   const listingCode = extractListingCode(text);
   if (listingCode && (interpretedAction === "reserve_listing" || /\b(reserve|take|accept|open)\b/i.test(text))) {
     return reserveListingByCode(user, listingCode);
@@ -601,6 +608,13 @@ async function routeMessage(text, user, session, incoming = {}) {
   if (command === "demo approve") {
     await clearSession(user, user.whatsapp_phone);
     return "Demo approval is now disabled. Type verify to submit a real verification request.";
+  }
+
+  if (isVerified(user) && ["post", "make offer", "create listing", "create offer", "list offer"].includes(command)) {
+    if (isOnHold(user)) return accountOnHoldReply(user);
+    await clearSession(user, user.whatsapp_phone);
+    await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {});
+    return makeOfferPrompt();
   }
 
   // One interpretation pass for everything else: the model sees the active

@@ -270,6 +270,25 @@ async function run() {
   reply = await send(ALICE, "my listings");
   check("listing appears in scoped view", reply.includes("AKR-LIST-001"), reply);
 
+  const { listingCardVersion } = require("../lib/listing-card");
+  check("listing card version changes with dynamic values", listingCardVersion({
+    listing_code: "AKR-LIST-001",
+    have_currency: "KES",
+    have_amount: 15000,
+    want_currency: "RWF",
+    want_amount: 200000,
+    listing_type: "fixed",
+    status: "active",
+  }) !== listingCardVersion({
+    listing_code: "AKR-LIST-001",
+    have_currency: "KES",
+    have_amount: 35000,
+    want_currency: "RWF",
+    want_amount: 200000,
+    listing_type: "fixed",
+    status: "active",
+  }), "Card version did not change after amount edit");
+
   reply = await send(ALICE, "hi, I want to convert 16,728 naira for 18,500 RWF. Is there any available offer that is within around this rate?", {
     interpret: { action: "find_offer", have_currency: "NGN", have_amount: 16728, want_currency: "RWF", want_amount: 18500 },
   });
@@ -342,7 +361,7 @@ async function run() {
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");
   reply = await send(ALICE, "make offer");
-  check("make offer opens flow", reply.includes("Make an offer in one line"), reply);
+  check("make offer opens flow", reply.includes("Tell me what you have."), reply);
   check("create flow active", (await sessionFlow(ALICE)) === "create_listing");
 
   reply = await send(ALICE, "show my bank details", { interpret: { action: "view_payouts" } });

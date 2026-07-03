@@ -261,7 +261,7 @@ async function publishListing(user, context) {
     if (autoMatchReply) return autoMatchReply;
 
     await clearSession(user, user.whatsapp_phone);
-    const shareUrl = listingShareUrl(listing.listing_code || context.listing_code);
+    const shareUrl = listingShareUrl(listing);
     const liveMessage = listingLiveMessage("Listing updated ✅", listing.listing_code || context.listing_code, listing, shareUrl);
     return deliverListingLive(user, listing, listing.listing_code || context.listing_code, liveMessage);
   }
@@ -286,7 +286,7 @@ async function publishListing(user, context) {
   if (autoMatchReply) return autoMatchReply;
 
   await clearSession(user, user.whatsapp_phone);
-  const shareUrl = listingShareUrl(listingCode);
+  const shareUrl = listingShareUrl(listing);
   const liveMessage = listingLiveMessage("Your listing is live ✅", listingCode, listing, shareUrl);
   return deliverListingLive(user, listing, listingCode, liveMessage);
 }
