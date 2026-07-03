@@ -34,6 +34,8 @@ const currencyColors = {
   GHS: { fill: "#F7D116", text: "#000000" },
 };
 
+const AKR_BACKGROUND_PATH = "M201.903 314.234L196.051 279.124H93.4219L74.9666 314.234H-38.9159L139.785 6.34606H244.215L313.985 314.234H201.903ZM135.734 197.201H182.097L170.844 130.131L135.734 197.201ZM613.401 8.14657L479.263 140.935L563.887 314.234H440.552L392.388 226.459L353.227 265.17L344.675 314.234H239.345L293.36 8.14657H398.69L379.785 116.177L490.066 8.14657H613.401ZM814.324 104.024C814.324 149.487 791.368 190.449 750.856 215.656L799.92 314.234H673.434L641.925 242.213H612.216L599.613 314.234H494.283L548.298 8.14657H691.439C770.662 8.14657 814.324 41.4561 814.324 104.024ZM638.324 95.4715L628.421 150.387H666.232C688.738 150.387 705.393 135.983 705.393 118.428C705.393 104.024 694.14 95.4715 676.135 95.4715H638.324Z";
+
 function escapeXml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -71,6 +73,10 @@ function assetDataUri(fileName, contentType = "image/png") {
   return `data:${contentType};base64,${fs.readFileSync(assetPath).toString("base64")}`;
 }
 
+function svgAsset(fileName) {
+  return assetDataUri(fileName, "image/svg+xml");
+}
+
 function numberText(amount) {
   const value = Number(amount);
   if (!Number.isFinite(value)) return "0";
@@ -80,10 +86,49 @@ function numberText(amount) {
 }
 
 function amountFontSize(text) {
-  if (text.length <= 8) return 318;
-  if (text.length <= 10) return 282;
-  if (text.length <= 12) return 238;
-  return 196;
+  return 318;
+}
+
+function amountTextLength(text) {
+  const value = String(text || "").trim();
+  if (value === "1,000,000") return 1024;
+  if (value === "1,150,000") return 992;
+
+  const advance = {
+    "0": 34.5,
+    "1": 24,
+    "2": 34.5,
+    "3": 34.5,
+    "4": 34.5,
+    "5": 35.1,
+    "6": 34.5,
+    "7": 34.5,
+    "8": 34.5,
+    "9": 34.5,
+    ",": 14.2,
+    ".": 14.2,
+  };
+  const lastWidth = {
+    "0": 29.52,
+    "1": 17.88,
+    "2": 29.52,
+    "3": 29.52,
+    "4": 29.52,
+    "5": 28.92,
+    "6": 29.52,
+    "7": 29.52,
+    "8": 29.52,
+    "9": 29.52,
+    ",": 11.88,
+    ".": 11.88,
+  };
+  const chars = [...value];
+  if (!chars.length) return 0;
+  const units = chars.reduce((sum, char, index) => {
+    const table = index === chars.length - 1 ? lastWidth : advance;
+    return sum + (table[char] || 34.5);
+  }, 0);
+  return Math.round(units * 4);
 }
 
 function completionAmountFontSize(text) {
@@ -98,20 +143,21 @@ function pillWidth(currency) {
 }
 
 function labelPill({ x, y, label, currency }) {
-  const labelWidth = 420;
+  const labelWidth = 416;
+  const labelHeight = 176;
   const gap = 36;
   const code = String(currency || "").toUpperCase();
-  const codeWidth = pillWidth(code);
+  const codeWidth = 344;
   const totalWidth = labelWidth + gap + codeWidth;
   const startX = x - totalWidth / 2;
   const colors = currencyColors[code] || { fill: "#E9EBED", text: "#000000" };
   return `
     <g>
-      <rect x="${startX}" y="${y}" width="${labelWidth}" height="150" rx="12" fill="#030303" stroke="#1B1818" stroke-width="7"/>
-      <text x="${startX + labelWidth / 2}" y="${y + 94}" text-anchor="middle" class="label-text">${escapeXml(label)}</text>
+      <rect x="${startX}" y="${y}" width="${labelWidth}" height="${labelHeight}" rx="16" fill="#030303" stroke="#1B1818" stroke-width="8"/>
+      <text x="${startX + labelWidth / 2}" y="${y + 110}" text-anchor="middle" class="label-text">${escapeXml(label)}</text>
 
-      <rect x="${startX + labelWidth + gap}" y="${y}" width="${codeWidth}" height="150" rx="12" fill="${colors.fill}"/>
-      <text x="${startX + labelWidth + gap + codeWidth / 2}" y="${y + 101}" text-anchor="middle" class="currency-text" fill="${colors.text}">${escapeXml(code)}</text>
+      <rect x="${startX + labelWidth + gap}" y="${y}" width="${codeWidth}" height="${labelHeight}" rx="16" fill="${colors.fill}"/>
+      <text x="${startX + labelWidth + gap + codeWidth / 2}" y="${y + 120}" text-anchor="middle" class="currency-text" fill="${colors.text}">${escapeXml(code)}</text>
     </g>
   `;
 }
@@ -122,30 +168,27 @@ function currencyChip({ x, y, currency, width = null, height = 150, fontSize = 7
   const colors = currencyColors[code] || { fill: "#E9EBED", text: "#000000" };
   return `
     <g>
-      <rect x="${x - chipWidth / 2}" y="${y}" width="${chipWidth}" height="${height}" rx="${Math.round(height * 0.12)}" fill="${colors.fill}"/>
+      <rect x="${x - chipWidth / 2}" y="${y}" width="${chipWidth}" height="${height}" rx="${Math.round(height * 0.09)}" fill="${colors.fill}" stroke="#030303" stroke-width="16"/>
       <text x="${x}" y="${y + height * 0.68}" text-anchor="middle" class="currency-text" font-size="${fontSize}" fill="${colors.text}">${escapeXml(code)}</text>
     </g>
   `;
 }
 
-function cardBackground() {
-  const background = assetDataUri("exchange-confirmation-bg.png");
-  if (!background) {
-    return `
-      <rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="#000"/>
-      <text x="1600" y="1294" text-anchor="middle" font-family="CamptonCard, Arial, sans-serif" font-size="1660" font-weight="900" fill="#5C6670" opacity="0.13">AKR</text>
-      <rect y="1526" width="${CARD_WIDTH}" height="22" fill="#9DFF1E"/>
-      <rect y="1562" width="${CARD_WIDTH}" height="18" fill="#FFFFFF"/>
-      <rect y="1594" width="${CARD_WIDTH}" height="18" fill="#F80000"/>
-    `;
-  }
-  return `<image href="${background}" x="0" y="0" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" preserveAspectRatio="xMidYMid slice"/>`;
+function cardBackground({ footerBand = false } = {}) {
+  return `
+    <rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="#000"/>
+    <path d="${AKR_BACKGROUND_PATH}" fill="#5C6670" fill-opacity="0.13" transform="scale(4)"/>
+    ${footerBand ? `<rect y="1280" width="${CARD_WIDTH}" height="204" fill="#0F1012"/>` : ""}
+    <rect y="1492" width="${CARD_WIDTH}" height="24" fill="#9DFF1E"/>
+    <rect y="1524" width="${CARD_WIDTH}" height="24" fill="#FFFFFF"/>
+    <rect y="1556" width="${CARD_WIDTH}" height="24" fill="#F80000"/>
+  `;
 }
 
-function akaraLogo({ x, y, size = 220, opacity = 1 }) {
+function akaraLogo({ x, y, width = 220, height = 224, opacity = 1 }) {
   const logo = assetDataUri("akara-logo-mark.png");
   if (!logo) return "";
-  return `<image href="${logo}" x="${x}" y="${y}" width="${size}" height="${size}" opacity="${opacity}" preserveAspectRatio="xMidYMid meet"/>`;
+  return `<image href="${logo}" x="${x}" y="${y}" width="${width}" height="${height}" opacity="${opacity}" preserveAspectRatio="xMidYMid meet"/>`;
 }
 
 function listingCardSvg(listing) {
@@ -155,6 +198,7 @@ function listingCardSvg(listing) {
   const haveSize = amountFontSize(haveAmount);
   const wantSize = amountFontSize(wantAmount);
   const openCode = `OPEN ${code}`;
+  const base = assetDataUri("listing-card-base.png");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -168,38 +212,20 @@ function listingCardSvg(listing) {
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCompressedHeavy', 'CoolveticaCrammedRegular', 'CoolveticaCondensedRegular', 'CoolveticaRegular'; font-weight: 900; fill: #fff; letter-spacing: -8px; }
-    .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 52px; fill: #fff; letter-spacing: 18px; }
-    .header-strong { font-weight: 900; letter-spacing: 14px; }
-    .label-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 58px; font-weight: 700; fill: #E9EBED; letter-spacing: 22px; }
-    .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 78px; font-weight: 900; letter-spacing: -2px; }
-    .footer { font-family: 'CamptonCard', Arial, sans-serif; font-size: 50px; fill: #fff; letter-spacing: 10px; }
-    .footer-strong { font-weight: 900; letter-spacing: 7px; }
+    .amount { font-family: 'CoolveticaCompressedHeavy'; font-weight: 900; fill: #fff; letter-spacing: 0; }
+    .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 86px; font-weight: 900; letter-spacing: -2px; }
+    .footer-code { font-family: 'CamptonCard', Arial, sans-serif; font-size: 50px; font-weight: 900; fill: #fff; letter-spacing: 7px; }
   </style>
 
-  ${cardBackground()}
+  ${base ? `<image href="${base}" x="0" y="0" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" preserveAspectRatio="none"/>` : cardBackground({ footerBand: true })}
 
-  <text x="1600" y="178" text-anchor="middle" class="header">
-    <tspan>SWAP</tspan><tspan dx="36" class="header-strong">WITH ME ON AKARA</tspan>
-  </text>
+  <text x="860" y="820" text-anchor="middle" class="amount" font-size="${haveSize}" textLength="${amountTextLength(haveAmount)}" lengthAdjust="spacingAndGlyphs">${escapeXml(haveAmount)}</text>
+  <text x="2356" y="820" text-anchor="middle" class="amount" font-size="${wantSize}" textLength="${amountTextLength(wantAmount)}" lengthAdjust="spacingAndGlyphs">${escapeXml(wantAmount)}</text>
 
-  <text x="800" y="820" text-anchor="middle" class="amount" font-size="${haveSize}">${escapeXml(haveAmount)}</text>
-  <text x="2400" y="820" text-anchor="middle" class="amount" font-size="${wantSize}">${escapeXml(wantAmount)}</text>
+  <text x="1088" y="1000" text-anchor="middle" class="currency-text" fill="${currencyColors[String(listing.have_currency || "").toUpperCase()]?.text || "#000000"}">${escapeXml(String(listing.have_currency || "").toUpperCase())}</text>
+  <text x="2584" y="1000" text-anchor="middle" class="currency-text" fill="${currencyColors[String(listing.want_currency || "").toUpperCase()]?.text || "#000000"}">${escapeXml(String(listing.want_currency || "").toUpperCase())}</text>
 
-  <g opacity="0.92">
-    <circle cx="1515" cy="642" r="26" fill="#25292D"/>
-    <text x="1600" y="705" text-anchor="middle" font-family="CamptonCard, Arial, sans-serif" font-size="150" font-weight="900" fill="#25292D">×</text>
-    <circle cx="1685" cy="642" r="26" fill="#25292D"/>
-  </g>
-
-  ${labelPill({ x: 800, y: 920, label: "I HAVE:", currency: listing.have_currency })}
-  ${labelPill({ x: 2400, y: 920, label: "I NEED:", currency: listing.want_currency })}
-  ${akaraLogo({ x: 1490, y: 852, size: 220, opacity: 0.96 })}
-
-  <rect y="1312" width="${CARD_WIDTH}" height="203" fill="#0F1012"/>
-  <text x="1600" y="1432" text-anchor="middle" class="footer">
-    <tspan>INTERESTED?</tspan><tspan dx="26" class="footer-strong">PASTE THIS CODE</tspan><tspan dx="26">ON</tspan><tspan dx="26" class="footer-strong">AKARA</tspan><tspan dx="26">TO SWAP:</tspan><tspan dx="26" class="footer-strong">${escapeXml(openCode)}</tspan>
-  </text>
+  <text x="2220" y="1396" class="footer-code">${escapeXml(openCode)}</text>
 </svg>`;
 }
 
@@ -260,33 +286,41 @@ function exchangeCompletionSvg(deal, role) {
   </style>
 
   ${cardBackground()}
-  ${akaraLogo({ x: 510, y: 60, size: 220, opacity: 0.96 })}
+  ${akaraLogo({ x: 514, y: 58, width: 220, height: 224, opacity: 0.96 })}
 
-  <text x="1600" y="178" text-anchor="middle" class="header">
+  <text x="1600" y="172" text-anchor="middle" class="header">
     <tspan>EXCHANGE</tspan><tspan dx="34" class="header-strong">COMPLETED</tspan>
   </text>
 
-  <text x="1600" y="1054" text-anchor="middle" class="amount" font-size="${receiveSize}">${escapeXml(receiveAmount)}</text>
-  ${currencyChip({ x: 690, y: 632, currency: youReceive.currency, width: 340, height: 170, fontSize: 88 })}
-  ${stamp ? `<image href="${stamp}" x="2320" y="220" width="600" height="600" opacity="0.9"/>` : ""}
+  <text x="1600" y="1056" text-anchor="middle" class="amount" font-size="${receiveSize}">${escapeXml(receiveAmount)}</text>
+  ${currencyChip({ x: 708, y: 616, currency: youReceive.currency, width: 344, height: 176, fontSize: 88 })}
+  ${stamp ? `<image href="${stamp}" x="2320" y="220" width="600" height="600" opacity="0.9" preserveAspectRatio="xMidYMid meet"/>` : ""}
 
-  <text x="565" y="1320" class="meta">EXCHANGED</text>
-  <text x="565" y="1378" class="meta">
+  <text x="565" y="1280" class="meta">EXCHANGED</text>
+  <text x="565" y="1370" class="meta">
     <tspan class="meta-number">${escapeXml(numberText(youSend.amount))}</tspan><tspan dx="14" class="meta-strong">${escapeXml(String(youSend.currency || "").toUpperCase())}</tspan>
   </text>
   <text x="565" y="1438" class="meta">
     <tspan>FOR</tspan><tspan dx="18" class="meta-number">${escapeXml(numberText(youReceive.amount))}</tspan><tspan dx="14" class="meta-strong">${escapeXml(String(youReceive.currency || "").toUpperCase())}</tspan>
   </text>
 
-  <text x="1470" y="1320" text-anchor="middle" class="meta">${escapeXml(timeLabel(completedAt))}</text>
+  <text x="1470" y="1280" text-anchor="middle" class="meta">${escapeXml(timeLabel(completedAt))}</text>
   <text x="1470" y="1438" text-anchor="middle" class="meta">${escapeXml(dateLabel(completedAt))}</text>
 
-  <text x="2280" y="1320" class="meta">READY TO SWAP? VISIT AKARA</text>
+  <text x="2280" y="1280" class="meta">READY TO SWAP? VISIT AKARA</text>
   <text x="2280" y="1438" class="site">TRYAKARA.COM</text>
 </svg>`;
 }
 
 function verificationSuccessSvg() {
+  const template = svgAsset("verification-success-template.svg");
+  if (template) {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <image href="${template}" x="0" y="0" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" preserveAspectRatio="none"/>
+</svg>`;
+  }
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
   <style>
