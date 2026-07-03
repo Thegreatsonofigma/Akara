@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const opentype = require("opentype.js");
 const { rootDir, config, getPublicUrl } = require("../config");
 const { supabaseRequest, filterValue } = require("./supabase");
 const { uploadWhatsAppMedia, sendWhatsAppMedia } = require("./whatsapp");
@@ -12,8 +13,7 @@ const CARD_WIDTH = 3200;
 const CARD_HEIGHT = 1600;
 const FIGMA_SOURCE_WIDTH = 800;
 const CARD_SCALE = CARD_WIDTH / FIGMA_SOURCE_WIDTH;
-const LISTING_NUMBER_FONT_SIZE = 111 * CARD_SCALE;
-const LISTING_NUMBER_LETTER_SPACING = 2;
+const LISTING_NUMBER_SOURCE_SIZE = 120;
 const RECEIPT_NUMBER_FONT_SIZE = 222 * CARD_SCALE;
 const RECEIPT_META_FONT_SIZE = 12 * CARD_SCALE;
 const RECEIPT_SITE_FONT_SIZE = 22 * CARD_SCALE;
@@ -61,6 +61,91 @@ function fontData(fileName) {
   return fs.readFileSync(fontPath).toString("base64");
 }
 
+let numberFontCache = null;
+
+function numberFont() {
+  if (numberFontCache) return numberFontCache;
+  const fontPath = path.join(fontDir, fontFiles.coolveticaCompressedHeavy);
+  const buffer = fs.readFileSync(fontPath);
+  numberFontCache = opentype.parse(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
+  return numberFontCache;
+}
+
+function appendPath(target, source) {
+  for (const command of source.commands) {
+    target.commands.push({ ...command });
+  }
+}
+
+function trackedTextPath(text, fontSize, tracking) {
+  const font = numberFont();
+  const output = new opentype.Path();
+  let x = 0;
+  const chars = [...String(text || "")];
+
+  chars.forEach((char, index) => {
+    const glyph = font.charToGlyph(char);
+    appendPath(output, glyph.getPath(x, 0, fontSize));
+    x += (glyph.advanceWidth * fontSize) / font.unitsPerEm;
+    if (index < chars.length - 1) x += tracking;
+  });
+
+  return output;
+}
+
+function trackedGlyphPaths(text, fontSize, tracking) {
+  const font = numberFont();
+  let x = 0;
+  const chars = [...String(text || "")];
+
+  return chars.map((char, index) => {
+    const glyph = font.charToGlyph(char);
+    const glyphPath = glyph.getPath(x, 0, fontSize);
+    x += (glyph.advanceWidth * fontSize) / font.unitsPerEm;
+    if (index < chars.length - 1) x += tracking;
+    return glyphPath;
+  });
+}
+
+function closedPathData(outline) {
+  const closed = new opentype.Path();
+  let hasOpenContour = false;
+
+  outline.commands.forEach((command) => {
+    if (command.type === "M") {
+      if (hasOpenContour) closed.commands.push({ type: "Z" });
+      hasOpenContour = true;
+    }
+    closed.commands.push({ ...command });
+  });
+
+  if (hasOpenContour) closed.commands.push({ type: "Z" });
+  return closed.toPathData(2);
+}
+
+function listingNumberTracking(text) {
+  const chars = [...String(text || "")];
+  if (chars.length < 2) return 0;
+  const untrackedBox = trackedTextPath(text, LISTING_NUMBER_SOURCE_SIZE, 0).getBoundingBox();
+  const targetWidth = amountTextLength(text) / CARD_SCALE;
+  const tracking = (targetWidth - (untrackedBox.x2 - untrackedBox.x1)) / (chars.length - 1);
+  return Math.max(-5, Math.min(8, tracking));
+}
+
+function listingAmountPath(text, { centerX, topY }) {
+  const tracking = listingNumberTracking(text);
+  const outline = trackedTextPath(text, LISTING_NUMBER_SOURCE_SIZE, tracking);
+  const box = outline.getBoundingBox();
+  const width = (box.x2 - box.x1) * CARD_SCALE;
+  const x = centerX - width / 2 - box.x1 * CARD_SCALE;
+  const y = topY - box.y1 * CARD_SCALE;
+  const glyphs = trackedGlyphPaths(text, LISTING_NUMBER_SOURCE_SIZE, tracking)
+    .map((glyphPath) => `<path d="${closedPathData(glyphPath)}"/>`)
+    .join("");
+
+  return `<g fill="#FFFFFF" transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${CARD_SCALE})">${glyphs}</g>`;
+}
+
 function fontFace(name, fileName, weight = 700) {
   const data = fontData(fileName);
   if (!data) return "";
@@ -92,14 +177,10 @@ function numberText(amount) {
   });
 }
 
-function amountFontSize(text) {
-  return LISTING_NUMBER_FONT_SIZE;
-}
-
 function amountTextLength(text) {
   const value = String(text || "").trim();
-  if (value === "1,000,000") return 974;
-  if (value === "1,150,000") return 948;
+  if (value === "1,000,000") return 1020;
+  if (value === "1,150,000") return 991;
 
   const advance = {
     "0": 34.5,
@@ -136,18 +217,6 @@ function amountTextLength(text) {
     return sum + (table[char] || 34.5);
   }, 0);
   return Math.round(units * 4);
-}
-
-function amountScaleX(text) {
-  const naturalRenderedWidth = 1850 * (amountFontSize(text) / 442);
-  const scale = amountTextLength(text) / naturalRenderedWidth;
-  return Math.max(0.34, Math.min(0.7, scale || 0.55)).toFixed(4);
-}
-
-function scaledTextPlacement({ centerX, width, scaleX, leftBearing = 22 }) {
-  const scale = Number(scaleX);
-  const visualLeft = centerX - width / 2;
-  return ((visualLeft - leftBearing) / scale).toFixed(3);
 }
 
 function completionAmountFontSize(text) {
@@ -230,8 +299,6 @@ function listingCardSvg(listing) {
   const code = displayReference(listing.listing_code, "listing");
   const haveAmount = numberText(listing.have_amount);
   const wantAmount = numberText(listing.want_amount);
-  const haveSize = amountFontSize(haveAmount);
-  const wantSize = amountFontSize(wantAmount);
   const openCode = `OPEN ${code}`;
   const base = assetDataUri("listing-card-base.png");
 
@@ -247,28 +314,14 @@ function listingCardSvg(listing) {
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount {
-      font-family: 'CoolveticaCompressedHeavy';
-      font-weight: 900;
-      fill: #fff;
-      stroke: #fff;
-      stroke-width: 10px;
-      stroke-linejoin: round;
-      paint-order: stroke fill;
-      letter-spacing: ${LISTING_NUMBER_LETTER_SPACING}px;
-    }
     .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 100px; font-weight: 900; letter-spacing: -2px; }
     .footer-code { font-family: 'CamptonCard', Arial, sans-serif; font-size: 50px; font-weight: 900; fill: #fff; letter-spacing: 7px; }
   </style>
 
   ${base ? `<image href="${base}" x="0" y="0" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" preserveAspectRatio="none"/>` : cardBackground({ footerBand: true })}
 
-  <g transform="scale(${amountScaleX(haveAmount)} 1)">
-    <text x="${scaledTextPlacement({ centerX: 842, width: amountTextLength(haveAmount), scaleX: amountScaleX(haveAmount) })}" y="782" class="amount" font-size="${haveSize}">${escapeXml(haveAmount)}</text>
-  </g>
-  <g transform="scale(${amountScaleX(wantAmount)} 1)">
-    <text x="${scaledTextPlacement({ centerX: 2338, width: amountTextLength(wantAmount), scaleX: amountScaleX(wantAmount) })}" y="780" class="amount" font-size="${wantSize}">${escapeXml(wantAmount)}</text>
-  </g>
+  ${listingAmountPath(haveAmount, { centerX: 860, topY: 464 })}
+  ${listingAmountPath(wantAmount, { centerX: 2356.5, topY: 464 })}
 
   <text x="1088" y="1000" text-anchor="middle" class="currency-text" fill="${currencyColors[String(listing.have_currency || "").toUpperCase()]?.text || "#000000"}">${escapeXml(String(listing.have_currency || "").toUpperCase())}</text>
   <text x="2584" y="1000" text-anchor="middle" class="currency-text" fill="${currencyColors[String(listing.want_currency || "").toUpperCase()]?.text || "#000000"}">${escapeXml(String(listing.want_currency || "").toUpperCase())}</text>
