@@ -14,6 +14,7 @@ const CARD_HEIGHT = 1600;
 const FIGMA_SOURCE_WIDTH = 800;
 const CARD_SCALE = CARD_WIDTH / FIGMA_SOURCE_WIDTH;
 const LISTING_NUMBER_SOURCE_SIZE = 120;
+const LISTING_NUMBER_TRACKING = 2;
 const RECEIPT_NUMBER_FONT_SIZE = 222 * CARD_SCALE;
 const RECEIPT_META_FONT_SIZE = 12 * CARD_SCALE;
 const RECEIPT_SITE_FONT_SIZE = 22 * CARD_SCALE;
@@ -134,27 +135,55 @@ function closedPathData(outline) {
   return closed.toPathData(2);
 }
 
-function listingNumberTracking(text) {
-  const chars = [...String(text || "")];
-  if (chars.length < 2) return 0;
-  const untrackedBox = trackedTextPath(text, LISTING_NUMBER_SOURCE_SIZE, 0).getBoundingBox();
+function listingNumberScaleX(text, sourceWidth) {
+  if (!sourceWidth) return 1;
   const targetWidth = amountTextLength(text) / CARD_SCALE;
-  const tracking = (targetWidth - (untrackedBox.x2 - untrackedBox.x1)) / (chars.length - 1);
-  return Math.max(-5, Math.min(8, tracking));
+  const scale = targetWidth / sourceWidth;
+  return Math.max(0.85, Math.min(1.55, scale || 1));
+}
+
+function listingCommaPath(x) {
+  const left = x + 1.8;
+  const right = x + 13.68;
+  return [
+    `M ${left.toFixed(2)} 17.88`,
+    `C ${(x + 9.48).toFixed(2)} 16.44 ${right.toFixed(2)} 10.92 ${right.toFixed(2)} 1.08`,
+    `L ${right.toFixed(2)} -11.76`,
+    `L ${left.toFixed(2)} -11.76`,
+    `L ${left.toFixed(2)} 0`,
+    `C ${left.toFixed(2)} 7.68 ${(x + 0.6).toFixed(2)} 12.96 ${(x - 3.36).toFixed(2)} 17.88`,
+    "Z",
+  ].join(" ");
+}
+
+function listingAmountGlyphs(text, tracking) {
+  const font = numberFont();
+  let x = 0;
+  const chars = [...String(text || "")];
+
+  return chars
+    .map((char, index) => {
+      const glyph = font.charToGlyph(char);
+      const glyphX = Number(x.toFixed(2));
+      const pathData = char === "," ? listingCommaPath(glyphX) : closedPathData(glyph.getPath(glyphX, 0, LISTING_NUMBER_SOURCE_SIZE));
+      x += (glyph.advanceWidth * LISTING_NUMBER_SOURCE_SIZE) / font.unitsPerEm;
+      if (index < chars.length - 1) x += tracking;
+      return `<path d="${pathData}"/>`;
+    })
+    .join("");
 }
 
 function listingAmountPath(text, { centerX, topY }) {
-  const tracking = listingNumberTracking(text);
+  const tracking = LISTING_NUMBER_TRACKING;
   const outline = trackedTextPath(text, LISTING_NUMBER_SOURCE_SIZE, tracking);
   const box = outline.getBoundingBox();
-  const width = (box.x2 - box.x1) * CARD_SCALE;
-  const x = centerX - width / 2 - box.x1 * CARD_SCALE;
+  const scaleX = listingNumberScaleX(text, box.x2 - box.x1);
+  const width = (box.x2 - box.x1) * CARD_SCALE * scaleX;
+  const x = centerX - width / 2 - box.x1 * CARD_SCALE * scaleX;
   const y = topY - box.y1 * CARD_SCALE;
-  const glyphs = trackedGlyphPaths(text, LISTING_NUMBER_SOURCE_SIZE, tracking)
-    .map((glyphPath) => `<path d="${closedPathData(glyphPath)}"/>`)
-    .join("");
+  const glyphs = listingAmountGlyphs(text, tracking);
 
-  return `<g fill="#FFFFFF" transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${CARD_SCALE})">${glyphs}</g>`;
+  return `<g fill="#FFFFFF" transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${(CARD_SCALE * scaleX).toFixed(4)} ${CARD_SCALE})">${glyphs}</g>`;
 }
 
 function textOutlineGroup({ text, fontFile, fontSize, centerX, centerY, fill, tracking = 0, targetWidth = null, strokeWidth = 0 }) {
