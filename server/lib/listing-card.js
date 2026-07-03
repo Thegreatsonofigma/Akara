@@ -15,7 +15,8 @@ const FIGMA_SOURCE_WIDTH = 800;
 const CARD_SCALE = CARD_WIDTH / FIGMA_SOURCE_WIDTH;
 const LISTING_NUMBER_SOURCE_SIZE = 120;
 const LISTING_NUMBER_TRACKING = 2;
-const RECEIPT_NUMBER_FONT_SIZE = 222 * CARD_SCALE;
+const RECEIPT_NUMBER_SOURCE_SIZE = 240;
+const RECEIPT_NUMBER_TRACKING = 2;
 const RECEIPT_META_FONT_SIZE = 12 * CARD_SCALE;
 const RECEIPT_SITE_FONT_SIZE = 22 * CARD_SCALE;
 const cacheDir = path.join(rootDir, ".cache", "listing-cards");
@@ -142,21 +143,28 @@ function listingNumberScaleX(text, sourceWidth) {
   return Math.max(0.85, Math.min(1.55, scale || 1));
 }
 
-function listingCommaPath(x) {
-  const left = x + 1.8;
-  const right = x + 13.68;
+function commaPath(x, fontSize = LISTING_NUMBER_SOURCE_SIZE) {
+  const scale = fontSize / LISTING_NUMBER_SOURCE_SIZE;
+  const point = (value) => (x + value * scale).toFixed(2);
+  const scalar = (value) => (value * scale).toFixed(2);
+  const left = x + 1.8 * scale;
+  const right = x + 13.68 * scale;
   return [
-    `M ${left.toFixed(2)} 17.88`,
-    `C ${(x + 9.48).toFixed(2)} 16.44 ${right.toFixed(2)} 10.92 ${right.toFixed(2)} 1.08`,
-    `L ${right.toFixed(2)} -11.76`,
-    `L ${left.toFixed(2)} -11.76`,
+    `M ${left.toFixed(2)} ${scalar(17.88)}`,
+    `C ${point(9.48)} ${scalar(16.44)} ${right.toFixed(2)} ${scalar(10.92)} ${right.toFixed(2)} ${scalar(1.08)}`,
+    `L ${right.toFixed(2)} ${scalar(-11.76)}`,
+    `L ${left.toFixed(2)} ${scalar(-11.76)}`,
     `L ${left.toFixed(2)} 0`,
-    `C ${left.toFixed(2)} 7.68 ${(x + 0.6).toFixed(2)} 12.96 ${(x - 3.36).toFixed(2)} 17.88`,
+    `C ${left.toFixed(2)} ${scalar(7.68)} ${point(0.6)} ${scalar(12.96)} ${point(-3.36)} ${scalar(17.88)}`,
     "Z",
   ].join(" ");
 }
 
-function listingAmountGlyphs(text, tracking) {
+function listingCommaPath(x) {
+  return commaPath(x, LISTING_NUMBER_SOURCE_SIZE);
+}
+
+function amountGlyphs(text, fontSize, tracking) {
   const font = numberFont();
   let x = 0;
   const chars = [...String(text || "")];
@@ -165,12 +173,16 @@ function listingAmountGlyphs(text, tracking) {
     .map((char, index) => {
       const glyph = font.charToGlyph(char);
       const glyphX = Number(x.toFixed(2));
-      const pathData = char === "," ? listingCommaPath(glyphX) : closedPathData(glyph.getPath(glyphX, 0, LISTING_NUMBER_SOURCE_SIZE));
-      x += (glyph.advanceWidth * LISTING_NUMBER_SOURCE_SIZE) / font.unitsPerEm;
+      const pathData = char === "," ? commaPath(glyphX, fontSize) : closedPathData(glyph.getPath(glyphX, 0, fontSize));
+      x += (glyph.advanceWidth * fontSize) / font.unitsPerEm;
       if (index < chars.length - 1) x += tracking;
       return `<path d="${pathData}"/>`;
     })
     .join("");
+}
+
+function listingAmountGlyphs(text, tracking) {
+  return amountGlyphs(text, LISTING_NUMBER_SOURCE_SIZE, tracking);
 }
 
 function listingAmountPath(text, { centerX, topY }) {
@@ -182,6 +194,20 @@ function listingAmountPath(text, { centerX, topY }) {
   const x = centerX - width / 2 - box.x1 * CARD_SCALE * scaleX;
   const y = topY - box.y1 * CARD_SCALE;
   const glyphs = listingAmountGlyphs(text, tracking);
+
+  return `<g fill="#FFFFFF" transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${(CARD_SCALE * scaleX).toFixed(4)} ${CARD_SCALE})">${glyphs}</g>`;
+}
+
+function amountOutlinePath(text, { fontSize, tracking, leftX = null, centerX = null, topY, targetWidth = null }) {
+  const outline = trackedTextPath(text, fontSize, tracking);
+  const box = outline.getBoundingBox();
+  const naturalWidth = (box.x2 - box.x1) * CARD_SCALE;
+  const scaleX = targetWidth ? Math.max(0.72, Math.min(1.18, targetWidth / naturalWidth)) : 1;
+  const width = naturalWidth * scaleX;
+  const visualLeft = leftX ?? centerX - width / 2;
+  const x = visualLeft - box.x1 * CARD_SCALE * scaleX;
+  const y = topY - box.y1 * CARD_SCALE;
+  const glyphs = amountGlyphs(text, fontSize, tracking);
 
   return `<g fill="#FFFFFF" transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${(CARD_SCALE * scaleX).toFixed(4)} ${CARD_SCALE})">${glyphs}</g>`;
 }
@@ -285,10 +311,6 @@ function amountTextLength(text) {
   return Math.round(units * 4);
 }
 
-function completionAmountFontSize(text) {
-  return RECEIPT_NUMBER_FONT_SIZE;
-}
-
 function completionAmountTextLength(text) {
   const value = String(text || "").trim();
   if (value === "1,000,000") return 2048;
@@ -296,16 +318,14 @@ function completionAmountTextLength(text) {
   return amountTextLength(text) * 2;
 }
 
-function completionScaleX(text) {
-  const naturalRenderedWidth = 1850 * (completionAmountFontSize(text) / 442);
-  const scale = completionAmountTextLength(text) / naturalRenderedWidth;
-  return Math.max(0.3, Math.min(0.68, scale || 0.5)).toFixed(4);
-}
-
-function completionTextX(text) {
-  const scale = Number(completionScaleX(text));
-  const visualLeft = 535;
-  return (visualLeft / scale).toFixed(3);
+function completionAmountPath(text) {
+  return amountOutlinePath(text, {
+    fontSize: RECEIPT_NUMBER_SOURCE_SIZE,
+    tracking: RECEIPT_NUMBER_TRACKING,
+    leftX: 535,
+    topY: 392,
+    targetWidth: completionAmountTextLength(text),
+  });
 }
 
 function pillWidth(currency) {
@@ -336,10 +356,19 @@ function currencyChip({ x, y, currency, width = null, height = 150, fontSize = 7
   const code = String(currency || "").toUpperCase();
   const chipWidth = width || pillWidth(code);
   const colors = currencyColors[code] || { fill: "#E9EBED", text: "#000000" };
+  const textWidth = listingCurrencyTextWidth(code);
   return `
     <g>
       <rect x="${x - chipWidth / 2}" y="${y}" width="${chipWidth}" height="${height}" rx="${Math.round(height * 0.09)}" fill="${colors.fill}" stroke="#030303" stroke-width="16"/>
-      <text x="${x}" y="${y + height * 0.68}" text-anchor="middle" class="currency-text" font-size="${fontSize}" fill="${colors.text}">${escapeXml(code)}</text>
+      ${textOutlineGroup({
+        text: code,
+        fontFile: fontFiles.camptonBlack,
+        fontSize,
+        centerX: x,
+        centerY: y + height * 0.56,
+        fill: colors.text,
+        targetWidth: textWidth,
+      })}
     </g>
   `;
 }
@@ -442,7 +471,6 @@ function exchangeCompletionSvg(deal, role) {
   const { youSend, youReceive } = dealPartySummary(role, deal);
   const completedAt = compactDay(deal.completed_at || new Date());
   const receiveAmount = numberText(youReceive.amount);
-  const receiveSize = completionAmountFontSize(receiveAmount);
   const stamp = assetDataUri("success-stamp.png");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -457,14 +485,12 @@ function exchangeCompletionSvg(deal, role) {
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCompressedHeavy'; font-weight: 900; fill: #fff; letter-spacing: 0; }
     .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 54px; fill: #fff; letter-spacing: 18px; }
     .header-strong { font-weight: 900; letter-spacing: 12px; }
     .meta { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_META_FONT_SIZE}px; fill: #fff; letter-spacing: 8px; }
     .meta-strong { font-weight: 900; letter-spacing: 4px; }
     .meta-number { font-family: 'CoolveticaCompressedHeavy'; font-weight: 900; letter-spacing: -0.02em; }
     .site { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_SITE_FONT_SIZE}px; fill: #fff; font-weight: 600; letter-spacing: 5px; }
-    .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-weight: 900; letter-spacing: -2px; }
   </style>
 
   ${cardBackground()}
@@ -474,10 +500,8 @@ function exchangeCompletionSvg(deal, role) {
     <tspan>EXCHANGE</tspan><tspan dx="34" class="header-strong">COMPLETED</tspan>
   </text>
 
-  <g transform="scale(${completionScaleX(receiveAmount)} 1)">
-    <text x="${completionTextX(receiveAmount)}" y="1016" class="amount" font-size="${receiveSize}">${escapeXml(receiveAmount)}</text>
-  </g>
-  ${currencyChip({ x: 708, y: 616, currency: youReceive.currency, width: 344, height: 176, fontSize: 88 })}
+  ${completionAmountPath(receiveAmount)}
+  ${currencyChip({ x: 708, y: 616, currency: youReceive.currency, width: 344, height: 176, fontSize: 92 })}
   ${stamp ? `<image href="${stamp}" x="2320" y="220" width="600" height="600" preserveAspectRatio="xMidYMid meet"/>` : ""}
 
   <text x="565" y="1280" class="meta">EXCHANGED</text>
@@ -488,8 +512,8 @@ function exchangeCompletionSvg(deal, role) {
     <tspan>FOR</tspan><tspan dx="18" class="meta-number">${escapeXml(numberText(youReceive.amount))}</tspan><tspan dx="14" class="meta-strong">${escapeXml(String(youReceive.currency || "").toUpperCase())}</tspan>
   </text>
 
-  <text x="1470" y="1280" text-anchor="middle" class="meta">${escapeXml(timeLabel(completedAt))}</text>
-  <text x="1470" y="1392" text-anchor="middle" class="meta">${escapeXml(dateLabel(completedAt))}</text>
+  <text x="1195" y="1280" class="meta" textLength="568" lengthAdjust="spacing">${escapeXml(timeLabel(completedAt))}</text>
+  <text x="1195" y="1392" class="meta" textLength="520" lengthAdjust="spacing">${escapeXml(dateLabel(completedAt))}</text>
 
   <text x="1996" y="1280" class="meta">READY TO SWAP? VISIT AKARA</text>
   <text x="1996" y="1438" class="site">TRYAKARA.COM</text>
