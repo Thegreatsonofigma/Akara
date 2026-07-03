@@ -86,7 +86,7 @@ function numberText(amount) {
 }
 
 function amountFontSize(text) {
-  return 318;
+  return 462;
 }
 
 function amountTextLength(text) {
@@ -131,11 +131,36 @@ function amountTextLength(text) {
   return Math.round(units * 4);
 }
 
+function amountScaleX(text) {
+  const naturalRenderedWidth = 1850 * (amountFontSize(text) / 442);
+  const scale = amountTextLength(text) / naturalRenderedWidth;
+  return Math.max(0.34, Math.min(0.7, scale || 0.55)).toFixed(4);
+}
+
+function scaledTextPlacement({ centerX, width, scaleX, leftBearing = 22 }) {
+  const scale = Number(scaleX);
+  const visualLeft = centerX - width / 2;
+  return ((visualLeft - leftBearing) / scale).toFixed(3);
+}
+
 function completionAmountFontSize(text) {
-  if (text.length <= 8) return 620;
-  if (text.length <= 10) return 520;
-  if (text.length <= 12) return 460;
-  return 390;
+  if (text.length <= 8) return 940;
+  if (text.length <= 10) return 790;
+  if (text.length <= 12) return 690;
+  return 590;
+}
+
+function completionScaleX(text) {
+  if (text.length <= 8) return "0.72";
+  if (text.length <= 10) return "0.64";
+  if (text.length <= 12) return "0.58";
+  return "0.52";
+}
+
+function completionTextX(text) {
+  const scale = Number(completionScaleX(text));
+  const visualLeft = 500;
+  return (visualLeft / scale).toFixed(3);
 }
 
 function pillWidth(currency) {
@@ -212,15 +237,19 @@ function listingCardSvg(listing) {
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCompressedHeavy'; font-weight: 900; fill: #fff; letter-spacing: 0; }
-    .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 86px; font-weight: 900; letter-spacing: -2px; }
+    .amount { font-family: 'CoolveticaCompressedHeavy'; font-weight: 900; fill: #fff; letter-spacing: -0.02em; }
+    .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 100px; font-weight: 900; letter-spacing: -2px; }
     .footer-code { font-family: 'CamptonCard', Arial, sans-serif; font-size: 50px; font-weight: 900; fill: #fff; letter-spacing: 7px; }
   </style>
 
   ${base ? `<image href="${base}" x="0" y="0" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" preserveAspectRatio="none"/>` : cardBackground({ footerBand: true })}
 
-  <text x="860" y="820" text-anchor="middle" class="amount" font-size="${haveSize}" textLength="${amountTextLength(haveAmount)}" lengthAdjust="spacingAndGlyphs">${escapeXml(haveAmount)}</text>
-  <text x="2356" y="820" text-anchor="middle" class="amount" font-size="${wantSize}" textLength="${amountTextLength(wantAmount)}" lengthAdjust="spacingAndGlyphs">${escapeXml(wantAmount)}</text>
+  <g transform="scale(${amountScaleX(haveAmount)} 1)">
+    <text x="${scaledTextPlacement({ centerX: 860, width: amountTextLength(haveAmount), scaleX: amountScaleX(haveAmount) })}" y="787" class="amount" font-size="${haveSize}">${escapeXml(haveAmount)}</text>
+  </g>
+  <g transform="scale(${amountScaleX(wantAmount)} 1)">
+    <text x="${scaledTextPlacement({ centerX: 2356, width: amountTextLength(wantAmount), scaleX: amountScaleX(wantAmount) })}" y="787" class="amount" font-size="${wantSize}">${escapeXml(wantAmount)}</text>
+  </g>
 
   <text x="1088" y="1000" text-anchor="middle" class="currency-text" fill="${currencyColors[String(listing.have_currency || "").toUpperCase()]?.text || "#000000"}">${escapeXml(String(listing.have_currency || "").toUpperCase())}</text>
   <text x="2584" y="1000" text-anchor="middle" class="currency-text" fill="${currencyColors[String(listing.want_currency || "").toUpperCase()]?.text || "#000000"}">${escapeXml(String(listing.want_currency || "").toUpperCase())}</text>
@@ -275,12 +304,12 @@ function exchangeCompletionSvg(deal, role) {
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCompressedHeavy', 'CoolveticaCrammedRegular', 'CoolveticaCondensedRegular', 'CoolveticaRegular'; font-weight: 900; fill: #fff; letter-spacing: -10px; }
+    .amount { font-family: 'CoolveticaCompressedHeavy'; font-weight: 900; fill: #fff; letter-spacing: -0.02em; }
     .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 54px; fill: #fff; letter-spacing: 18px; }
     .header-strong { font-weight: 900; letter-spacing: 12px; }
     .meta { font-family: 'CamptonCard', Arial, sans-serif; font-size: 46px; fill: #fff; letter-spacing: 8px; }
     .meta-strong { font-weight: 900; letter-spacing: 4px; }
-    .meta-number { font-family: 'CoolveticaCompressedHeavy', 'CoolveticaCrammedRegular', 'CoolveticaCondensedRegular', 'CoolveticaRegular'; font-weight: 900; letter-spacing: -1px; }
+    .meta-number { font-family: 'CoolveticaCompressedHeavy'; font-weight: 900; letter-spacing: -0.02em; }
     .site { font-family: 'CamptonCard', Arial, sans-serif; font-size: 80px; fill: #fff; font-weight: 900; letter-spacing: 5px; }
     .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-weight: 900; letter-spacing: -2px; }
   </style>
@@ -292,7 +321,9 @@ function exchangeCompletionSvg(deal, role) {
     <tspan>EXCHANGE</tspan><tspan dx="34" class="header-strong">COMPLETED</tspan>
   </text>
 
-  <text x="1600" y="1056" text-anchor="middle" class="amount" font-size="${receiveSize}">${escapeXml(receiveAmount)}</text>
+  <g transform="scale(${completionScaleX(receiveAmount)} 1)">
+    <text x="${completionTextX(receiveAmount)}" y="940" class="amount" font-size="${receiveSize}">${escapeXml(receiveAmount)}</text>
+  </g>
   ${currencyChip({ x: 708, y: 616, currency: youReceive.currency, width: 344, height: 176, fontSize: 88 })}
   ${stamp ? `<image href="${stamp}" x="2320" y="220" width="600" height="600" opacity="0.9" preserveAspectRatio="xMidYMid meet"/>` : ""}
 
