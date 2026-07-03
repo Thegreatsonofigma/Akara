@@ -111,10 +111,24 @@ async function showOfferMatches(user, context) {
 
   if (!listings.length) {
     if (draft) {
-      return prepareListingPreview(user, draft, [
+      // Ask before listing: the user came to search, so an empty result
+      // offers the listing and waits for a yes instead of opening the
+      // create flow straight away. handleFindOffer's suggest_listing step
+      // picks up the confirmation with the draft already filled in.
+      await upsertSession(user, user.whatsapp_phone, "find_offer", "suggest_listing", {
+        ...context,
+        suggested_listing: draft,
+      });
+      return [
         title("No current offer"),
-        "No live listing fits that request right now. I prepared yours for review.",
-      ].join("\n"));
+        "No one is currently looking for that exchange.",
+        "",
+        `Want me to list ${formatMoney(draft.have_amount, draft.have_currency)} for ${formatMoney(draft.want_amount, draft.want_currency)} so others can find you?`,
+        "",
+        `${action("yes")} to open the listing`,
+        `${action("search again")} to try another pair`,
+        `${action("no thanks")} to leave it`,
+      ].join("\n");
     }
 
     const partialDraft = {
@@ -244,7 +258,7 @@ async function showBrowseOffers(user, currency = null, page = 0) {
     `${action("1")} or ${action("open 1")} to start an Akara Trade`,
     hasMore ? `${action("view more")} to see more offers` : "",
     `${action("search again")} to narrow it down`,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 // Users often mix a directional request with browse words, like "I have 2k
@@ -341,7 +355,7 @@ async function handleFindOffer(text, user, session) {
 
   if (step === "have_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return [title("Choose what you have"), currencyHelpLine()].join("\n\n");
+    if (!currency) return [title("Choose what currency you have"), currencyHelpLine()].join("\n\n");
 
     context.have_currency = currency;
     return continueSearchOrShowMatches(user, context);
@@ -349,7 +363,7 @@ async function handleFindOffer(text, user, session) {
 
   if (step === "want_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return [title("Choose what you need"), currencyHelpLine(context.have_currency)].join("\n\n");
+    if (!currency) return [title("Choose what currency you need"), currencyHelpLine(context.have_currency)].join("\n\n");
     if (currency === context.have_currency) return "Choose a different currency from the one you have.";
 
     context.want_currency = currency;

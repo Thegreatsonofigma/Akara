@@ -216,7 +216,7 @@ function disputeGuidance(role, dealCode, deal = null, reason = "") {
     title("Actions"),
     `${action("add proof")} upload a receipt or screenshot`,
     `${action("close dispute")} only if you opened it`,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 function paymentNoticeForOther(dealCode, expectedAmount, alreadyPaid, proofDelivery) {
@@ -239,7 +239,7 @@ function paymentNoticeForOther(dealCode, expectedAmount, alreadyPaid, proofDeliv
     `${action("dispute")} if anything looks wrong`,
     "",
     dealSafetyLine(),
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 function paymentNotedReply(dealCode, youSend, youReceive, proof, sideComplete = false) {
@@ -471,7 +471,7 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
       ...extraLines,
       "",
       feeIncludedNote(youSend.currency),
-    ].filter(Boolean).join("\n"),
+    ].filter(Boolean).join("\n\n"),
   };
 }
 
@@ -570,7 +570,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
         proof?.public_url ? `View proof: ${proof.public_url}` : "The supporting file is saved for admin review.",
         "",
         disputeGuidance(role, dealCode, deal),
-      ].filter(Boolean).join("\n");
+      ].filter(Boolean).join("\n\n");
     }
 
     if (isCancelIntent(command) || isDeclineIntent(command) || /\b(skip|later)\b/.test(command)) {
@@ -652,7 +652,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
         proof?.public_url ? `View proof: ${proof.public_url}` : "The supporting file is saved for admin review.",
         "",
         disputeGuidance(role, dealCode, deal),
-      ].filter(Boolean).join("\n");
+      ].filter(Boolean).join("\n\n");
     }
 
     return disputeGuidance(role, dealCode, deal);
@@ -862,7 +862,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       "",
       `${action("received")} once your own funds land`,
       `${action("dispute")} if anything looks wrong`,
-    ].filter(Boolean).join("\n")).catch((error) => {
+    ].filter(Boolean).join("\n\n")).catch((error) => {
       console.error(`[deal] combined confirmation notice failed for ${dealCode}: ${error.message}`);
     });
 
@@ -873,7 +873,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       "",
       "I will confirm the exchange after your trade partner also confirms receipt.",
       proof ? "Receipt saved and sent to your trade partner." : "",
-    ].filter(Boolean).join("\n");
+    ].filter(Boolean).join("\n\n");
   }
 
   if (incoming.media?.id || isSentIntent(command)) {
@@ -1019,7 +1019,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       deal[dealReceivedField(role)] ? "" : caption(paymentExpectationLine(youReceive.amount, youReceive.currency, await getDefaultPaymentProfile(user.id, youReceive.currency))),
       "",
       dealSafetyLine(),
-    ].filter(Boolean).join("\n");
+    ].filter(Boolean).join("\n\n");
   }
 
   return [

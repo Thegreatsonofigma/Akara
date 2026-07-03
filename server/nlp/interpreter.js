@@ -81,7 +81,7 @@ const SYSTEM_PROMPT = [
   "",
   "Classify the user's newest message into exactly one action:",
   "- create_listing: they state money they have and want to exchange (posting/making an offer, listing, ad, or post).",
-  "- find_offer: they are looking for someone to exchange with for a specific currency pair.",
+  "- find_offer: they are looking for someone to exchange with for a specific currency pair, or asking who needs/wants a currency they hold (\"who needs naira? 50k for 54k rwf\", \"anyone want NGN?\"). A demand question is find_offer even when it quotes full amounts or a rate — the money they hold is the have side, so still extract the slots.",
   "- browse_offers: they want to see available offers, deals, or rates without giving a full pair.",
   "- reserve_listing: they want to reserve, take, accept, pick, or open a specific posted offer, usually referenced by a code like AKR-LIST-104, \"Akara Offer 12\", or a number from a list Akara just showed.",
   "- trade_action: they report a payment sent or received, share proof or a receipt, ask to remind the other party, raise a dispute, check the status of a trade, or cancel an open trade.",

@@ -55,7 +55,7 @@ function listingLiveMessage(heading, listingCode, listing, shareUrl) {
     title("Share"),
     shareUrl ? shareUrl : action(`open ${code}`),
     listingShareCopy(),
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 async function deliverListingLive(user, listing, listingCode, message) {
@@ -117,7 +117,7 @@ function tradeOpenedMessage({
     "",
     firstInstruction,
     fundsDisclaimer(),
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 function formatListingReview(context) {
@@ -146,45 +146,25 @@ function formatListingReview(context) {
   ].join("\n");
 }
 
-function listingEditMenu(context) {
+// Opens the edit conversation for a listing draft: keeps only the edit
+// metadata (which listing is being edited, its code, and the status to
+// restore on cancel) and asks for fresh details. Used by the review screen's
+// "edit" reply and by a direct edit request from profile settings, so a user
+// who asks to edit is never bounced through the review screen first.
+async function startListingEdit(user, context, intro = title("Edit listing")) {
+  const editContext = {
+    ...(context.editing_listing_id ? { editing_listing_id: context.editing_listing_id } : {}),
+    ...(context.listing_code ? { listing_code: context.listing_code } : {}),
+    ...(context.previous_listing_status ? { previous_listing_status: context.previous_listing_status } : {}),
+  };
+  await upsertSession(user, user.whatsapp_phone, "create_listing", "have_currency", editContext);
   return [
-    title("What do you want to edit?"),
-    "Choose one part of this listing.",
+    intro,
     "",
-    `1. ${action("send amount")} · ${formatMoney(context.have_amount, context.have_currency)}`,
-    `2. ${action("receive amount")} · ${formatMoney(context.want_amount, context.want_currency)}`,
-    `3. ${action("currencies")} · ${context.have_currency} to ${context.want_currency}`,
-    `4. ${action("terms")} · ${listingTypeLabel(context.listing_type || "fixed")}`,
+    "What currency do you have?",
     "",
-    title("Or"),
-    `${action("publish")} to make it live`,
-    `${action("cancel")} to trash this review`,
+    currencyHelpLine(),
   ].join("\n");
-}
-
-function listingEditChoice(text) {
-  const command = compactText(text);
-  if (/^(1|send|send amount|amount i have|what i have|have amount|give amount|you send)$/.test(command)
-    || /\b(send|have|give)\b.*\b(amount|value|figure|money)\b/.test(command)) {
-    return "have_amount";
-  }
-
-  if (/^(2|receive|receive amount|amount i need|amount i want|what i need|what i want|want amount|need amount|you receive)$/.test(command)
-    || /\b(receive|want|need|get)\b.*\b(amount|value|figure|money)\b/.test(command)) {
-    return "want_amount";
-  }
-
-  if (/^(3|currency|currencies|pair|currency pair|change currencies|change pair)$/.test(command)
-    || /\b(currency|currencies|pair)\b/.test(command)) {
-    return "currencies";
-  }
-
-  if (/^(4|terms|term|rate terms|fixed|flexible|negotiable|rate type)$/.test(command)
-    || /\b(terms?|fixed|flexible|negotiable|rate type)\b/.test(command)) {
-    return "terms";
-  }
-
-  return null;
 }
 
 async function prepareListingPreview(user, details, intro = "") {
@@ -567,12 +547,12 @@ async function handleCreateListing(text, user, session) {
 
   if (step === "have_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return ["Choose what you have.", currencyHelpLine()].join("\n\n");
+    if (!currency) return ["Choose what currency you have.", currencyHelpLine()].join("\n\n");
 
     context.have_currency = currency;
     await upsertSession(user, user.whatsapp_phone, "create_listing", "want_currency", context);
     return [
-      "What do you want in return?",
+      "What currency do you want in return?",
       "",
       currencyHelpLine(currency),
     ].join("\n");
@@ -580,7 +560,7 @@ async function handleCreateListing(text, user, session) {
 
   if (step === "want_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return ["Choose what you want in return.", currencyHelpLine(context.have_currency)].join("\n\n");
+    if (!currency) return ["Choose what currency you want in return.", currencyHelpLine(context.have_currency)].join("\n\n");
     if (currency === context.have_currency) return "Choose a different currency from the one you have.";
 
     context.want_currency = currency;
@@ -627,8 +607,7 @@ async function handleCreateListing(text, user, session) {
     const command = compactText(text);
 
     if (isEditIntent(command)) {
-      await upsertSession(user, user.whatsapp_phone, "create_listing", "edit_choice", context);
-      return listingEditMenu(context);
+      return startListingEdit(user, context);
     }
 
     if (!isListingPublishIntent(command)) {
@@ -713,10 +692,11 @@ async function handleCreateListing(text, user, session) {
   }
 
   await clearSession(user, user.whatsapp_phone);
-  return "I reset that listing flow. Tell me what you have and what you want in one line when you are ready.";
+  return "I reset that listing flow. Tell me what currency you have and which currency you want in one line when you are ready.";
 }
 
 module.exports = {
+  startListingEdit,
   prepareListingPreview,
   publishListing,
   reserveListing,

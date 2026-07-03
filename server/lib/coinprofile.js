@@ -72,7 +72,19 @@ const BANK_ALIASES = {
   firstbank: "first",
   stanbic: "stanbic ibtc",
   alat: "wema",
+  opay: "paycom",
 };
+
+// Users know some CoinProfile entries by a different name — Opay is
+// registered there as Paycom. Swap in the familiar name for everything the
+// user sees; API calls keep using the entry's code.
+const BANK_DISPLAY_NAMES = [{ match: "paycom", display: "Opay" }];
+
+function presentBank(bank) {
+  const normalized = normalizeBankText(bank.name);
+  const known = BANK_DISPLAY_NAMES.find((entry) => normalized.includes(entry.match));
+  return known ? { name: known.display, code: bank.code } : bank;
+}
 
 function normalizeBankText(input) {
   return String(input || "")
@@ -96,13 +108,13 @@ async function findNigerianBanks(input) {
   const normalized = banks.map((bank) => ({ bank, name: normalizeBankText(bank.name) }));
 
   const exact = normalized.filter((entry) => entry.name === value);
-  if (exact.length) return exact.map((entry) => entry.bank);
+  if (exact.length) return exact.map((entry) => presentBank(entry.bank));
 
   const partial = normalized.filter(
     (entry) => entry.name.includes(value) || value.includes(entry.name)
   );
   partial.sort((a, b) => a.name.length - b.name.length);
-  return partial.map((entry) => entry.bank);
+  return partial.map((entry) => presentBank(entry.bank));
 }
 
 // Takes an account number and bank code, returns the account holder's name
@@ -117,14 +129,20 @@ async function resolveBankAccount(accountNumber, bankCode) {
     },
   });
 
-  // CoinProfile nests the account info as data.data.
+  // CoinProfile nests the payload as data.data, but the holder's name is not
+  // always in the nested object — data.data can be the BANK record, whose
+  // `name` is the bank itself, while the holder arrives one level up. Read
+  // explicit account-name fields from either level, and only trust a bare
+  // `name` when it sits beside the account number, so a bank name can never
+  // be mistaken for the account holder.
+
   const info = body?.data?.data || body?.data || null;
   if (!info) return null;
 
-  const accountName = info.account_name || info.accountName || info.name || "";
+  const accountName = info.accountname || info.accountName || info.name || "";
   return {
     account_name: accountName,
-    account_number: info.account_number || info.accountNumber || String(accountNumber),
+    account_number: info.accountnumber || info.accountNumber || String(accountNumber),
   };
 }
 

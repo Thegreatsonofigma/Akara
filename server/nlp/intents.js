@@ -53,7 +53,7 @@ function inferIntent(text) {
   if (/\b(profile|settings|account|payout|payouts|payment details|bank details|momo details|wallet|manage)\b/.test(value)) return "settings";
   if (/\b(my offers|my listings|offers i posted|listings i posted|what i posted)\b/.test(value)) return "my_listings";
   if (/\b(my deals|my trades|reserved deals|transactions|transaction history|deal history|history|statement|records)\b/.test(value)) return "my_deals";
-  if (/\b(find|search|need|wan|want to see|show me|see|looking for|dey find|find who|who go help|change am|convert am|swap am|available|offers|deals|trades|matches|rates|who has|who get|reserve|take|find|show|check rate)\b/.test(value)) return "find_offer";
+  if (/\b(find|search|need|wan|want to see|show me|see|looking for|dey find|find who|who go help|change am|convert am|swap am|available|offers|deals|trades|matches|rates|who has|who get|who needs?|who wants?|anyone needs?|anyone wants?|anybody needs?|anybody wants?|reserve|take|find|show|check rate)\b/.test(value)) return "find_offer";
   if (/\b(post|create|list|listing|offer|make offer|i have|i get|i dey with|get|i want to exchange|i wan exchange|i want to sell|i can give|i fit give)\b/.test(value)) return "create_listing";
   return null;
 }
@@ -99,6 +99,18 @@ function isRateQuestion(text) {
   const value = compactText(text);
   return /\b(rate|rates|exchange rate|market rate|live rate|price|pricing|how much is|convert|conversion|worth)\b/.test(value)
     && currencyMentions(text).length > 0;
+}
+
+// "who needs naira? 50k for 54k rwf", "anyone want RWF?": the user is hunting
+// for a counterparty who wants the money they already hold. It reads like an
+// offer, but it is a demand question — search first, never list straight away.
+function isDemandSeekingQuestion(text) {
+  const value = compactText(text);
+  if (!value) return false;
+  if (!currencyMentions(text).length) return false;
+  const asksWho = /\b(who|anyone|anybody|any one|any body)\b/.test(value);
+  const demandWord = /\b(needs?|wants?|dey find|looking for|go take|fit take|will take|interested)\b/.test(value);
+  return asksWho && demandWord;
 }
 
 function isCurrencyOfferBrowsePhrase(text) {
@@ -235,6 +247,7 @@ module.exports = {
   isConfirmationNo,
   isAssistantQuestion,
   isRateQuestion,
+  isDemandSeekingQuestion,
   isCurrencyOfferBrowsePhrase,
   isBrowseAllOffersIntent,
   isMoreResultsIntent,

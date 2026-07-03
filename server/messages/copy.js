@@ -83,7 +83,7 @@ function welcomePrompt(user) {
   return [
     `Hi${name ? ` ${name}` : ""} 👋`,
     "",
-    "What would you like Akara to help you move today?",
+    "What currency would you like Akara to help you move today?",
     "",
     "You can say things naturally, like:",
     "I have 100,000 RWF and need 210,000 NGN",
@@ -100,7 +100,7 @@ function thanksReply(user) {
   return [
     `You're welcome${name ? `, ${name}` : ""} 🙌`,
     "",
-    "Anytime you're ready, just tell me what you want to move.",
+    "Anytime you're ready, just tell me what currency you want to move.",
     "",
     `${action("find offers")} · ${action("make offer")} · ${action("history")}`,
   ].join("\n");
@@ -137,7 +137,7 @@ function listingShareCopy() {
 function explainMissingListing(fields, context = {}) {
   if (fields.includes("have_amount") || fields.includes("have_currency")) {
     return [
-      "Tell me what you have.",
+      "Tell me what currency you have.",
       "",
       currencyHelpLine(),
       "",
