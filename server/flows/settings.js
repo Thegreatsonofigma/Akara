@@ -92,16 +92,16 @@ async function viewPayoutsReply(user, intro = "") {
     listing_map: {},
   });
 
-  const payoutLines = profiles.length
-    ? profiles.map((profile, index) => formatPaymentProfileCompact(profile, index + 1))
-    : ["No payout details saved yet."];
+  const payoutBlock = profiles.length
+    ? profiles.map((profile, index) => formatPaymentProfileCompact(profile, index + 1)).join("\n\n")
+    : "No payout details saved yet.";
 
   return [
     intro,
     title("Bank & payout details"),
     caption("Where your trade partners send your money."),
     "",
-    ...payoutLines,
+    payoutBlock,
     "",
     title("Actions"),
     action("add payout"),
@@ -130,9 +130,9 @@ async function profileSettingsReply(user, intro = "") {
     listing_map: listingMap,
   });
 
-  const payoutLines = profiles.length
-    ? profiles.map((profile, index) => formatPaymentProfileCompact(profile, index + 1))
-    : ["No payout details saved yet.", "Reply add payout to add one."];
+  const payoutBlock = profiles.length
+    ? profiles.map((profile, index) => formatPaymentProfileCompact(profile, index + 1)).join("\n\n")
+    : ["No payout details saved yet.", "Reply add payout to add one."].join("\n");
 
   const listingLines = listings.length
     ? listings.map((listing, index) => [
@@ -148,7 +148,7 @@ async function profileSettingsReply(user, intro = "") {
     caption("Manage payout details and your live listings."),
     "",
     title("Payouts"),
-    ...payoutLines,
+    payoutBlock,
     "",
     title("Listings"),
     ...listingLines,

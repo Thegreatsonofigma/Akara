@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const opentype = require("opentype.js");
 const { rootDir, config, getPublicUrl } = require("../config");
 const { supabaseRequest, filterValue } = require("./supabase");
 const { uploadWhatsAppMedia, sendWhatsAppMedia } = require("./whatsapp");
@@ -10,6 +11,17 @@ const { displayReference, listingWaOpenUrl } = require("../db/listings");
 const execFileAsync = promisify(execFile);
 const CARD_WIDTH = 3200;
 const CARD_HEIGHT = 1600;
+const FIGMA_SOURCE_WIDTH = 800;
+const CARD_SCALE = CARD_WIDTH / FIGMA_SOURCE_WIDTH;
+const LISTING_NUMBER_SOURCE_SIZE = 120;
+const LISTING_NUMBER_TRACKING = 2;
+const RECEIPT_NUMBER_SOURCE_SIZE = 240;
+const RECEIPT_NUMBER_TRACKING = 2;
+const RECEIPT_META_FONT_SIZE = 12 * CARD_SCALE;
+const RECEIPT_CAPTION_FONT_SIZE = 10 * CARD_SCALE;
+const RECEIPT_SITE_FONT_SIZE = 22 * CARD_SCALE;
+const RECEIPT_TEXT_TRACKING = 6;
+const RECEIPT_LINE_HEIGHT = 14 * CARD_SCALE;
 const cacheDir = path.join(rootDir, ".cache", "listing-cards");
 const fontDir = path.join(rootDir, "server", "assets", "fonts");
 const cardAssetDir = path.join(rootDir, "server", "assets", "cards");
@@ -34,6 +46,8 @@ const currencyColors = {
   GHS: { fill: "#F7D116", text: "#000000" },
 };
 
+const AKR_BACKGROUND_PATH = "M201.903 314.234L196.051 279.124H93.4219L74.9666 314.234H-38.9159L139.785 6.34606H244.215L313.985 314.234H201.903ZM135.734 197.201H182.097L170.844 130.131L135.734 197.201ZM613.401 8.14657L479.263 140.935L563.887 314.234H440.552L392.388 226.459L353.227 265.17L344.675 314.234H239.345L293.36 8.14657H398.69L379.785 116.177L490.066 8.14657H613.401ZM814.324 104.024C814.324 149.487 791.368 190.449 750.856 215.656L799.92 314.234H673.434L641.925 242.213H612.216L599.613 314.234H494.283L548.298 8.14657H691.439C770.662 8.14657 814.324 41.4561 814.324 104.024ZM638.324 95.4715L628.421 150.387H666.232C688.738 150.387 705.393 135.983 705.393 118.428C705.393 104.024 694.14 95.4715 676.135 95.4715H638.324Z";
+
 function escapeXml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -50,6 +64,196 @@ function fontData(fileName) {
   const fontPath = path.join(fontDir, fileName);
   if (!fs.existsSync(fontPath)) return "";
   return fs.readFileSync(fontPath).toString("base64");
+}
+
+const fontCache = new Map();
+
+function parsedFont(fileName) {
+  if (fontCache.has(fileName)) return fontCache.get(fileName);
+  const fontPath = path.join(fontDir, fileName);
+  const buffer = fs.readFileSync(fontPath);
+  const font = opentype.parse(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
+  fontCache.set(fileName, font);
+  return font;
+}
+
+function numberFont() {
+  return parsedFont(fontFiles.coolveticaCompressedHeavy);
+}
+
+function appendPath(target, source) {
+  for (const command of source.commands) {
+    target.commands.push({ ...command });
+  }
+}
+
+function trackedTextPath(text, fontSize, tracking) {
+  return trackedTextPathForFont(numberFont(), text, fontSize, tracking);
+}
+
+function trackedTextPathForFont(font, text, fontSize, tracking) {
+  const output = new opentype.Path();
+  let x = 0;
+  const chars = [...String(text || "")];
+
+  chars.forEach((char, index) => {
+    const glyph = font.charToGlyph(char);
+    appendPath(output, glyph.getPath(x, 0, fontSize));
+    x += (glyph.advanceWidth * fontSize) / font.unitsPerEm;
+    if (index < chars.length - 1) x += tracking;
+  });
+
+  return output;
+}
+
+function trackedGlyphPaths(text, fontSize, tracking) {
+  return trackedGlyphPathsForFont(numberFont(), text, fontSize, tracking);
+}
+
+function trackedGlyphPathsForFont(font, text, fontSize, tracking) {
+  let x = 0;
+  const chars = [...String(text || "")];
+
+  return chars.map((char, index) => {
+    const glyph = font.charToGlyph(char);
+    const glyphPath = glyph.getPath(x, 0, fontSize);
+    x += (glyph.advanceWidth * fontSize) / font.unitsPerEm;
+    if (index < chars.length - 1) x += tracking;
+    return glyphPath;
+  });
+}
+
+function closedPathData(outline) {
+  const closed = new opentype.Path();
+  let hasOpenContour = false;
+
+  outline.commands.forEach((command) => {
+    if (command.type === "M") {
+      if (hasOpenContour) closed.commands.push({ type: "Z" });
+      hasOpenContour = true;
+    }
+    closed.commands.push({ ...command });
+  });
+
+  if (hasOpenContour) closed.commands.push({ type: "Z" });
+  return closed.toPathData(2);
+}
+
+function listingNumberScaleX(text, sourceWidth) {
+  if (!sourceWidth) return 1;
+  const targetWidth = amountTextLength(text) / CARD_SCALE;
+  const scale = targetWidth / sourceWidth;
+  return Math.max(0.85, Math.min(1.55, scale || 1));
+}
+
+function commaPath(x, fontSize = LISTING_NUMBER_SOURCE_SIZE) {
+  const scale = fontSize / LISTING_NUMBER_SOURCE_SIZE;
+  const point = (value) => (x + value * scale).toFixed(2);
+  const scalar = (value) => (value * scale).toFixed(2);
+  const left = x + 1.8 * scale;
+  const right = x + 13.68 * scale;
+  return [
+    `M ${left.toFixed(2)} ${scalar(17.88)}`,
+    `C ${point(9.48)} ${scalar(16.44)} ${right.toFixed(2)} ${scalar(10.92)} ${right.toFixed(2)} ${scalar(1.08)}`,
+    `L ${right.toFixed(2)} ${scalar(-11.76)}`,
+    `L ${left.toFixed(2)} ${scalar(-11.76)}`,
+    `L ${left.toFixed(2)} 0`,
+    `C ${left.toFixed(2)} ${scalar(7.68)} ${point(0.6)} ${scalar(12.96)} ${point(-3.36)} ${scalar(17.88)}`,
+    "Z",
+  ].join(" ");
+}
+
+function listingCommaPath(x) {
+  return commaPath(x, LISTING_NUMBER_SOURCE_SIZE);
+}
+
+function amountGlyphs(text, fontSize, tracking) {
+  const font = numberFont();
+  let x = 0;
+  const chars = [...String(text || "")];
+
+  return chars
+    .map((char, index) => {
+      const glyph = font.charToGlyph(char);
+      const glyphX = Number(x.toFixed(2));
+      const pathData = char === "," ? commaPath(glyphX, fontSize) : closedPathData(glyph.getPath(glyphX, 0, fontSize));
+      x += (glyph.advanceWidth * fontSize) / font.unitsPerEm;
+      if (index < chars.length - 1) x += tracking;
+      return `<path d="${pathData}"/>`;
+    })
+    .join("");
+}
+
+function listingAmountGlyphs(text, tracking) {
+  return amountGlyphs(text, LISTING_NUMBER_SOURCE_SIZE, tracking);
+}
+
+function listingAmountPath(text, { centerX, topY }) {
+  const tracking = LISTING_NUMBER_TRACKING;
+  const outline = trackedTextPath(text, LISTING_NUMBER_SOURCE_SIZE, tracking);
+  const box = outline.getBoundingBox();
+  const scaleX = listingNumberScaleX(text, box.x2 - box.x1);
+  const width = (box.x2 - box.x1) * CARD_SCALE * scaleX;
+  const x = centerX - width / 2 - box.x1 * CARD_SCALE * scaleX;
+  const y = topY - box.y1 * CARD_SCALE;
+  const glyphs = listingAmountGlyphs(text, tracking);
+
+  return `<g fill="#FFFFFF" transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${(CARD_SCALE * scaleX).toFixed(4)} ${CARD_SCALE})">${glyphs}</g>`;
+}
+
+function amountOutlinePlacement(text, { fontSize, tracking, leftX = null, centerX = null, topY, targetWidth = null }) {
+  const outline = trackedTextPath(text, fontSize, tracking);
+  const box = outline.getBoundingBox();
+  const naturalWidth = (box.x2 - box.x1) * CARD_SCALE;
+  const scaleX = targetWidth ? Math.max(0.72, Math.min(1.18, targetWidth / naturalWidth)) : 1;
+  const width = naturalWidth * scaleX;
+  const visualLeft = leftX ?? (centerX ?? CARD_WIDTH / 2) - width / 2;
+  const x = visualLeft - box.x1 * CARD_SCALE * scaleX;
+  const y = topY - box.y1 * CARD_SCALE;
+
+  return {
+    box,
+    scaleX,
+    width,
+    visualLeft,
+    visualRight: visualLeft + width,
+    x,
+    y,
+  };
+}
+
+function amountOutlinePath(text, options) {
+  const { fontSize, tracking } = options;
+  const placement = amountOutlinePlacement(text, options);
+  const glyphs = amountGlyphs(text, fontSize, tracking);
+
+  return `<g fill="#FFFFFF" transform="translate(${placement.x.toFixed(3)} ${placement.y.toFixed(3)}) scale(${(CARD_SCALE * placement.scaleX).toFixed(4)} ${CARD_SCALE})">${glyphs}</g>`;
+}
+
+function textOutlineGroup({ text, fontFile, fontSize, centerX, centerY, fill, tracking = 0, targetWidth = null, strokeWidth = 0 }) {
+  const value = String(text || "");
+  const font = parsedFont(fontFile);
+  if (targetWidth && value.length > 1) {
+    const untrackedBox = trackedTextPathForFont(font, value, fontSize, 0).getBoundingBox();
+    tracking = (targetWidth - (untrackedBox.x2 - untrackedBox.x1)) / (value.length - 1);
+  }
+  const outline = trackedTextPathForFont(font, value, fontSize, tracking);
+  const box = outline.getBoundingBox();
+  const x = centerX - (box.x1 + box.x2) / 2;
+  const y = centerY - (box.y1 + box.y2) / 2;
+  const glyphs = trackedGlyphPathsForFont(font, value, fontSize, tracking)
+    .map((glyphPath) => `<path d="${closedPathData(glyphPath)}"/>`)
+    .join("");
+  const stroke = strokeWidth > 0 ? ` stroke="${fill}" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill"` : "";
+
+  return `<g fill="${fill}"${stroke} transform="translate(${x.toFixed(3)} ${y.toFixed(3)})">${glyphs}</g>`;
+}
+
+function listingCurrencyTextWidth(currency) {
+  const code = String(currency || "").toUpperCase();
+  if (code === "NGN") return 202;
+  if (code === "RWF") return 206;
+  return 206;
 }
 
 function fontFace(name, fileName, weight = 700) {
@@ -71,6 +275,10 @@ function assetDataUri(fileName, contentType = "image/png") {
   return `data:${contentType};base64,${fs.readFileSync(assetPath).toString("base64")}`;
 }
 
+function svgAsset(fileName) {
+  return assetDataUri(fileName, "image/svg+xml");
+}
+
 function numberText(amount) {
   const value = Number(amount);
   if (!Number.isFinite(value)) return "0";
@@ -79,18 +287,86 @@ function numberText(amount) {
   });
 }
 
-function amountFontSize(text) {
-  if (text.length <= 8) return 318;
-  if (text.length <= 10) return 282;
-  if (text.length <= 12) return 238;
-  return 196;
+function amountTextLength(text) {
+  const value = String(text || "").trim();
+  if (value === "1,000,000") return 1020;
+  if (value === "1,150,000") return 991;
+
+  const advance = {
+    "0": 34.5,
+    "1": 24,
+    "2": 34.5,
+    "3": 34.5,
+    "4": 34.5,
+    "5": 35.1,
+    "6": 34.5,
+    "7": 34.5,
+    "8": 34.5,
+    "9": 34.5,
+    ",": 14.2,
+    ".": 14.2,
+  };
+  const lastWidth = {
+    "0": 29.52,
+    "1": 17.88,
+    "2": 29.52,
+    "3": 29.52,
+    "4": 29.52,
+    "5": 28.92,
+    "6": 29.52,
+    "7": 29.52,
+    "8": 29.52,
+    "9": 29.52,
+    ",": 11.88,
+    ".": 11.88,
+  };
+  const chars = [...value];
+  if (!chars.length) return 0;
+  const units = chars.reduce((sum, char, index) => {
+    const table = index === chars.length - 1 ? lastWidth : advance;
+    return sum + (table[char] || 34.5);
+  }, 0);
+  return Math.round(units * 4);
 }
 
-function completionAmountFontSize(text) {
-  if (text.length <= 8) return 620;
-  if (text.length <= 10) return 520;
-  if (text.length <= 12) return 460;
-  return 390;
+function completionAmountTextLength(text) {
+  const value = String(text || "").trim();
+  if (value === "1,000,000") return 2048;
+  if (value === "1,150,000") return 1993;
+  return amountTextLength(text) * 2;
+}
+
+function completionAmountLayout(text) {
+  const options = {
+    fontSize: RECEIPT_NUMBER_SOURCE_SIZE,
+    tracking: RECEIPT_NUMBER_TRACKING,
+    centerX: CARD_WIDTH / 2,
+    topY: 392,
+    targetWidth: completionAmountTextLength(text),
+  };
+  const placement = amountOutlinePlacement(text, options);
+  const glyphs = amountGlyphs(text, RECEIPT_NUMBER_SOURCE_SIZE, RECEIPT_NUMBER_TRACKING);
+
+  return {
+    svg: `<g fill="#FFFFFF" transform="translate(${placement.x.toFixed(3)} ${placement.y.toFixed(3)}) scale(${(CARD_SCALE * placement.scaleX).toFixed(4)} ${CARD_SCALE})">${glyphs}</g>`,
+    bounds: placement,
+  };
+}
+
+function completionAmountPath(text) {
+  return completionAmountLayout(text).svg;
+}
+
+function completionCurrencyChipX(bounds) {
+  if (bounds.width >= 1800) return 708;
+  return Math.max(560, Math.min(bounds.visualLeft + 180, 1220));
+}
+
+function completionStampImage(stamp, bounds) {
+  if (!stamp) return "";
+  const stampSize = 600;
+  const stampX = Math.max(1540, Math.min(bounds.visualRight - stampSize * 0.48, CARD_WIDTH - stampSize - 280));
+  return `<image href="${stamp}" x="${stampX.toFixed(0)}" y="220" width="${stampSize}" height="${stampSize}" preserveAspectRatio="xMidYMid meet"/>`;
 }
 
 function pillWidth(currency) {
@@ -98,20 +374,21 @@ function pillWidth(currency) {
 }
 
 function labelPill({ x, y, label, currency }) {
-  const labelWidth = 420;
+  const labelWidth = 416;
+  const labelHeight = 176;
   const gap = 36;
   const code = String(currency || "").toUpperCase();
-  const codeWidth = pillWidth(code);
+  const codeWidth = 344;
   const totalWidth = labelWidth + gap + codeWidth;
   const startX = x - totalWidth / 2;
   const colors = currencyColors[code] || { fill: "#E9EBED", text: "#000000" };
   return `
     <g>
-      <rect x="${startX}" y="${y}" width="${labelWidth}" height="150" rx="12" fill="#030303" stroke="#1B1818" stroke-width="7"/>
-      <text x="${startX + labelWidth / 2}" y="${y + 94}" text-anchor="middle" class="label-text">${escapeXml(label)}</text>
+      <rect x="${startX}" y="${y}" width="${labelWidth}" height="${labelHeight}" rx="16" fill="#030303" stroke="#1B1818" stroke-width="8"/>
+      <text x="${startX + labelWidth / 2}" y="${y + 110}" text-anchor="middle" class="label-text">${escapeXml(label)}</text>
 
-      <rect x="${startX + labelWidth + gap}" y="${y}" width="${codeWidth}" height="150" rx="12" fill="${colors.fill}"/>
-      <text x="${startX + labelWidth + gap + codeWidth / 2}" y="${y + 101}" text-anchor="middle" class="currency-text" fill="${colors.text}">${escapeXml(code)}</text>
+      <rect x="${startX + labelWidth + gap}" y="${y}" width="${codeWidth}" height="${labelHeight}" rx="16" fill="${colors.fill}"/>
+      <text x="${startX + labelWidth + gap + codeWidth / 2}" y="${y + 120}" text-anchor="middle" class="currency-text" fill="${colors.text}">${escapeXml(code)}</text>
     </g>
   `;
 }
@@ -120,41 +397,46 @@ function currencyChip({ x, y, currency, width = null, height = 150, fontSize = 7
   const code = String(currency || "").toUpperCase();
   const chipWidth = width || pillWidth(code);
   const colors = currencyColors[code] || { fill: "#E9EBED", text: "#000000" };
+  const textWidth = listingCurrencyTextWidth(code);
   return `
     <g>
-      <rect x="${x - chipWidth / 2}" y="${y}" width="${chipWidth}" height="${height}" rx="${Math.round(height * 0.12)}" fill="${colors.fill}"/>
-      <text x="${x}" y="${y + height * 0.68}" text-anchor="middle" class="currency-text" font-size="${fontSize}" fill="${colors.text}">${escapeXml(code)}</text>
+      <rect x="${x - chipWidth / 2}" y="${y}" width="${chipWidth}" height="${height}" rx="${Math.round(height * 0.09)}" fill="${colors.fill}" stroke="#030303" stroke-width="16"/>
+      ${textOutlineGroup({
+        text: code,
+        fontFile: fontFiles.camptonBlack,
+        fontSize,
+        centerX: x,
+        centerY: y + height * 0.56,
+        fill: colors.text,
+        targetWidth: textWidth,
+      })}
     </g>
   `;
 }
 
-function cardBackground() {
-  const background = assetDataUri("exchange-confirmation-bg.png");
-  if (!background) {
-    return `
-      <rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="#000"/>
-      <text x="1600" y="1294" text-anchor="middle" font-family="CamptonCard, Arial, sans-serif" font-size="1660" font-weight="900" fill="#5C6670" opacity="0.13">AKR</text>
-      <rect y="1526" width="${CARD_WIDTH}" height="22" fill="#9DFF1E"/>
-      <rect y="1562" width="${CARD_WIDTH}" height="18" fill="#FFFFFF"/>
-      <rect y="1594" width="${CARD_WIDTH}" height="18" fill="#F80000"/>
-    `;
-  }
-  return `<image href="${background}" x="0" y="0" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" preserveAspectRatio="xMidYMid slice"/>`;
+function cardBackground({ footerBand = false } = {}) {
+  return `
+    <rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="#000"/>
+    <path d="${AKR_BACKGROUND_PATH}" fill="#5C6670" fill-opacity="0.13" transform="scale(4)"/>
+    ${footerBand ? `<rect y="1280" width="${CARD_WIDTH}" height="204" fill="#0F1012"/>` : ""}
+    <rect y="1492" width="${CARD_WIDTH}" height="24" fill="#9DFF1E"/>
+    <rect y="1524" width="${CARD_WIDTH}" height="24" fill="#FFFFFF"/>
+    <rect y="1556" width="${CARD_WIDTH}" height="24" fill="#F80000"/>
+  `;
 }
 
-function akaraLogo({ x, y, size = 220, opacity = 1 }) {
+function akaraLogo({ x, y, width = 220, height = 224, opacity = 1 }) {
   const logo = assetDataUri("akara-logo-mark.png");
   if (!logo) return "";
-  return `<image href="${logo}" x="${x}" y="${y}" width="${size}" height="${size}" opacity="${opacity}" preserveAspectRatio="xMidYMid meet"/>`;
+  return `<image href="${logo}" x="${x}" y="${y}" width="${width}" height="${height}" opacity="${opacity}" preserveAspectRatio="xMidYMid meet"/>`;
 }
 
 function listingCardSvg(listing) {
   const code = displayReference(listing.listing_code, "listing");
   const haveAmount = numberText(listing.have_amount);
   const wantAmount = numberText(listing.want_amount);
-  const haveSize = amountFontSize(haveAmount);
-  const wantSize = amountFontSize(wantAmount);
   const openCode = `OPEN ${code}`;
+  const base = assetDataUri("listing-card-base.png");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -168,38 +450,34 @@ function listingCardSvg(listing) {
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCompressedHeavy', 'CoolveticaCrammedRegular', 'CoolveticaCondensedRegular', 'CoolveticaRegular'; font-weight: 900; fill: #fff; letter-spacing: -8px; }
-    .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 52px; fill: #fff; letter-spacing: 18px; }
-    .header-strong { font-weight: 900; letter-spacing: 14px; }
-    .label-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 58px; font-weight: 700; fill: #E9EBED; letter-spacing: 22px; }
-    .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-size: 78px; font-weight: 900; letter-spacing: -2px; }
-    .footer { font-family: 'CamptonCard', Arial, sans-serif; font-size: 50px; fill: #fff; letter-spacing: 10px; }
-    .footer-strong { font-weight: 900; letter-spacing: 7px; }
+    .footer-code { font-family: 'CamptonCard', Arial, sans-serif; font-size: 50px; font-weight: 900; fill: #fff; letter-spacing: 7px; }
   </style>
 
-  ${cardBackground()}
+  ${base ? `<image href="${base}" x="0" y="0" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" preserveAspectRatio="none"/>` : cardBackground({ footerBand: true })}
 
-  <text x="1600" y="178" text-anchor="middle" class="header">
-    <tspan>SWAP</tspan><tspan dx="36" class="header-strong">WITH ME ON AKARA</tspan>
-  </text>
+  ${listingAmountPath(haveAmount, { centerX: 860, topY: 464 })}
+  ${listingAmountPath(wantAmount, { centerX: 2356.5, topY: 464 })}
 
-  <text x="800" y="820" text-anchor="middle" class="amount" font-size="${haveSize}">${escapeXml(haveAmount)}</text>
-  <text x="2400" y="820" text-anchor="middle" class="amount" font-size="${wantSize}">${escapeXml(wantAmount)}</text>
+  ${textOutlineGroup({
+    text: String(listing.have_currency || "").toUpperCase(),
+    fontFile: fontFiles.camptonBlack,
+    fontSize: 94,
+    centerX: 1088,
+    centerY: 967,
+    fill: currencyColors[String(listing.have_currency || "").toUpperCase()]?.text || "#000000",
+    targetWidth: listingCurrencyTextWidth(listing.have_currency),
+  })}
+  ${textOutlineGroup({
+    text: String(listing.want_currency || "").toUpperCase(),
+    fontFile: fontFiles.camptonBlack,
+    fontSize: 94,
+    centerX: 2584,
+    centerY: 967,
+    fill: currencyColors[String(listing.want_currency || "").toUpperCase()]?.text || "#000000",
+    targetWidth: listingCurrencyTextWidth(listing.want_currency),
+  })}
 
-  <g opacity="0.92">
-    <circle cx="1515" cy="642" r="26" fill="#25292D"/>
-    <text x="1600" y="705" text-anchor="middle" font-family="CamptonCard, Arial, sans-serif" font-size="150" font-weight="900" fill="#25292D">×</text>
-    <circle cx="1685" cy="642" r="26" fill="#25292D"/>
-  </g>
-
-  ${labelPill({ x: 800, y: 920, label: "I HAVE:", currency: listing.have_currency })}
-  ${labelPill({ x: 2400, y: 920, label: "I NEED:", currency: listing.want_currency })}
-  ${akaraLogo({ x: 1490, y: 852, size: 220, opacity: 0.96 })}
-
-  <rect y="1312" width="${CARD_WIDTH}" height="203" fill="#0F1012"/>
-  <text x="1600" y="1432" text-anchor="middle" class="footer">
-    <tspan>INTERESTED?</tspan><tspan dx="26" class="footer-strong">PASTE THIS CODE</tspan><tspan dx="26">ON</tspan><tspan dx="26" class="footer-strong">AKARA</tspan><tspan dx="26">TO SWAP:</tspan><tspan dx="26" class="footer-strong">${escapeXml(openCode)}</tspan>
-  </text>
+  <text x="2220" y="1396" class="footer-code">${escapeXml(openCode)}</text>
 </svg>`;
 }
 
@@ -223,10 +501,36 @@ function timeLabel(date) {
   return `${hour} : ${minute} ${dayPeriod.toUpperCase()} - ${weekday.toUpperCase()}`;
 }
 
+function timeLabelParts(date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    weekday: "long",
+  }).formatToParts(date);
+  const hour = parts.find((part) => part.type === "hour")?.value || "00";
+  const minute = parts.find((part) => part.type === "minute")?.value || "00";
+  const dayPeriod = parts.find((part) => part.type === "dayPeriod")?.value || "AM";
+  const weekday = parts.find((part) => part.type === "weekday")?.value || "Today";
+  return {
+    time: `${hour} : ${minute}`,
+    period: dayPeriod.toUpperCase(),
+    weekday: weekday.toUpperCase(),
+  };
+}
+
 function dateLabel(date) {
   const day = String(date.getDate()).padStart(2, "0");
   const month = new Intl.DateTimeFormat("en-US", { month: "short" }).format(date).toUpperCase();
   return `${day} - ${month} - ${date.getFullYear()}`;
+}
+
+function dateLabelParts(date) {
+  return {
+    day: String(date.getDate()).padStart(2, "0"),
+    month: new Intl.DateTimeFormat("en-US", { month: "short" }).format(date).toUpperCase(),
+    year: String(date.getFullYear()),
+  };
 }
 
 function exchangeCompletionSvg(deal, role) {
@@ -234,8 +538,14 @@ function exchangeCompletionSvg(deal, role) {
   const { youSend, youReceive } = dealPartySummary(role, deal);
   const completedAt = compactDay(deal.completed_at || new Date());
   const receiveAmount = numberText(youReceive.amount);
-  const receiveSize = completionAmountFontSize(receiveAmount);
   const stamp = assetDataUri("success-stamp.png");
+  const amountLayout = completionAmountLayout(receiveAmount);
+  const chipX = completionCurrencyChipX(amountLayout.bounds);
+  const timeParts = timeLabelParts(completedAt);
+  const dateParts = dateLabelParts(completedAt);
+  const lowerLine1Y = 1280;
+  const lowerLine2Y = lowerLine1Y + RECEIPT_LINE_HEIGHT;
+  const lowerLine3Y = lowerLine2Y + RECEIPT_LINE_HEIGHT;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -249,44 +559,54 @@ function exchangeCompletionSvg(deal, role) {
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCompressedHeavy', 'CoolveticaCrammedRegular', 'CoolveticaCondensedRegular', 'CoolveticaRegular'; font-weight: 900; fill: #fff; letter-spacing: -10px; }
     .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 54px; fill: #fff; letter-spacing: 18px; }
     .header-strong { font-weight: 900; letter-spacing: 12px; }
-    .meta { font-family: 'CamptonCard', Arial, sans-serif; font-size: 46px; fill: #fff; letter-spacing: 8px; }
-    .meta-strong { font-weight: 900; letter-spacing: 4px; }
-    .meta-number { font-family: 'CoolveticaCompressedHeavy', 'CoolveticaCrammedRegular', 'CoolveticaCondensedRegular', 'CoolveticaRegular'; font-weight: 900; letter-spacing: -1px; }
-    .site { font-family: 'CamptonCard', Arial, sans-serif; font-size: 80px; fill: #fff; font-weight: 900; letter-spacing: 5px; }
-    .currency-text { font-family: 'CamptonCard', Arial, sans-serif; font-weight: 900; letter-spacing: -2px; }
+    .receipt-meta { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_META_FONT_SIZE}px; fill: #fff; font-weight: 400; letter-spacing: ${RECEIPT_TEXT_TRACKING}px; text-transform: uppercase; }
+    .receipt-strong { font-weight: 700; }
+    .receipt-caption { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_CAPTION_FONT_SIZE}px; fill: #fff; font-weight: 400; letter-spacing: ${RECEIPT_TEXT_TRACKING}px; text-transform: uppercase; }
+    .receipt-site { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_SITE_FONT_SIZE}px; fill: #fff; font-weight: 600; letter-spacing: ${RECEIPT_TEXT_TRACKING}px; text-transform: uppercase; }
   </style>
 
   ${cardBackground()}
-  ${akaraLogo({ x: 510, y: 60, size: 220, opacity: 0.96 })}
+  ${akaraLogo({ x: 514, y: 58, width: 220, height: 224, opacity: 0.96 })}
 
-  <text x="1600" y="178" text-anchor="middle" class="header">
+  <text x="1600" y="172" text-anchor="middle" class="header">
     <tspan>EXCHANGE</tspan><tspan dx="34" class="header-strong">COMPLETED</tspan>
   </text>
 
-  <text x="1600" y="1054" text-anchor="middle" class="amount" font-size="${receiveSize}">${escapeXml(receiveAmount)}</text>
-  ${currencyChip({ x: 690, y: 632, currency: youReceive.currency, width: 340, height: 170, fontSize: 88 })}
-  ${stamp ? `<image href="${stamp}" x="2320" y="220" width="600" height="600" opacity="0.9"/>` : ""}
+  ${amountLayout.svg}
+  ${currencyChip({ x: chipX, y: 616, currency: youReceive.currency, width: 344, height: 176, fontSize: 92 })}
+  ${completionStampImage(stamp, amountLayout.bounds)}
 
-  <text x="565" y="1320" class="meta">EXCHANGED</text>
-  <text x="565" y="1378" class="meta">
-    <tspan class="meta-number">${escapeXml(numberText(youSend.amount))}</tspan><tspan dx="14" class="meta-strong">${escapeXml(String(youSend.currency || "").toUpperCase())}</tspan>
+  <text x="565" y="${lowerLine1Y}" class="receipt-meta">EXCHANGED</text>
+  <text x="565" y="${lowerLine2Y}" class="receipt-meta">
+    <tspan class="receipt-strong">${escapeXml(numberText(youSend.amount))}</tspan><tspan dx="24" class="receipt-strong">${escapeXml(String(youSend.currency || "").toUpperCase())}</tspan>
   </text>
-  <text x="565" y="1438" class="meta">
-    <tspan>FOR</tspan><tspan dx="18" class="meta-number">${escapeXml(numberText(youReceive.amount))}</tspan><tspan dx="14" class="meta-strong">${escapeXml(String(youReceive.currency || "").toUpperCase())}</tspan>
+  <text x="565" y="${lowerLine3Y}" class="receipt-meta">
+    <tspan>FOR</tspan><tspan dx="24" class="receipt-strong">${escapeXml(numberText(youReceive.amount))}</tspan><tspan dx="24" class="receipt-strong">${escapeXml(String(youReceive.currency || "").toUpperCase())}</tspan>
   </text>
 
-  <text x="1470" y="1320" text-anchor="middle" class="meta">${escapeXml(timeLabel(completedAt))}</text>
-  <text x="1470" y="1438" text-anchor="middle" class="meta">${escapeXml(dateLabel(completedAt))}</text>
+  <text x="1195" y="${lowerLine1Y}" class="receipt-meta">
+    <tspan>${escapeXml(timeParts.time)}</tspan><tspan dx="24" class="receipt-strong">${escapeXml(timeParts.period)}</tspan><tspan dx="24">- ${escapeXml(timeParts.weekday)}</tspan>
+  </text>
+  <text x="1195" y="${lowerLine2Y}" class="receipt-meta">
+    <tspan>${escapeXml(dateParts.day)}</tspan><tspan dx="24">-</tspan><tspan dx="24" class="receipt-strong">${escapeXml(dateParts.month)}</tspan><tspan dx="24">- ${escapeXml(dateParts.year)}</tspan>
+  </text>
 
-  <text x="2280" y="1320" class="meta">READY TO SWAP? VISIT AKARA</text>
-  <text x="2280" y="1438" class="site">TRYAKARA.COM</text>
+  <text x="1996" y="${lowerLine1Y}" class="receipt-caption">READY TO SWAP? VISIT AKARA</text>
+  <text x="1996" y="${lowerLine1Y + RECEIPT_CAPTION_FONT_SIZE + 15 * CARD_SCALE}" class="receipt-site">TRYAKARA.COM</text>
 </svg>`;
 }
 
 function verificationSuccessSvg() {
+  const template = svgAsset("verification-success-template.svg");
+  if (template) {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <image href="${template}" x="0" y="0" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" preserveAspectRatio="none"/>
+</svg>`;
+  }
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
   <style>
