@@ -155,12 +155,56 @@ function seedListing(owner, values) {
     want_currency: values.want_currency,
     have_amount: values.have_amount,
     want_amount: values.want_amount,
-    listing_type: "fixed",
+    listing_type: values.listing_type || "fixed",
     status: "active",
     created_at: new Date().toISOString(),
   };
   __table("listings").push(listing);
   return listing;
+}
+
+function seedCompletedDeal(maker, taker, values = {}) {
+  const now = new Date().toISOString();
+  const listing = seedListing(maker, {
+    code: values.listing_code || `AKR-LIST-${crypto.randomUUID().slice(0, 4)}`,
+    have_currency: values.have_currency || "NGN",
+    have_amount: values.have_amount || 1000,
+    want_currency: values.want_currency || "RWF",
+    want_amount: values.want_amount || 1200,
+  });
+  listing.status = "reserved";
+  const deal = {
+    id: crypto.randomUUID(),
+    deal_code: values.deal_code || `AKR-TXN-${crypto.randomUUID().slice(0, 4)}`,
+    listing_id: listing.id,
+    maker_user_id: maker.id,
+    taker_user_id: taker.id,
+    have_currency: listing.have_currency,
+    want_currency: listing.want_currency,
+    have_amount: listing.have_amount,
+    want_amount: listing.want_amount,
+    status: "closed",
+    maker_sent_at: now,
+    taker_sent_at: now,
+    maker_received_at: now,
+    taker_received_at: now,
+    completed_at: now,
+    reservation_expires_at: now,
+    created_at: now,
+  };
+  __table("deals").push(deal);
+  return deal;
+}
+
+function removeSeededDeals(deals) {
+  const dealIds = new Set(deals.map((deal) => deal.id));
+  const listingIds = new Set(deals.map((deal) => deal.listing_id));
+  for (const deal of [...__table("deals")]) {
+    if (dealIds.has(deal.id)) __table("deals").splice(__table("deals").indexOf(deal), 1);
+  }
+  for (const listing of [...__table("listings")]) {
+    if (listingIds.has(listing.id)) __table("listings").splice(__table("listings").indexOf(listing), 1);
+  }
 }
 
 // ---------------------------------------------------------------- tests
@@ -170,6 +214,7 @@ async function run() {
 
   const ALICE = "250700000001";
   const BOB = "250700000002";
+  const CHARLIE = "250700000003";
 
   // ---------- intent regex units
   scenario("intent regex units");
@@ -219,6 +264,12 @@ async function run() {
   // the remaining steps are approved directly in the fake DB.
   const aliceRow = __table("users").find((row) => row.whatsapp_phone === ALICE);
   Object.assign(aliceRow, { verification_status: "verified_manual", verification_score: 90, completed_deals_count: 3 });
+  const profileCounterparty = seedVerifiedUser("250700000099", "Counter Party");
+  const completedProfileDeals = [
+    seedCompletedDeal(aliceRow, profileCounterparty, { deal_code: "AKR-TXN-P01" }),
+    seedCompletedDeal(profileCounterparty, aliceRow, { deal_code: "AKR-TXN-P02" }),
+    seedCompletedDeal(aliceRow, profileCounterparty, { deal_code: "AKR-TXN-P03" }),
+  ];
   await send(ALICE, "cancel");
   seedPayout(aliceRow, "NGN");
   seedPayout(aliceRow, "RWF");
@@ -231,8 +282,10 @@ async function run() {
   reply = await send(ALICE, "profile");
   check("profile view title", reply.includes("*Your profile*"), reply);
   check("profile shows completed trades", reply.includes("Completed trades"), reply);
+  check("profile counts completed deals from records", reply.includes("*Completed trades:* 3"), reply);
   check("profile has no bank numbers", !reply.includes("0123456789"), reply);
   check("profile has no payout list", !reply.includes("*Payouts*"), reply);
+  removeSeededDeals(completedProfileDeals);
 
   reply = await send(ALICE, "bank details");
   check("payouts view title", reply.includes("Bank & payout details"), reply);
@@ -365,6 +418,33 @@ async function run() {
 
   reply = await send(ALICE, "close dispute");
   check("opener can withdraw dispute", reply.includes("Dispute withdrawn"), reply);
+
+  // ---------- flexible listing negotiation
+  scenario("flexible listing negotiation");
+  const charlieRow = seedVerifiedUser(CHARLIE, "Charlie Owner");
+  seedPayout(charlieRow, "NGN");
+  seedPayout(charlieRow, "RWF");
+  seedListing(charlieRow, {
+    code: "AKR-LIST-091",
+    have_currency: "NGN",
+    have_amount: 100000,
+    want_currency: "RWF",
+    want_amount: 115000,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(ALICE, "open AKR-LIST-091");
+  check("flexible listing starts negotiation", reply.includes("*Flexible listing*"), reply);
+  check("flexible listing does not instantly reserve", (await sessionFlow(ALICE)) === "negotiation", reply);
+
+  reply = await send(ALICE, "offer 105000 rwf");
+  check("proposal is sent", reply.includes("*Proposal sent*") && reply.includes("105,000 RWF"), reply);
+  check("owner receives negotiation session", (await sessionFlow(CHARLIE)) === "negotiation");
+
+  reply = await send(CHARLIE, "accept");
+  check("owner acceptance opens trade", reply.includes("Akara Trade opened ✅"), reply);
+  const negotiatedDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-091")?.id);
+  check("negotiated amount becomes deal amount", Number(negotiatedDeal?.want_amount) === 105000, JSON.stringify(negotiatedDeal));
 
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");

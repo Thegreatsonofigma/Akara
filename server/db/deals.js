@@ -44,6 +44,40 @@ async function getLatestOpenDealForUser(userId) {
   return null;
 }
 
+async function getCompletedTradeCount(userId) {
+  const [makerRows, takerRows] = await Promise.all([
+    supabaseRequest(
+      [
+        "deals?select=id,status,completed_at,maker_received_at,taker_received_at",
+        `maker_user_id=eq.${filterValue(userId)}`,
+        "limit=1000",
+      ].join("&")
+    ),
+    supabaseRequest(
+      [
+        "deals?select=id,status,completed_at,maker_received_at,taker_received_at",
+        `taker_user_id=eq.${filterValue(userId)}`,
+        "limit=1000",
+      ].join("&")
+    ),
+  ]);
+
+  const completed = new Map();
+  for (const deal of [...makerRows, ...takerRows]) {
+    if (isCompletedDeal(deal)) completed.set(deal.id, true);
+  }
+  return completed.size;
+}
+
+async function syncCompletedDealsCount(userId) {
+  const count = await getCompletedTradeCount(userId);
+  await supabaseRequest(`users?id=eq.${filterValue(userId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ completed_deals_count: count }),
+  });
+  return count;
+}
+
 function userRoleInDeal(user, deal) {
   if (deal.maker_user_id === user.id) return "maker";
   if (deal.taker_user_id === user.id) return "taker";
@@ -197,6 +231,8 @@ module.exports = {
   getDealById,
   getDealByCodeForUser,
   getLatestOpenDealForUser,
+  getCompletedTradeCount,
+  syncCompletedDealsCount,
   userRoleInDeal,
   isCompletedDeal,
   expireDealIfElapsed,
