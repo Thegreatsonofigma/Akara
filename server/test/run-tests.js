@@ -49,6 +49,8 @@ const { findOrCreateUser } = require("../db/users");
 const { getSession } = require("../db/sessions");
 const intents = require("../nlp/intents");
 const { clearHistory } = require("../nlp/history");
+const { config } = require("../config");
+const { findNigerianBanks } = require("../lib/coinprofile");
 
 const { __table, __reset } = fakeSupabase;
 
@@ -273,9 +275,15 @@ async function run() {
   reply = await send(ALICE, "hi, I want to convert 16,728 naira for 18,500 RWF. Is there any available offer that is within around this rate?", {
     interpret: { action: "find_offer", have_currency: "NGN", have_amount: 16728, want_currency: "RWF", want_amount: 18500 },
   });
-  check("rate-shaped request prepares listing when no offer fits", reply.includes("*Review listing*"), reply);
-  check("rate-shaped request keeps extracted send amount", reply.includes("16,728 NGN"), reply);
-  check("rate-shaped request keeps extracted receive amount", reply.includes("18,500 RWF"), reply);
+  check("rate-shaped request offers to list when no offer fits", reply.includes("*No current offer*"), reply);
+  check("no-match offer keeps extracted send amount", reply.includes("16,728 NGN"), reply);
+  check("no-match offer keeps extracted receive amount", reply.includes("18,500 RWF"), reply);
+  check("no-match offer waits for confirmation", (await sessionFlow(ALICE)) === "find_offer");
+
+  reply = await send(ALICE, "yes", { interpret: { action: "flow_reply" } });
+  check("yes after no-match opens prefilled review", reply.includes("*Review listing*"), reply);
+  check("prefilled review keeps send amount", reply.includes("16,728 NGN"), reply);
+  check("prefilled review keeps receive amount", reply.includes("18,500 RWF"), reply);
 
   reply = await send(ALICE, "edit", { interpret: { action: "settings_action" } });
   check("review edit stays in listing flow", reply.includes("*Edit listing*") && reply.includes("What currency do you have?"), reply);
@@ -336,7 +344,7 @@ async function run() {
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");
   reply = await send(ALICE, "make offer");
-  check("make offer opens flow", reply.includes("Make an offer in one line"), reply);
+  check("make offer opens flow", reply.includes("Tell me what currency you have"), reply);
   check("create flow active", (await sessionFlow(ALICE)) === "create_listing");
 
   reply = await send(ALICE, "show my bank details", { interpret: { action: "view_payouts" } });
@@ -388,7 +396,7 @@ async function run() {
   // ---------- guided find flow with deterministic escape
   scenario("guided find flow");
   reply = await send(ALICE, "find offers");
-  check("find opens flow", reply.includes("Tell me what you need"), reply);
+  check("find opens flow", reply.includes("Tell me what currency you need"), reply);
 
   reply = await send(ALICE, "rwf");
   check("asks for have currency once", reply.includes("What currency do you have?"), reply);
@@ -451,8 +459,136 @@ async function run() {
   reply = await send(ALICE, "open the offer", { interpret: { action: "reserve_listing" } });
   check("reserve without code is guided", reply.includes("Which offer?"), reply);
 
+  // ---------- demand-seeking question → search first, list only on yes
+  scenario("demand-seeking search");
+  reply = await send(ALICE, "who needs naira? 50k for 54k rwf?", {
+    interpret: { action: "find_offer", have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 54000 },
+  });
+  check("demand question searches instead of listing", !reply.includes("*Review listing*"), reply);
+  check("no-match search offers to list", reply.includes("*No current offer*"), reply);
+  check("offer prompt carries both sides", reply.includes("50,000 NGN") && reply.includes("54,000 RWF"), reply);
+  check("offer prompt awaits confirmation", (await sessionFlow(ALICE)) === "find_offer");
+
+  reply = await send(ALICE, "yes", { interpret: { action: "flow_reply" } });
+  check("yes opens prefilled listing review", reply.includes("*Review listing*"), reply);
+  check("prefill keeps send side", reply.includes("50,000 NGN"), reply);
+  check("prefill keeps receive side", reply.includes("54,000 RWF"), reply);
+  check("confirmation enters create flow", (await sessionFlow(ALICE)) === "create_listing");
+  await send(ALICE, "cancel");
+
+  // even when the model mislabels the demand question as create_listing,
+  // the router searches first instead of opening the create flow
+  reply = await send(ALICE, "who needs naira? 50k for 54k rwf?", {
+    interpret: { action: "create_listing", have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 54000 },
+  });
+  check("create_listing misfire still searches first", reply.includes("*No current offer*") && !reply.includes("*Review listing*"), reply);
+
+  reply = await send(ALICE, "no thanks", { interpret: { action: "flow_reply" } });
+  check("decline closes the search", reply.includes("No problem"), reply);
+  check("decline never opens listing flow", (await sessionFlow(ALICE)) === null);
+
+  // with a live counterparty listing, the same question shows matches
+  seedListing(bobRow, { code: "AKR-LIST-300", have_currency: "RWF", have_amount: 60000, want_currency: "NGN", want_amount: 56000 });
+  reply = await send(ALICE, "who needs naira? 50k for 54k rwf?", {
+    interpret: { action: "find_offer", have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 54000 },
+  });
+  check("demand question shows live matches", reply.includes("AKR-LIST-300"), reply);
+  check("matches enter search results", (await sessionFlow(ALICE)) === "search_results");
+  await send(ALICE, "cancel");
+
+  // ---------- fresh-session edit request goes straight to the edit handler
+  scenario("fresh edit request");
+  const editListing = seedListing(aliceRow, { code: "AKR-LIST-888", have_currency: "NGN", have_amount: 20000, want_currency: "RWF", want_amount: 22000 });
+  reply = await send(ALICE, "i want to edit my listing", { interpret: { action: "settings_action" } });
+  check("fresh edit skips review screen", !reply.includes("*Review listing*"), reply);
+  check("fresh edit opens the edit handler", reply.includes("*Edit listing*") && reply.includes("What currency do you have?"), reply);
+  check("fresh edit pauses the listing", __table("listings").find((row) => row.id === editListing.id)?.status === "paused", reply);
+  check("fresh edit enters create flow", (await sessionFlow(ALICE)) === "create_listing");
+
+  reply = await send(ALICE, "ngn");
+  reply = await send(ALICE, "rwf");
+  reply = await send(ALICE, "25000");
+  reply = await send(ALICE, "70000");
+  reply = await send(ALICE, "fixed");
+  check("edited draft re-previews", reply.includes("*Review listing*") && reply.includes("25,000 NGN"), reply);
+
+  reply = await send(ALICE, "publish");
+  check("publish updates the existing listing", reply.includes("Listing updated ✅"), reply);
+  check("edited listing keeps its identity", __table("listings").find((row) => row.id === editListing.id)?.status === "active", reply);
+  check("edited listing carries new amount", Number(__table("listings").find((row) => row.id === editListing.id)?.have_amount) === 25000, reply);
+
+  // ---------- NGN payout edit with CoinProfile resolution (faked over fetch)
+  scenario("payout resolution");
+  const CHIDI = "250700000003";
+  const chidiRow = seedVerifiedUser(CHIDI, "Chidi Payout Okoro");
+  seedPayout(chidiRow, "NGN");
+
+  const resolveCalls = [];
+  const realFetch = global.fetch;
+  Object.assign(config, {
+    coinProfileApiUrl: "https://coinprofile.test/v1",
+    coinProfileApiKey: "test-key",
+    coinProfileUsername: "test-user",
+  });
+  // CoinProfile fake: the resolve payload mirrors production, where the
+  // nested data.data object is the BANK record (its `name` is the bank) and
+  // the account holder's name arrives as the outer accountName.
+  global.fetch = async (url, options = {}) => {
+    const pathname = new URL(url).pathname;
+    const respond = (payload) => ({ ok: true, status: 200, text: async () => JSON.stringify(payload) });
+    if (pathname.endsWith("/bank/supported")) {
+      return respond({
+        success: true,
+        data: [
+          { Name: "Guaranty Trust Bank", Code: "058" },
+          { Name: "Paycom", Code: "305" },
+          { Name: "Opay", Code: "999" },
+        ],
+      });
+    }
+    if (pathname.endsWith("/bank/resolve")) {
+      const requestBody = JSON.parse(options.body);
+      resolveCalls.push(requestBody);
+      return respond({
+        success: true,
+        data: {
+          accountName: "OKORO CHIDI PAYOUT",
+          data: { name: requestBody.bankCode === "305" ? "Paycom" : "Guaranty Trust Bank", code: requestBody.bankCode },
+        },
+      });
+    }
+    throw new Error(`unexpected CoinProfile fetch: ${url}`);
+  };
+
+  try {
+    const opayMatches = await findNigerianBanks("Opay Bank");
+    check("opay bank matches CoinProfile's Paycom entry", opayMatches.length === 1 && opayMatches[0].code === "305", JSON.stringify(opayMatches));
+    check("opay match displays as Opay", opayMatches[0]?.name === "Opay", JSON.stringify(opayMatches));
+
+    reply = await send(CHIDI, "bank details");
+    reply = await send(CHIDI, "edit payout 1");
+    check("payout edit menu opens", reply.includes("Edit NGN payout"), reply);
+
+    reply = await send(CHIDI, "bank");
+    reply = await send(CHIDI, "opay");
+    check("opay resolves against paycom's bank code", resolveCalls.length === 1 && resolveCalls[0]?.bankCode === "305", JSON.stringify(resolveCalls));
+    check("review bank line shows Opay, never Paycom", reply.includes("*Bank:* Opay") && !reply.includes("Paycom"), reply);
+    check("review name line shows the resolved holder", reply.includes("*Name:* OKORO CHIDI PAYOUT"), reply);
+    check("review confirms the bank check", reply.includes("Account name confirmed by the bank"), reply);
+
+    reply = await send(CHIDI, "save payout");
+    check("resolved payout saves", reply.includes("Payout detail saved ✅"), reply);
+    const chidiPayout = __table("payment_profiles").find((row) => row.user_id === chidiRow.id && row.currency === "NGN");
+    check("saved payout keeps Opay as the bank", chidiPayout?.bank_name === "Opay", JSON.stringify(chidiPayout));
+    check("saved payout keeps the resolved holder name", chidiPayout?.account_name === "OKORO CHIDI PAYOUT", JSON.stringify(chidiPayout));
+  } finally {
+    global.fetch = realFetch;
+    Object.assign(config, { coinProfileApiUrl: "", coinProfileApiKey: "", coinProfileUsername: "" });
+  }
+
   clearHistory(ALICE);
   clearHistory(BOB);
+  clearHistory(CHIDI);
 }
 
 run()

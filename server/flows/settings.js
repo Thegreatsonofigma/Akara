@@ -22,7 +22,7 @@ const {
   paymentEditMenuPrompt,
   paymentContextFromProfile,
 } = require("./payment-profile");
-const { prepareListingPreview } = require("./listing");
+const { startListingEdit } = require("./listing");
 
 function parseNumberedAction(text, actionWords, nounWords) {
   const value = compactText(text);
@@ -74,7 +74,7 @@ async function viewProfileReply(user) {
     `${action("bank details")} for your payout information`,
     `${action("my listings")} for your posted offers`,
     `${action("history")} for your transactions`,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 // Scoped view: only the saved bank / mobile money details, with the numbered
@@ -384,12 +384,9 @@ async function handleSettings(text, user, session) {
       body: JSON.stringify({ status: "paused" }),
     });
 
-    return prepareListingPreview(user, {
-      have_currency: existing.have_currency,
-      want_currency: existing.want_currency,
-      have_amount: existing.have_amount,
-      want_amount: existing.want_amount,
-      listing_type: existing.listing_type || "fixed",
+    // Straight to the edit conversation: the user already asked to edit, so
+    // the pre-publish review screen ("edit to change it") would be a detour.
+    return startListingEdit(user, {
       listing_code: existing.listing_code,
       editing_listing_id: existing.id,
       previous_listing_status: existing.status,

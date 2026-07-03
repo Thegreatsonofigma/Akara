@@ -23,6 +23,7 @@ const {
   isConfirmationNo,
   isAssistantQuestion,
   isRateQuestion,
+  isDemandSeekingQuestion,
   isBrowseAllOffersIntent,
   isListingPublishIntent,
   isEditIntent,
@@ -72,7 +73,7 @@ function accountOnHoldReply(user) {
 
 function makeOfferPrompt() {
   return [
-      "Tell me what you have.",
+      "Tell me what currency you have.",
       "",
       currencyHelpLine(),
       "",
@@ -82,7 +83,7 @@ function makeOfferPrompt() {
 
 function findOfferPrompt() {
   return [
-    "Tell me what you need.",
+    "Tell me what currency you need.",
     "",
     "Example:",
     "I have 55k RWF and need naira",
@@ -325,6 +326,17 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     && session.current_step === "confirm"
     && isListingPublishIntent(text);
 
+  // "Who needs naira? 50k for 54k rwf" hunts for a counterparty for money the
+  // user already holds. It reads like a listing (and the model sometimes
+  // labels it create_listing), but it is a search: show live matches first,
+  // and let the no-match path offer to create the listing instead of opening
+  // the create flow straight away.
+  if (isDemandSeekingQuestion(text) && freshDirectional && !confirmingDraft) {
+    if (isOnHold(user)) return accountOnHoldReply(user);
+    await clearSession(user, user.whatsapp_phone);
+    return continueSearchOrShowMatches(user, freshListingDetails);
+  }
+
   if (session?.current_flow === "create_listing" && hasFreshCompleteListing && freshDirectional && !confirmingDraft) {
     if (isOnHold(user)) return accountOnHoldReply(user);
     await clearSession(user, user.whatsapp_phone);
@@ -509,7 +521,8 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   // Loose intent words like "trades" and "get" appear in ordinary questions,
   // so a question-shaped message is answered before the intent fallbacks can
   // hijack it into a flow prompt.
-  if (["question", "unknown", "flow_reply"].includes(interpretedAction) && isAssistantQuestion(text)) {
+  if (["question", "unknown", "flow_reply"].includes(interpretedAction) && isAssistantQuestion(text)
+      && !isDemandSeekingQuestion(text)) {
     return scopedAssistantReply(text, user);
   }
 
