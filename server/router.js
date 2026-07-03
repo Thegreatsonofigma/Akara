@@ -1,4 +1,4 @@
-const { title, caption, action } = require("./lib/format");
+const { title, caption, action, applyInterpretedAnswer } = require("./lib/format");
 const { normalizeCurrency, parsePaymentCurrency, parseCurrencyAmountPairs } = require("./nlp/currency");
 const {
   parseListingDetails,
@@ -603,6 +603,20 @@ async function routeMessage(text, user, session, incoming = {}) {
       })) || { action: "unknown", details: {}, answer: "" };
   console.log({ interpreted });
 
+  const reply = await routeInterpreted(interpreted, text, user, session, incoming);
+
+  // The interpreter writes a short answer describing what the user asked for;
+  // it becomes the reply's caption (or head text) so every message opens with
+  // language fitted to the conversation. Question/unknown answers are already
+  // full replies on their own, so they are never woven into another reply.
+  // An unverified user's fresh request is answered by the verification gate,
+  // so an acknowledgement of the request would contradict the reply.
+  const skipAnswer = ANSWER_ACTIONS.has(interpreted.action)
+    || (!isVerified(user) && isFreshRequestAction(interpreted.action));
+  return skipAnswer ? reply : applyInterpretedAnswer(reply, interpreted.answer);
+}
+
+async function routeInterpreted(interpreted, text, user, session, incoming = {}) {
   // Verification collects answers to direct prompts (names, ID photos), so
   // replies stay in the flow — but a question still gets a real answer, and a
   // clear outside request is explained instead of being saved as an answer

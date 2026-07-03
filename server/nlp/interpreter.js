@@ -111,9 +111,9 @@ const SYSTEM_PROMPT = [
   "Users may write in Nigerian Pidgin or casual slang.",
   "When the newest message omits a currency or amount that the transcript clearly establishes (\"make it 20k instead\"), fill the missing slots from the transcript.",
   "",
-  "Only write answer for actions question and unknown: a short, friendly WhatsApp answer (under 100 words) about Akara only. Use the transcript so the answer fits the conversation.",
+  "Always write answer. For question and unknown: a short, friendly WhatsApp answer (under 100 words) about Akara only. Use the transcript so the answer fits the conversation.",
+  "For every other action: one short, friendly sentence (under 15 words) that acknowledges what the user asked for, for example \"Here's your transaction history.\" for my_deals. The app builds the functional reply itself and shows your sentence as its heading or caption, so acknowledge the request only — never promise specific results, quote data, list options, or give instructions, and never contradict what the app might report (it may find nothing).",
   "Never invent exchange rates, fees, or features. If asked for a live rate, say rates on Akara are peer-set and suggest checking current offers.",
-  "For every other action answer must be null. The app sends its own reply for those actions, including flow_reply — do not greet the user or narrate the flow.",
 ].join("\n");
 
 function cleanAmount(value) {
