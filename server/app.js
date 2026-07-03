@@ -2,7 +2,13 @@ const http = require("node:http");
 const { URL } = require("node:url");
 const { config, setRuntimePublicUrl } = require("./config");
 const { jsonResponse, textResponse, readJsonBody, serveFile } = require("./lib/http");
-const { extractMessages, sendWhatsAppText, sendWhatsAppTyping, getOutboundTextByMessageId } = require("./lib/whatsapp");
+const {
+  extractMessages,
+  sendWhatsAppText,
+  sendWhatsAppList,
+  sendWhatsAppTyping,
+  getOutboundTextByMessageId,
+} = require("./lib/whatsapp");
 const { handleReceiptRedirect } = require("./lib/receipts");
 const { handleListingCardRoute } = require("./lib/listing-card");
 const { findOrCreateUser } = require("./db/users");
@@ -12,6 +18,62 @@ const { handleAdminApi, adminFilePath } = require("./admin");
 const { supabaseRequest, filterValue } = require("./lib/supabase");
 
 const activeInboundMessageIds = new Set();
+
+function isMainMenuReply(reply = "") {
+  return String(reply || "").trim().startsWith("*Akara menu*");
+}
+
+function splitReplyWithMainMenu(reply = "") {
+  const text = String(reply || "");
+  const menuIndex = text.indexOf("*Akara menu*");
+  if (menuIndex <= 0) return null;
+  return {
+    intro: text.slice(0, menuIndex).trim(),
+    menu: text.slice(menuIndex).trim(),
+  };
+}
+
+function mainMenuListPayload() {
+  return {
+    body: "Choose what you want to do next on Akara.",
+    button: "Click to Select",
+    sections: [
+      {
+        title: "Akara actions",
+        rows: [
+          { id: "make_offer", title: "make offer", description: "Create a rate listing people can take." },
+          { id: "find_offers", title: "find offers", description: "Browse available currency offers." },
+          { id: "my_listings", title: "my listings", description: "Manage your live listings." },
+          { id: "history", title: "history", description: "See your past and active trades." },
+          { id: "profile", title: "profile", description: "Payouts, verification, and account details." },
+        ],
+      },
+    ],
+  };
+}
+
+async function sendAkaraReply(to, reply) {
+  if (!reply) return null;
+  const splitMenu = splitReplyWithMainMenu(reply);
+  if (splitMenu) {
+    if (splitMenu.intro) await sendWhatsAppText(to, splitMenu.intro);
+    try {
+      return await sendWhatsAppList(to, mainMenuListPayload());
+    } catch (error) {
+      console.error(`[webhook] menu list failed for ${to}: ${error.message}`);
+      return sendWhatsAppText(to, splitMenu.menu);
+    }
+  }
+
+  if (isMainMenuReply(reply)) {
+    try {
+      return await sendWhatsAppList(to, mainMenuListPayload());
+    } catch (error) {
+      console.error(`[webhook] menu list failed for ${to}: ${error.message}`);
+    }
+  }
+  return sendWhatsAppText(to, reply);
+}
 
 async function isInboundMessageProcessed(messageId) {
   if (!messageId) return false;
@@ -87,9 +149,7 @@ async function handleWebhookPost(req, res) {
       }
       const session = await getSession(incoming.from);
       const reply = await buildReply(incoming.text, user, session, incoming);
-      if (reply) {
-        await sendWhatsAppText(incoming.from, reply);
-      }
+      await sendAkaraReply(incoming.from, reply);
       await markInboundMessageProcessed(incoming).catch((error) => {
         console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
       });

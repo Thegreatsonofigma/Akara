@@ -136,13 +136,19 @@ async function resolveBankAccount(accountNumber, bankCode) {
   // `name` when it sits beside the account number, so a bank name can never
   // be mistaken for the account holder.
 
-  const info = body?.data?.data || body?.data || null;
-  if (!info) return null;
+  const outer = body?.data || null;
+  const info = outer?.data || outer || null;
+  if (!outer && !info) return null;
 
-  const accountName = info.accountname || info.accountName || info.name || "";
+  const accountName =
+    outer?.accountName
+    || outer?.accountname
+    || info?.accountName
+    || info?.accountname
+    || "";
   return {
     account_name: accountName,
-    account_number: info.accountnumber || info.accountNumber || String(accountNumber),
+    account_number: info?.accountnumber || info?.accountNumber || outer?.accountnumber || outer?.accountNumber || String(accountNumber),
   };
 }
 

@@ -185,7 +185,7 @@ function accountNamePrompt(user, context = {}) {
       "",
       title("Quick option"),
       `${action("1")} ${verifiedName}`,
-      `${action("different name")} if it is not the same`,
+      `${action("different name")} if the account uses another name`,
     );
   }
 
@@ -195,7 +195,7 @@ function accountNamePrompt(user, context = {}) {
 function parseAccountNameReply(text, user, context = {}) {
   const value = compactText(text);
   const verifiedName = normalizeShortText(user?.legal_name || context.legal_name || "", 120);
-  if (verifiedName && /^(1|same|use same|use verified|verified name|my name|legal name|full name)$/.test(value)) {
+  if (verifiedName && /^(?:1|one|option 1|first|same|use same|use verified|verified name|my name|legal name|full name|use my name|my verified name)$/.test(value)) {
     return verifiedName;
   }
   if (verifiedName && /\b(different|another|not same|not the same|manual)\b/.test(value)) {
@@ -448,6 +448,10 @@ async function assessPayoutNameTrust(user, payoutName, { notifyVerificationSucce
   const kycName = freshUser.legal_name || request?.extracted_name || "";
   if (!kycName || !payoutName) return { status: "unknown", reason: "KYC name or payout name is missing." };
 
+  // Payout details alone never complete a verification: auto-verifying also
+  // requires the identity documents already collected on the request.
+  const hasIdentityEvidence = Boolean(request?.document_front_path && request?.selfie_path);
+
   const matched = namesLikelyMatch(kycName, payoutName);
   if (matched) {
     if (request?.id) {
@@ -455,13 +459,15 @@ async function assessPayoutNameTrust(user, payoutName, { notifyVerificationSucce
         method: "PATCH",
         body: JSON.stringify({
           automated_decision: "tier_1_candidate",
-          automated_reason: "Payout account name matches the submitted KYC name. Tier 1 auto-check passed, pending higher-limit review.",
+          automated_reason: "Payout account name matches the submitted KYC name. Tier 1 auto-check passed.",
         }),
       });
     }
 
-    const shouldNotifySuccess = notifyVerificationSuccess && ["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status);
-    if (["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status)) {
+    const canAutoVerify = hasIdentityEvidence
+      && ["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status);
+    const shouldNotifySuccess = notifyVerificationSuccess && canAutoVerify;
+    if (canAutoVerify) {
       await updateUser(user.id, {
         verification_status: "verified_auto",
         verification_score: Math.max(Number(freshUser.verification_score || 0), 65),
@@ -487,7 +493,7 @@ async function assessPayoutNameTrust(user, payoutName, { notifyVerificationSucce
     });
   }
 
-  if (["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status)) {
+  if (hasIdentityEvidence && ["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status)) {
     await updateUser(user.id, {
       verification_status: "pending_review",
       verification_score: Math.max(Number(freshUser.verification_score || 0), 45),
@@ -527,7 +533,7 @@ async function savePaymentProfile(user, context, { notifyVerificationSuccess = t
 
   if (context.payment_profile_id) {
     const rows = await supabaseRequest(
-      `payment_profiles?id=eq.${filterValue(context.payment_profile_id)}&user_id=eq.${filterValue(user.id)}`,
+      `payment_profiles?user_id=eq.${filterValue(user.id)}&currency=eq.${filterValue(currency)}`,
       {
         method: "PATCH",
         body: JSON.stringify({
@@ -540,6 +546,27 @@ async function savePaymentProfile(user, context, { notifyVerificationSuccess = t
       }
     );
     const profile = rows[0] || null;
+    await assessPayoutNameTrust(user, context.payment_account_name, { notifyVerificationSuccess }).catch((error) => {
+      console.error(`[kyc] payout name check failed for ${user.id}: ${error.message}`);
+    });
+    return profile;
+  }
+
+  const existingRows = await supabaseRequest(
+    `payment_profiles?user_id=eq.${filterValue(user.id)}&currency=eq.${filterValue(currency)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        ...body,
+        bank_name: method === "bank" ? body.bank_name : null,
+        account_number_encrypted: method === "bank" ? body.account_number_encrypted : null,
+        momo_network: method === "momo" ? body.momo_network : null,
+        momo_number_encrypted: method === "momo" ? body.momo_number_encrypted : null,
+      }),
+    }
+  );
+  if (existingRows.length) {
+    const profile = existingRows[0] || null;
     await assessPayoutNameTrust(user, context.payment_account_name, { notifyVerificationSuccess }).catch((error) => {
       console.error(`[kyc] payout name check failed for ${user.id}: ${error.message}`);
     });
@@ -573,7 +600,8 @@ async function finishPaymentProfileSave(user, flow, context) {
       "Payout detail saved ✅",
       "",
       "Add another payout method?",
-      "Reply another, or submit.",
+      `${action("another")} to add one more`,
+      `${action("submit")} to finish verification`,
     ].join("\n");
   }
 
@@ -650,7 +678,7 @@ async function handlePaymentSteps(flow, text, user, session, context, { onDeclin
       return paymentEditMenuPrompt(context);
     }
 
-    if (isDeclineIntent(command) || isCancelIntent(command)) {
+    if (isDeclineIntent(command) || isCancelIntent(command) || /^(no|nope)$/.test(command)) {
       return onDecline(context);
     }
 
@@ -812,11 +840,13 @@ async function handlePaymentProfile(text, user, session) {
 module.exports = {
   paymentMethodForCurrency,
   paymentChoicePrompt,
+  paymentStepPrompt,
   startPaymentProfileForCurrency,
   startPaymentProfileFlow,
   paymentEditMenuPrompt,
   paymentContextFromProfile,
   formatPayoutReview,
+  namesLikelyMatch,
   maybeHandlePaymentEdit,
   handlePaymentSteps,
   handlePaymentProfile,

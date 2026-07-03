@@ -39,12 +39,13 @@ const { extractListingCode, extractDealCode } = require("./db/listings");
 const { getDealByCodeForUser, getLatestOpenDealForUser } = require("./db/deals");
 const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply, explainMissingListing } = require("./messages/copy");
 const { scopedAssistantReply } = require("./messages/assistant");
-const { startVerification, handleVerification } = require("./flows/verification");
+const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
-const { prepareListingPreview, reserveListingByCode, handleCreateListing } = require("./flows/listing");
+const { prepareListingPreview, reserveListingByCode, handleCreateListing, handleNegotiation } = require("./flows/listing");
 const {
   continueSearchOrShowMatches,
   showOfferMatches,
+  showBrowseOffers,
   showBrowseOrPairMatches,
   handleFindOffer,
   handleSearchResults,
@@ -126,8 +127,8 @@ async function resolveQuotedReply(text, user, incoming = {}) {
       return makeOfferPrompt();
     }
     if (number === 2) {
-      await upsertSession(user, user.whatsapp_phone, "find_offer", "quick", {});
-      return findOfferPrompt();
+      await clearSession(user, user.whatsapp_phone);
+      return showBrowseOffers(user);
     }
     if (number === 3) return getMyListingsReply(user);
     if (number === 4) return getMyDealsReply(user);
@@ -158,6 +159,7 @@ const FLOW_COMPATIBLE_ACTIONS = {
   create_listing: new Set(["create_listing"]),
   find_offer: new Set(["find_offer"]),
   search_results: new Set(["reserve_listing", "find_offer"]),
+  negotiation: new Set(["flow_reply", "reserve_listing", "trade_action"]),
   settings: new Set(["settings_action", "add_payout"]),
   deal_room: new Set(["trade_action", "reserve_listing"]),
 };
@@ -190,6 +192,16 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
       return viewProfileReply(user);
     }
 
+    // "verify" must always be able to start or resume the flow — checked
+    // before the status intros so a user who cancelled mid-verification is
+    // never trapped on the "reply with the next detail" screen. Submitted
+    // (pending_review) and suspended profiles keep their intro instead.
+    const wantsVerify = interpretedAction === "verify" || command === "verify" || command === "verify me"
+      || command === "1" || inferIntent(text) === "verify";
+    if (wantsVerify && !["pending_review", "suspended"].includes(user.verification_status)) {
+      return startVerification(user);
+    }
+
     if (["pending_input", "pending_review", "rejected", "suspended"].includes(user.verification_status)) {
       if (interpretedAction === "question" || isAssistantQuestion(text)) return scopedAssistantReply(text, user);
       return verificationIntro(user);
@@ -197,10 +209,6 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
     if (interpretedAction === "greeting" || isGreeting(text)) {
       return verificationIntro(user);
-    }
-
-    if (command === "verify" || command === "verify me" || command === "1" || interpretedAction === "verify" || inferIntent(text) === "verify") {
-      return startVerification(user);
     }
 
     if (interpretedAction === "question" || isAssistantQuestion(text)) {
@@ -259,6 +267,17 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   const quotedReply = await resolveQuotedReply(text, user, incoming);
   if (quotedReply) return quotedReply;
+
+  if (session?.current_flow === "negotiation") {
+    return handleNegotiation(text, user, session);
+  }
+
+  if (["post", "make offer", "create listing", "create offer", "list offer"].includes(command)) {
+    if (isOnHold(user)) return accountOnHoldReply(user);
+    await clearSession(user, user.whatsapp_phone);
+    await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {});
+    return makeOfferPrompt();
+  }
 
   const listingCode = extractListingCode(text);
   if (listingCode && (interpretedAction === "reserve_listing" || /\b(reserve|take|accept|open)\b/i.test(text))) {
@@ -418,6 +437,10 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return handleSearchResults(text, user, session);
   }
 
+  if (session?.current_flow === "negotiation") {
+    return handleNegotiation(text, user, session);
+  }
+
   if (session?.current_flow === "settings") {
     if (interpretedAction === "unknown" && shouldLeaveSettingsForFreshCommand(text)) {
       await clearSession(user, user.whatsapp_phone);
@@ -552,6 +575,11 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   if (command === "find match" || command === "find offer" || command === "find offers" || command === "find money" || command === "2" || interpretedAction === "find_offer" || intent === "find_offer") {
     if (isOnHold(user)) return accountOnHoldReply(user);
 
+    if (command === "find offers" || command === "2") {
+      await clearSession(user, user.whatsapp_phone);
+      return showBrowseOffers(user);
+    }
+
     const searchDetails = mergePresentDetails(parseSearchDetails(text), interpretedExchangeDetails);
     if (searchDetails.have_currency && searchDetails.want_currency) {
       return continueSearchOrShowMatches(user, searchDetails);
@@ -606,7 +634,9 @@ async function routeMessage(text, user, session, incoming = {}) {
           title("Stopped"),
           caption("That flow is closed."),
           "",
-          "Tell Akara what you want to do next.",
+          "Choose what you want to do next.",
+          "",
+          mainMenu(),
         ].join("\n")
       : "No problem. Verification paused. Type verify when you are ready.";
   }
@@ -614,6 +644,13 @@ async function routeMessage(text, user, session, incoming = {}) {
   if (command === "demo approve") {
     await clearSession(user, user.whatsapp_phone);
     return "Demo approval is now disabled. Type verify to submit a real verification request.";
+  }
+
+  if (isVerified(user) && ["post", "make offer", "create listing", "create offer", "list offer"].includes(command)) {
+    if (isOnHold(user)) return accountOnHoldReply(user);
+    await clearSession(user, user.whatsapp_phone);
+    await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {});
+    return makeOfferPrompt();
   }
 
   // One interpretation pass for everything else: the model sees the active
@@ -636,26 +673,42 @@ async function routeMessage(text, user, session, incoming = {}) {
   // it becomes the reply's caption (or head text) so every message opens with
   // language fitted to the conversation. Question/unknown answers are already
   // full replies on their own, so they are never woven into another reply.
-  // An unverified user's fresh request is answered by the verification gate,
-  // so an acknowledgement of the request would contradict the reply.
+  // Unverified users and the verification flow only ever get predetermined
+  // copy — never a model-written caption or heading.
   const skipAnswer = ANSWER_ACTIONS.has(interpreted.action)
-    || (!isVerified(user) && isFreshRequestAction(interpreted.action));
+    || !isVerified(user)
+    || session?.current_flow === "verification";
   return skipAnswer ? reply : applyInterpretedAnswer(reply, interpreted.answer);
 }
 
 async function routeInterpreted(interpreted, text, user, session, incoming = {}) {
-  // Verification collects answers to direct prompts (names, ID photos), so
-  // replies stay in the flow — but a question still gets a real answer, and a
-  // clear outside request is explained instead of being saved as an answer
-  // ("find offers" must never become someone's nationality).
+  // Verification is fully scripted: the model only classifies messages here,
+  // and nothing it writes is ever sent. Questions and outside requests get
+  // predetermined walls that repeat the current step's prompt, so "find
+  // offers" is never saved as someone's nationality and no AI-written answer
+  // can replace or decorate a verification reply.
   if (session?.current_flow === "verification") {
-    if (interpreted.answer && ANSWER_ACTIONS.has(interpreted.action)) return interpreted.answer;
+    const stepPrompt = verificationStepPrompt(session.current_step, session.context_json || {});
+    if (!incoming.media?.id && interpreted.action === "question") {
+      return [
+        "Verification first 🔐",
+        "",
+        "I will answer questions properly once your verification is done. For now:",
+        "",
+        stepPrompt,
+        "",
+        "Type cancel to pause.",
+      ].join("\n");
+    }
     if (!incoming.media?.id && isFreshRequestAction(interpreted.action) && interpreted.action !== "verify") {
       return [
         "Verification comes first 🔐",
         "",
         "I can do that as soon as your verification is complete.",
-        "Reply with the detail I asked for above to continue, or type cancel to pause.",
+        "",
+        stepPrompt,
+        "",
+        "Type cancel to pause.",
       ].join("\n");
     }
     return handleVerification(text, user, session, incoming);

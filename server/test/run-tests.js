@@ -155,12 +155,56 @@ function seedListing(owner, values) {
     want_currency: values.want_currency,
     have_amount: values.have_amount,
     want_amount: values.want_amount,
-    listing_type: "fixed",
+    listing_type: values.listing_type || "fixed",
     status: "active",
     created_at: new Date().toISOString(),
   };
   __table("listings").push(listing);
   return listing;
+}
+
+function seedCompletedDeal(maker, taker, values = {}) {
+  const now = new Date().toISOString();
+  const listing = seedListing(maker, {
+    code: values.listing_code || `AKR-LIST-${crypto.randomUUID().slice(0, 4)}`,
+    have_currency: values.have_currency || "NGN",
+    have_amount: values.have_amount || 1000,
+    want_currency: values.want_currency || "RWF",
+    want_amount: values.want_amount || 1200,
+  });
+  listing.status = "reserved";
+  const deal = {
+    id: crypto.randomUUID(),
+    deal_code: values.deal_code || `AKR-TXN-${crypto.randomUUID().slice(0, 4)}`,
+    listing_id: listing.id,
+    maker_user_id: maker.id,
+    taker_user_id: taker.id,
+    have_currency: listing.have_currency,
+    want_currency: listing.want_currency,
+    have_amount: listing.have_amount,
+    want_amount: listing.want_amount,
+    status: "closed",
+    maker_sent_at: now,
+    taker_sent_at: now,
+    maker_received_at: now,
+    taker_received_at: now,
+    completed_at: now,
+    reservation_expires_at: now,
+    created_at: now,
+  };
+  __table("deals").push(deal);
+  return deal;
+}
+
+function removeSeededDeals(deals) {
+  const dealIds = new Set(deals.map((deal) => deal.id));
+  const listingIds = new Set(deals.map((deal) => deal.listing_id));
+  for (const deal of [...__table("deals")]) {
+    if (dealIds.has(deal.id)) __table("deals").splice(__table("deals").indexOf(deal), 1);
+  }
+  for (const listing of [...__table("listings")]) {
+    if (listingIds.has(listing.id)) __table("listings").splice(__table("listings").indexOf(listing), 1);
+  }
 }
 
 // ---------------------------------------------------------------- tests
@@ -170,6 +214,7 @@ async function run() {
 
   const ALICE = "250700000001";
   const BOB = "250700000002";
+  const CHARLIE = "250700000003";
 
   // ---------- intent regex units
   scenario("intent regex units");
@@ -219,6 +264,12 @@ async function run() {
   // the remaining steps are approved directly in the fake DB.
   const aliceRow = __table("users").find((row) => row.whatsapp_phone === ALICE);
   Object.assign(aliceRow, { verification_status: "verified_manual", verification_score: 90, completed_deals_count: 3 });
+  const profileCounterparty = seedVerifiedUser("250700000099", "Counter Party");
+  const completedProfileDeals = [
+    seedCompletedDeal(aliceRow, profileCounterparty, { deal_code: "AKR-TXN-P01" }),
+    seedCompletedDeal(profileCounterparty, aliceRow, { deal_code: "AKR-TXN-P02" }),
+    seedCompletedDeal(aliceRow, profileCounterparty, { deal_code: "AKR-TXN-P03" }),
+  ];
   await send(ALICE, "cancel");
   seedPayout(aliceRow, "NGN");
   seedPayout(aliceRow, "RWF");
@@ -231,8 +282,10 @@ async function run() {
   reply = await send(ALICE, "profile");
   check("profile view title", reply.includes("*Your profile*"), reply);
   check("profile shows completed trades", reply.includes("Completed trades"), reply);
+  check("profile counts completed deals from records", reply.includes("*Completed trades:* 3"), reply);
   check("profile has no bank numbers", !reply.includes("0123456789"), reply);
   check("profile has no payout list", !reply.includes("*Payouts*"), reply);
+  removeSeededDeals(completedProfileDeals);
 
   reply = await send(ALICE, "bank details");
   check("payouts view title", reply.includes("Bank & payout details"), reply);
@@ -272,6 +325,57 @@ async function run() {
   reply = await send(ALICE, "my listings");
   check("listing appears in scoped view", reply.includes("AKR-LIST-001"), reply);
 
+  reply = await send(ALICE, "I have 50k naira and want 55k RWF");
+  check("duplicate live listing is blocked", reply.includes("*Listing already live*"), reply);
+  check("duplicate listing points to existing reference", reply.includes("AKR-LIST-001"), reply);
+  check("duplicate listing does not open review", !reply.includes("*Review listing*"), reply);
+
+  const DORA = "250700000004";
+  const doraRow = seedVerifiedUser(DORA, "Promise Uchenna Steven");
+  seedPayout(doraRow, "NGN");
+  reply = await send(DORA, "I have 10k NGN and want 12k RWF");
+  check("missing receive payout starts payout setup", reply.includes("*Add payout detail*") && reply.includes("RWF"), reply);
+  reply = await send(DORA, "mtn");
+  check("momo network asks for registered name", reply.includes("Quick option") && reply.includes("Promise Uchenna Steven"), reply);
+  reply = await send(DORA, "option 1");
+  check("verified name shortcut advances to momo number", reply.toLowerCase().includes("mobile money phone number"), reply);
+  reply = await send(DORA, "0788123456");
+  check("momo number advances to payout review", reply.includes("Review payout detail"), reply);
+  reply = await send(DORA, "save payout");
+  check("saving payout resumes listing review", reply.includes("Payout detail saved") && reply.includes("*Review listing*"), reply);
+
+  const TIER = "250700000005";
+  const tierRow = seedVerifiedUser(TIER, "Tier One User");
+  tierRow.verification_status = "verified_auto";
+  tierRow.verification_score = 65;
+  seedPayout(tierRow, "NGN");
+  seedPayout(tierRow, "RWF");
+  reply = await send(TIER, "I have 150k NGN and want 170k RWF");
+  check("tier one high value can reach review", reply.includes("*Review listing*"), reply);
+  reply = await send(TIER, "publish");
+  check("tier one publish is blocked by limit", reply.includes("Tier 1 limit reached"), reply);
+  const tierSession = await getSession(TIER);
+  check("tier limit stores pending publish", tierSession?.current_flow === "kyc_upgrade" && tierSession?.context_json?.return_flow === "publish_listing", JSON.stringify(tierSession));
+
+  const { listingCardVersion } = require("../lib/listing-card");
+  check("listing card version changes with dynamic values", listingCardVersion({
+    listing_code: "AKR-LIST-001",
+    have_currency: "KES",
+    have_amount: 15000,
+    want_currency: "RWF",
+    want_amount: 200000,
+    listing_type: "fixed",
+    status: "active",
+  }) !== listingCardVersion({
+    listing_code: "AKR-LIST-001",
+    have_currency: "KES",
+    have_amount: 35000,
+    want_currency: "RWF",
+    want_amount: 200000,
+    listing_type: "fixed",
+    status: "active",
+  }), "Card version did not change after amount edit");
+
   reply = await send(ALICE, "hi, I want to convert 16,728 naira for 18,500 RWF. Is there any available offer that is within around this rate?", {
     interpret: { action: "find_offer", have_currency: "NGN", have_amount: 16728, want_currency: "RWF", want_amount: 18500 },
   });
@@ -286,8 +390,14 @@ async function run() {
   check("prefilled review keeps receive amount", reply.includes("18,500 RWF"), reply);
 
   reply = await send(ALICE, "edit", { interpret: { action: "settings_action" } });
-  check("review edit stays in listing flow", reply.includes("*Edit listing*") && reply.includes("What currency do you have?"), reply);
-  check("review edit shows currency options", reply.includes("Available:"), reply);
+  check("review edit asks what to edit", reply.includes("*What do you want to edit?*"), reply);
+  check("review edit offers amount choices", reply.includes("`send amount`") && reply.includes("`receive amount`"), reply);
+
+  reply = await send(ALICE, "1");
+  check("review edit number selects send amount", reply.includes("*Edit send amount*"), reply);
+
+  reply = await send(ALICE, "20,000");
+  check("review edit applies send amount", reply.includes("*Review listing*") && reply.includes("20,000 NGN"), reply);
   await send(ALICE, "cancel");
 
   // ---------- browse + orphaned search_results flow fix
@@ -341,6 +451,33 @@ async function run() {
   reply = await send(ALICE, "close dispute");
   check("opener can withdraw dispute", reply.includes("Dispute withdrawn"), reply);
 
+  // ---------- flexible listing negotiation
+  scenario("flexible listing negotiation");
+  const charlieRow = seedVerifiedUser(CHARLIE, "Charlie Owner");
+  seedPayout(charlieRow, "NGN");
+  seedPayout(charlieRow, "RWF");
+  seedListing(charlieRow, {
+    code: "AKR-LIST-091",
+    have_currency: "NGN",
+    have_amount: 100000,
+    want_currency: "RWF",
+    want_amount: 115000,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(ALICE, "open AKR-LIST-091");
+  check("flexible listing starts negotiation", reply.includes("*Flexible listing*"), reply);
+  check("flexible listing does not instantly reserve", (await sessionFlow(ALICE)) === "negotiation", reply);
+
+  reply = await send(ALICE, "offer 105000 rwf");
+  check("proposal is sent", reply.includes("*Proposal sent*") && reply.includes("105,000 RWF"), reply);
+  check("owner receives negotiation session", (await sessionFlow(CHARLIE)) === "negotiation");
+
+  reply = await send(CHARLIE, "accept");
+  check("owner acceptance opens trade", reply.includes("Akara Trade opened ✅"), reply);
+  const negotiatedDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-091")?.id);
+  check("negotiated amount becomes deal amount", Number(negotiatedDeal?.want_amount) === 105000, JSON.stringify(negotiatedDeal));
+
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");
   reply = await send(ALICE, "make offer");
@@ -358,11 +495,11 @@ async function run() {
   check("question answered mid-flow", reply.includes("Akara is free"), reply);
   check("flow survives a question", (await sessionFlow(ALICE)) === "create_listing");
 
-  reply = await send(ALICE, "i wan move 50k naira make i get 55k rwf", {
-    interpret: { action: "create_listing", have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 55000 },
+  reply = await send(ALICE, "i wan move 51k naira make i get 55k rwf", {
+    interpret: { action: "create_listing", have_currency: "NGN", have_amount: 51000, want_currency: "RWF", want_amount: 55000 },
   });
   check("model slots complete the listing", reply.includes("*Review listing*"), reply);
-  check("model direction beats regex misread", reply.includes("*You send:* 50,000 NGN"), reply);
+  check("model direction beats regex misread", reply.includes("*You send:* 51,000 NGN"), reply);
   check("model want side kept", reply.includes("*You receive:* 55,000 RWF"), reply);
 
   reply = await send(ALICE, "make it 60k instead", {
@@ -396,10 +533,8 @@ async function run() {
   // ---------- guided find flow with deterministic escape
   scenario("guided find flow");
   reply = await send(ALICE, "find offers");
-  check("find opens flow", reply.includes("Tell me what currency you need"), reply);
-
-  reply = await send(ALICE, "rwf");
-  check("asks for have currency once", reply.includes("What currency do you have?"), reply);
+  check("find opens marketplace", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
+  check("find does not ask follow-up questions", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you have?"), reply);
 
   reply = await send(ALICE, "menu");
   check("menu escapes find flow", reply.includes("*Akara menu*"), reply);
