@@ -278,8 +278,14 @@ async function run() {
   check("rate-shaped request keeps extracted receive amount", reply.includes("18,500 RWF"), reply);
 
   reply = await send(ALICE, "edit", { interpret: { action: "settings_action" } });
-  check("review edit stays in listing flow", reply.includes("*Edit listing*") && reply.includes("What currency do you have?"), reply);
-  check("review edit shows currency options", reply.includes("Available:"), reply);
+  check("review edit asks what to edit", reply.includes("*What do you want to edit?*"), reply);
+  check("review edit offers amount choices", reply.includes("`send amount`") && reply.includes("`receive amount`"), reply);
+
+  reply = await send(ALICE, "1");
+  check("review edit number selects send amount", reply.includes("*Edit send amount*"), reply);
+
+  reply = await send(ALICE, "20,000");
+  check("review edit applies send amount", reply.includes("*Review listing*") && reply.includes("20,000 NGN"), reply);
   await send(ALICE, "cancel");
 
   // ---------- browse + orphaned search_results flow fix

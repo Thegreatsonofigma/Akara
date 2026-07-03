@@ -146,6 +146,47 @@ function formatListingReview(context) {
   ].join("\n");
 }
 
+function listingEditMenu(context) {
+  return [
+    title("What do you want to edit?"),
+    "Choose one part of this listing.",
+    "",
+    `1. ${action("send amount")} · ${formatMoney(context.have_amount, context.have_currency)}`,
+    `2. ${action("receive amount")} · ${formatMoney(context.want_amount, context.want_currency)}`,
+    `3. ${action("currencies")} · ${context.have_currency} to ${context.want_currency}`,
+    `4. ${action("terms")} · ${listingTypeLabel(context.listing_type || "fixed")}`,
+    "",
+    title("Or"),
+    `${action("publish")} to make it live`,
+    `${action("cancel")} to trash this review`,
+  ].join("\n");
+}
+
+function listingEditChoice(text) {
+  const command = compactText(text);
+  if (/^(1|send|send amount|amount i have|what i have|have amount|give amount|you send)$/.test(command)
+    || /\b(send|have|give)\b.*\b(amount|value|figure|money)\b/.test(command)) {
+    return "have_amount";
+  }
+
+  if (/^(2|receive|receive amount|amount i need|amount i want|what i need|what i want|want amount|need amount|you receive)$/.test(command)
+    || /\b(receive|want|need|get)\b.*\b(amount|value|figure|money)\b/.test(command)) {
+    return "want_amount";
+  }
+
+  if (/^(3|currency|currencies|pair|currency pair|change currencies|change pair)$/.test(command)
+    || /\b(currency|currencies|pair)\b/.test(command)) {
+    return "currencies";
+  }
+
+  if (/^(4|terms|term|rate terms|fixed|flexible|negotiable|rate type)$/.test(command)
+    || /\b(terms?|fixed|flexible|negotiable|rate type)\b/.test(command)) {
+    return "terms";
+  }
+
+  return null;
+}
+
 async function prepareListingPreview(user, details, intro = "") {
   const context = {
     have_currency: details.have_currency,
@@ -586,19 +627,8 @@ async function handleCreateListing(text, user, session) {
     const command = compactText(text);
 
     if (isEditIntent(command)) {
-      const editContext = {
-        ...(context.editing_listing_id ? { editing_listing_id: context.editing_listing_id } : {}),
-        ...(context.listing_code ? { listing_code: context.listing_code } : {}),
-        ...(context.previous_listing_status ? { previous_listing_status: context.previous_listing_status } : {}),
-      };
-      await upsertSession(user, user.whatsapp_phone, "create_listing", "have_currency", editContext);
-      return [
-        title("Edit listing"),
-        "",
-        "What currency do you have?",
-        "",
-        currencyHelpLine(),
-      ].join("\n");
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "edit_choice", context);
+      return listingEditMenu(context);
     }
 
     if (!isListingPublishIntent(command)) {
@@ -611,6 +641,75 @@ async function handleCreateListing(text, user, session) {
     }
 
     return publishListing(user, context);
+  }
+
+  if (step === "edit_choice") {
+    const command = compactText(text);
+
+    if (isListingPublishIntent(command)) return publishListing(user, context);
+
+    const choice = listingEditChoice(command);
+    if (choice === "have_amount") {
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "edit_have_amount", context);
+      return [
+        title("Edit send amount"),
+        "",
+        `Current: ${formatMoney(context.have_amount, context.have_currency)}`,
+        "",
+        `What should the new ${context.have_currency} amount be?`,
+      ].join("\n");
+    }
+
+    if (choice === "want_amount") {
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "edit_want_amount", context);
+      return [
+        title("Edit receive amount"),
+        "",
+        `Current: ${formatMoney(context.want_amount, context.want_currency)}`,
+        "",
+        `What should the new ${context.want_currency} amount be?`,
+      ].join("\n");
+    }
+
+    if (choice === "currencies") {
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "have_currency", context);
+      return [
+        title("Edit currencies"),
+        "",
+        "What currency do you have?",
+        "",
+        currencyHelpLine(),
+      ].join("\n");
+    }
+
+    if (choice === "terms") {
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "listing_type", context);
+      return [
+        title("Edit terms"),
+        "",
+        `Current: ${listingTypeLabel(context.listing_type || "fixed")}`,
+        "",
+        `Choose ${action("fixed")} or ${action("flexible")}.`,
+      ].join("\n");
+    }
+
+    return listingEditMenu(context);
+  }
+
+  if (step === "edit_have_amount") {
+    const amount = parseAmount(text);
+    if (!amount) return "Enter the new amount you want to send, like 50000.";
+
+    context.have_amount = amount;
+    return prepareListingPreview(user, context);
+  }
+
+  if (step === "edit_want_amount") {
+    const amount = parseAmount(text);
+    if (!amount) return "Enter the new amount you want to receive, like 55000.";
+
+    context.want_amount = amount;
+    return prepareListingPreview(user, context);
   }
 
   await clearSession(user, user.whatsapp_phone);
