@@ -408,13 +408,105 @@ async function tryAutoMatchListing(user, listing) {
   });
 }
 
-async function reserveListing(user, listing) {
+async function getActiveListingById(listingId) {
+  const rows = await supabaseRequest(
+    `listings?id=eq.${filterValue(listingId)}&status=eq.active&limit=1`
+  );
+  return rows[0] || null;
+}
+
+async function getNegotiableOfferById(offerId) {
+  const rows = await supabaseRequest(
+    `negotiable_offers?id=eq.${filterValue(offerId)}&limit=1`
+  );
+  return rows[0] || null;
+}
+
+function flexibleListingPrompt(listing) {
+  const code = displayReference(listing.listing_code, "listing");
+  return [
+    title("Flexible listing"),
+    caption("You can accept the posted terms or propose what you want to send."),
+    "",
+    fieldBlock("Reference", code),
+    "",
+    fieldBlock("You send", formatMoney(listing.want_amount, listing.want_currency)),
+    "",
+    fieldBlock("You receive", formatMoney(listing.have_amount, listing.have_currency)),
+    "",
+    title("Actions"),
+    `${action("accept terms")} to open the trade now`,
+    `${action(`offer ${formatMoney(listing.want_amount, listing.want_currency)}`)} to propose a value`,
+    `${action("cancel")} to stop`,
+  ].join("\n");
+}
+
+function negotiationProposalMessage(listing, offer) {
+  const code = displayReference(listing.listing_code, "listing");
+  return [
+    title("New proposal"),
+    caption("A verified trader wants different terms on your flexible listing."),
+    "",
+    fieldBlock("Listing", code),
+    "",
+    fieldBlock("They send", formatMoney(offer.offered_amount, offer.offered_currency)),
+    "",
+    fieldBlock("They receive", formatMoney(listing.have_amount, listing.have_currency)),
+    "",
+    title("Actions"),
+    `${action("accept")} to open this Akara Trade`,
+    `${action("decline")} to pass`,
+    `${action(`counter ${formatMoney(listing.want_amount, listing.want_currency)}`)} to suggest another value`,
+  ].join("\n");
+}
+
+function negotiationWaitingMessage(listing, offer) {
+  return [
+    title("Proposal sent"),
+    caption("I sent your value to the listing owner."),
+    "",
+    fieldBlock("You offered", formatMoney(offer.offered_amount, offer.offered_currency)),
+    "",
+    fieldBlock("You receive if accepted", formatMoney(listing.have_amount, listing.have_currency)),
+    "",
+    "I will update this chat once they accept, decline, or counter.",
+  ].join("\n");
+}
+
+function negotiationCounterMessage(listing, offer) {
+  return [
+    title("Counter proposal"),
+    caption("The listing owner suggested a new value."),
+    "",
+    fieldBlock("You send", formatMoney(offer.offered_amount, offer.offered_currency)),
+    "",
+    fieldBlock("You receive", formatMoney(listing.have_amount, listing.have_currency)),
+    "",
+    title("Actions"),
+    `${action("accept")} to open the trade`,
+    `${action("decline")} to pass`,
+    `${action(`counter ${formatMoney(offer.offered_amount, offer.offered_currency)}`)} to suggest another value`,
+  ].join("\n");
+}
+
+function parseNegotiatedSendAmount(text, defaultCurrency) {
+  const amount = parseAmount(text);
+  if (!amount) return null;
+  return {
+    amount,
+    currency: normalizeCurrency(text) || defaultCurrency,
+  };
+}
+
+async function openListingTrade(user, listing, options = {}) {
   if (!isVerified(user)) {
     return "Please verify first so your trade partner knows you are real. Type verify.";
   }
 
-  const tierBlock = tierLimitBlockForAmount(user, listing.want_amount, listing.want_currency)
-    || tierLimitBlockForAmount(user, listing.have_amount, listing.have_currency);
+  const dealHaveAmount = moneyNumber(options.have_amount || listing.have_amount);
+  const dealWantAmount = moneyNumber(options.want_amount || listing.want_amount);
+  const tierBlock = tierLimitBlockForAmount(user, dealWantAmount, listing.want_currency)
+    || tierLimitBlockForAmount(user, dealHaveAmount, listing.have_currency);
   if (tierBlock) return tierBlock;
 
   if (listing.owner_user_id === user.id) {
@@ -451,8 +543,8 @@ async function reserveListing(user, listing) {
       taker_user_id: user.id,
       have_currency: listing.have_currency,
       want_currency: listing.want_currency,
-      have_amount: listing.have_amount,
-      want_amount: listing.want_amount,
+      have_amount: dealHaveAmount,
+      want_amount: dealWantAmount,
       status: "reserved",
       reservation_expires_at: expiresAt,
     }),
@@ -472,36 +564,58 @@ async function reserveListing(user, listing) {
 
   const maker = await getUserById(listing.owner_user_id);
 
+  const makerNotice = tradeOpenedMessage({
+    heading: "Akara Trade opened ✅",
+    intro: options.makerIntro,
+    dealCode,
+    youSend: { amount: dealHaveAmount, currency: listing.have_currency },
+    youReceive: { amount: dealWantAmount, currency: listing.want_currency },
+    paymentProfile: takerReceiveProfile,
+    expectedProfile: makerReceiveProfile,
+    firstInstruction: "When their payment is marked sent, check your bank or MoMo before sending your side.",
+  });
+
+  const takerNotice = tradeOpenedMessage({
+    heading: "Akara Trade opened ✅",
+    intro: options.takerIntro,
+    dealCode,
+    youSend: { amount: dealWantAmount, currency: listing.want_currency },
+    youReceive: { amount: dealHaveAmount, currency: listing.have_currency },
+    paymentProfile: makerReceiveProfile,
+    expectedProfile: takerReceiveProfile,
+    firstInstruction: "Name check: the account name should match the verified person you are trading with.",
+  });
+
   if (maker?.whatsapp_phone) {
     await upsertSession(maker, maker.whatsapp_phone, "deal_room", "reserved", {
       deal_id: deal.id,
       deal_code: dealCode,
     });
 
-    const makerNotice = tradeOpenedMessage({
-      heading: "Akara Trade opened ✅",
-      dealCode,
-      youSend: { amount: listing.have_amount, currency: listing.have_currency },
-      youReceive: { amount: listing.want_amount, currency: listing.want_currency },
-      paymentProfile: takerReceiveProfile,
-      expectedProfile: makerReceiveProfile,
-      firstInstruction: "When their payment is marked sent, check your bank or MoMo before sending your side.",
-    });
-
-    sendWhatsAppText(maker.whatsapp_phone, makerNotice).catch((error) => {
+    const makerShouldReceiveNotice = options.returnRole !== "maker";
+    const takerShouldReceiveNotice = options.returnRole === "maker";
+    if (makerShouldReceiveNotice) sendWhatsAppText(maker.whatsapp_phone, makerNotice).catch((error) => {
       console.error(`[deal] maker notice failed for ${maker.whatsapp_phone}: ${error.message}`);
+    });
+    if (takerShouldReceiveNotice && user.whatsapp_phone) sendWhatsAppText(user.whatsapp_phone, takerNotice).catch((error) => {
+      console.error(`[deal] taker notice failed for ${user.whatsapp_phone}: ${error.message}`);
     });
   }
 
-  return tradeOpenedMessage({
-    heading: "Akara Trade opened ✅",
-    dealCode,
-    youSend: { amount: listing.want_amount, currency: listing.want_currency },
-    youReceive: { amount: listing.have_amount, currency: listing.have_currency },
-    paymentProfile: makerReceiveProfile,
-    expectedProfile: takerReceiveProfile,
-    firstInstruction: "Name check: the account name should match the verified person you are trading with.",
-  });
+  return options.returnRole === "maker" ? makerNotice : takerNotice;
+}
+
+async function reserveListing(user, listing, options = {}) {
+  if (!options.force && listing.listing_type === "negotiable") {
+    if (!isVerified(user)) return "Please verify first so your trade partner knows you are real. Type verify.";
+    if (listing.owner_user_id === user.id) return "This is your own offer. Share the link with someone else to start an Akara Trade.";
+    await upsertSession(user, user.whatsapp_phone, "negotiation", "taker_review", {
+      listing_id: listing.id,
+    });
+    return flexibleListingPrompt(listing);
+  }
+
+  return openListingTrade(user, listing, options);
 }
 
 async function reserveListingByCode(user, listingCode) {
@@ -520,6 +634,278 @@ async function reserveListingById(user, listingId) {
   const listing = rows[0];
   if (!listing) return "That offer is no longer available. Type find offers to see live ones.";
   return reserveListing(user, listing);
+}
+
+async function createNegotiationOffer(user, listing, proposal) {
+  const rows = await supabaseRequest("negotiable_offers", {
+    method: "POST",
+    body: JSON.stringify({
+      listing_id: listing.id,
+      offering_user_id: user.id,
+      offered_amount: proposal.amount,
+      offered_currency: proposal.currency,
+      status: "pending",
+      message: proposal.message || null,
+    }),
+  });
+  return rows[0];
+}
+
+async function handleNegotiation(text, user, session) {
+  const context = session.context_json || {};
+  const command = compactText(text);
+
+  if (isCancelIntent(text) || isDeclineIntent(text)) {
+    if (context.offer_id) {
+      await supabaseRequest(`negotiable_offers?id=eq.${filterValue(context.offer_id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "withdrawn",
+          message: "Withdrawn in chat.",
+        }),
+      }).catch(() => {});
+    }
+    await clearSession(user, user.whatsapp_phone);
+    return [
+      title("Negotiation closed"),
+      "",
+      "No trade was opened.",
+      `${action("find offers")} to browse again.`,
+    ].join("\n");
+  }
+
+  if (session.current_step === "taker_review") {
+    const listing = await getActiveListingById(context.listing_id);
+    if (!listing) {
+      await clearSession(user, user.whatsapp_phone);
+      return "That flexible listing is no longer live. Type find offers to browse again.";
+    }
+
+    if (/\b(accept|take|open|deal|start|go ahead|posted|same terms|terms)\b/.test(command)) {
+      await clearSession(user, user.whatsapp_phone);
+      return reserveListing(user, listing, {
+        force: true,
+        takerIntro: "You accepted the posted flexible terms.",
+        makerIntro: "The trader accepted your posted flexible terms.",
+      });
+    }
+
+    const proposal = parseNegotiatedSendAmount(text, listing.want_currency);
+    if (!proposal) {
+      return [
+        title("Send a proposal"),
+        caption(`Tell me what you want to send in ${listing.want_currency}.`),
+        "",
+        `${action(`offer ${formatMoney(listing.want_amount, listing.want_currency)}`)} or ${action("accept terms")}`,
+      ].join("\n");
+    }
+
+    if (proposal.currency !== listing.want_currency) {
+      return `For this listing, propose what you will send in ${listing.want_currency}.`;
+    }
+
+    const offer = await createNegotiationOffer(user, listing, {
+      ...proposal,
+      message: text,
+    });
+    await upsertSession(user, user.whatsapp_phone, "negotiation", "taker_waiting", {
+      offer_id: offer.id,
+      listing_id: listing.id,
+    });
+
+    const maker = await getUserById(listing.owner_user_id);
+    if (maker?.whatsapp_phone) {
+      await upsertSession(maker, maker.whatsapp_phone, "negotiation", "owner_review", {
+        offer_id: offer.id,
+        listing_id: listing.id,
+        taker_user_id: user.id,
+      });
+      sendWhatsAppText(maker.whatsapp_phone, negotiationProposalMessage(listing, offer)).catch((error) => {
+        console.error(`[negotiation] owner proposal notice failed: ${error.message}`);
+      });
+    }
+
+    return negotiationWaitingMessage(listing, offer);
+  }
+
+  if (session.current_step === "owner_review") {
+    const offer = await getNegotiableOfferById(context.offer_id);
+    if (!offer || !["pending", "countered"].includes(offer.status)) {
+      await clearSession(user, user.whatsapp_phone);
+      return "That proposal is no longer open.";
+    }
+
+    const listing = await getActiveListingById(offer.listing_id);
+    if (!listing || listing.owner_user_id !== user.id) {
+      await clearSession(user, user.whatsapp_phone);
+      return "That flexible listing is no longer available.";
+    }
+
+    const taker = await getUserById(offer.offering_user_id);
+    if (!taker) {
+      await clearSession(user, user.whatsapp_phone);
+      return "I could not find the trader who sent that proposal.";
+    }
+
+    if (/\b(accept|approve|agree|yes|deal|open)\b/.test(command)) {
+      await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "accepted" }),
+      });
+      await clearSession(user, user.whatsapp_phone);
+      return openListingTrade(taker, listing, {
+        force: true,
+        want_amount: offer.offered_amount,
+        returnRole: "maker",
+        takerIntro: "Your proposal was accepted, so I opened the trade room.",
+        makerIntro: "You accepted a flexible proposal, so I opened the trade room.",
+      });
+    }
+
+    if (/\b(decline|reject|pass|no)\b/.test(command)) {
+      await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "declined" }),
+      });
+      await clearSession(user, user.whatsapp_phone);
+      if (taker.whatsapp_phone) {
+        sendWhatsAppText(
+          taker.whatsapp_phone,
+          [
+            title("Proposal declined"),
+            "",
+            "The listing owner passed on your proposal.",
+            `${action("find offers")} to browse another one.`,
+          ].join("\n")
+        ).catch((error) => console.error(`[negotiation] decline notice failed: ${error.message}`));
+      }
+      return "Proposal declined. No trade was opened.";
+    }
+
+    const proposal = parseNegotiatedSendAmount(text, listing.want_currency);
+    if (!proposal) {
+      return [
+        title("Reply to proposal"),
+        "",
+        `${action("accept")} to open the trade`,
+        `${action("decline")} to pass`,
+        `${action(`counter ${formatMoney(listing.want_amount, listing.want_currency)}`)} to suggest another value`,
+      ].join("\n");
+    }
+
+    if (proposal.currency !== listing.want_currency) {
+      return `Counter in ${listing.want_currency}, because that is what you receive on this listing.`;
+    }
+
+    const updated = (await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "countered",
+        offered_amount: proposal.amount,
+        offered_currency: proposal.currency,
+        message: text,
+      }),
+    }))[0] || { ...offer, offered_amount: proposal.amount, offered_currency: proposal.currency };
+
+    await upsertSession(taker, taker.whatsapp_phone, "negotiation", "counter_review", {
+      offer_id: offer.id,
+      listing_id: listing.id,
+    });
+    if (taker.whatsapp_phone) {
+      sendWhatsAppText(taker.whatsapp_phone, negotiationCounterMessage(listing, updated)).catch((error) => {
+        console.error(`[negotiation] counter notice failed: ${error.message}`);
+      });
+    }
+
+    return [
+      title("Counter sent"),
+      "",
+      fieldBlock("You suggested", formatMoney(proposal.amount, proposal.currency)),
+      "",
+      "I will update you if they accept or decline.",
+    ].join("\n");
+  }
+
+  if (session.current_step === "counter_review" || session.current_step === "taker_waiting") {
+    const offer = await getNegotiableOfferById(context.offer_id);
+    if (!offer) {
+      await clearSession(user, user.whatsapp_phone);
+      return "That proposal is no longer available.";
+    }
+
+    const listing = await getActiveListingById(offer.listing_id);
+    if (!listing) {
+      await clearSession(user, user.whatsapp_phone);
+      return "That flexible listing is no longer live.";
+    }
+
+    if (session.current_step === "taker_waiting" && offer.status === "pending") {
+      return [
+        title("Proposal still pending"),
+        "",
+        "The listing owner has not replied yet.",
+        `${action("cancel")} to withdraw it.`,
+      ].join("\n");
+    }
+
+    if (/\b(accept|approve|agree|yes|deal|open)\b/.test(command)) {
+      await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "accepted" }),
+      });
+      await clearSession(user, user.whatsapp_phone);
+      return reserveListing(user, listing, {
+        force: true,
+        want_amount: offer.offered_amount,
+        takerIntro: "You accepted the counter proposal.",
+        makerIntro: "The trader accepted your counter proposal.",
+      });
+    }
+
+    if (/\b(decline|reject|pass|no)\b/.test(command)) {
+      await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "declined" }),
+      });
+      await clearSession(user, user.whatsapp_phone);
+      const owner = await getUserById(listing.owner_user_id);
+      if (owner?.whatsapp_phone) {
+        sendWhatsAppText(owner.whatsapp_phone, "The trader declined your counter proposal. No trade was opened.").catch(() => {});
+      }
+      return "Counter declined. No trade was opened.";
+    }
+
+    const proposal = parseNegotiatedSendAmount(text, listing.want_currency);
+    if (!proposal) return negotiationCounterMessage(listing, offer);
+    if (proposal.currency !== listing.want_currency) return `Propose what you will send in ${listing.want_currency}.`;
+
+    const updated = (await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "pending",
+        offered_amount: proposal.amount,
+        offered_currency: proposal.currency,
+        message: text,
+      }),
+    }))[0] || { ...offer, offered_amount: proposal.amount, offered_currency: proposal.currency };
+    const owner = await getUserById(listing.owner_user_id);
+    if (owner?.whatsapp_phone) {
+      await upsertSession(owner, owner.whatsapp_phone, "negotiation", "owner_review", {
+        offer_id: offer.id,
+        listing_id: listing.id,
+        taker_user_id: user.id,
+      });
+      sendWhatsAppText(owner.whatsapp_phone, negotiationProposalMessage(listing, updated)).catch(() => {});
+    }
+    await upsertSession(user, user.whatsapp_phone, "negotiation", "taker_waiting", {
+      offer_id: offer.id,
+      listing_id: listing.id,
+    });
+    return negotiationWaitingMessage(listing, updated);
+  }
+
+  await clearSession(user, user.whatsapp_phone);
+  return "I closed that negotiation. Type find offers to browse again.";
 }
 
 async function handleCreateListing(text, user, session) {
@@ -723,4 +1109,5 @@ module.exports = {
   reserveListingByCode,
   reserveListingById,
   handleCreateListing,
+  handleNegotiation,
 };

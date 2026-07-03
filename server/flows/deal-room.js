@@ -36,6 +36,7 @@ const {
   dealMiniSummary,
   exchangeCompleteMessage,
   notifyDealUser,
+  syncCompletedDealsCount,
 } = require("../db/deals");
 const { storeDealProof, dealUserHasProof, sendDealProofToUser } = require("../lib/receipts");
 const { sendExchangeCompletionCard } = require("../lib/listing-card");
@@ -448,6 +449,12 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
   const otherRole = otherDealRole(role);
   const dealCode = displayReference(deal.deal_code, "deal");
   const completedDeal = await getDealById(dealId) || updatedDeal || deal;
+  await Promise.all([
+    syncCompletedDealsCount(completedDeal.maker_user_id),
+    syncCompletedDealsCount(completedDeal.taker_user_id),
+  ]).catch((error) => {
+    console.error(`[deal] completed count sync failed for ${dealCode}: ${error.message}`);
+  });
   await notifyExchangeCompleteForOtherUser(otherUserId, completedDeal, otherRole).catch((error) => {
     console.error(`[deal] completion notice failed for ${dealCode}: ${error.message}`);
   });

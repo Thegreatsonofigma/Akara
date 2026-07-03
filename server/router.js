@@ -40,7 +40,7 @@ const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply,
 const { scopedAssistantReply } = require("./messages/assistant");
 const { startVerification, handleVerification } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
-const { prepareListingPreview, reserveListingByCode, handleCreateListing } = require("./flows/listing");
+const { prepareListingPreview, reserveListingByCode, handleCreateListing, handleNegotiation } = require("./flows/listing");
 const {
   continueSearchOrShowMatches,
   showOfferMatches,
@@ -157,6 +157,7 @@ const FLOW_COMPATIBLE_ACTIONS = {
   create_listing: new Set(["create_listing"]),
   find_offer: new Set(["find_offer"]),
   search_results: new Set(["reserve_listing", "find_offer"]),
+  negotiation: new Set(["flow_reply", "reserve_listing", "trade_action"]),
   settings: new Set(["settings_action", "add_payout"]),
   deal_room: new Set(["trade_action", "reserve_listing"]),
 };
@@ -258,6 +259,10 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   const quotedReply = await resolveQuotedReply(text, user, incoming);
   if (quotedReply) return quotedReply;
+
+  if (session?.current_flow === "negotiation") {
+    return handleNegotiation(text, user, session);
+  }
 
   if (["post", "make offer", "create listing", "create offer", "list offer"].includes(command)) {
     if (isOnHold(user)) return accountOnHoldReply(user);
@@ -411,6 +416,10 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   if (session?.current_flow === "search_results") {
     return handleSearchResults(text, user, session);
+  }
+
+  if (session?.current_flow === "negotiation") {
+    return handleNegotiation(text, user, session);
   }
 
   if (session?.current_flow === "settings") {
