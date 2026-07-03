@@ -87,11 +87,13 @@ async function handleWebhookPost(req, res) {
       }
       const session = await getSession(incoming.from);
       const reply = await buildReply(incoming.text, user, session, incoming);
-      await sendWhatsAppText(incoming.from, reply);
+      if (reply) {
+        await sendWhatsAppText(incoming.from, reply);
+      }
       await markInboundMessageProcessed(incoming).catch((error) => {
         console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
       });
-      console.log(`[webhook] reply sent to ${incoming.from}`);
+      console.log(`[webhook] reply ${reply ? "sent" : "handled"} for ${incoming.from}`);
     } catch (error) {
       failedMessages += 1;
       console.error(`[webhook] failed message from ${incoming.from}: ${error.message}`);

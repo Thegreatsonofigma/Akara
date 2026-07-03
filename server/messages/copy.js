@@ -24,8 +24,6 @@ function mainMenu() {
     "`I have 2k naira and want rwf, show me available deals`",
     "",
     "_At any time:_ `menu`, `history`, `profile`, or `start over`",
-    "",
-    referralPitch(),
   ].join("\n");
 }
 
@@ -125,18 +123,15 @@ function referralPitch() {
 }
 
 function feeIncludedText() {
-  return "Free — refer a friend and get 10 more free trades 🎁";
+  return "Free";
 }
 
 function feeIncludedNote() {
-  return [
-    "No fee payment is needed inside this trade.",
-    referralPitch(),
-  ].join("\n");
+  return "Service fee: Free";
 }
 
 function listingShareCopy() {
-  return "Share this with someone who wants the swap. They will land on your listing, review the terms, and open the Akara Trade from their own chat.";
+  return "Share this with anyone interested. They can review it and open the Akara Trade from their own chat.";
 }
 
 function explainMissingListing(fields, context = {}) {

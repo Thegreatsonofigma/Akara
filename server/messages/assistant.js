@@ -4,7 +4,7 @@ const { compactText } = require("../nlp/slang");
 const { currencyMentions, currencyHelpLine } = require("../nlp/currency");
 const { isRateQuestion } = require("../nlp/intents");
 const { isVerified, firstName } = require("../db/users");
-const { mainMenu, referralPitch } = require("./copy");
+const { mainMenu } = require("./copy");
 
 function explainAkaraReply() {
   return [
@@ -25,10 +25,6 @@ function feeAssistantReply() {
   return [
     title("Service fee"),
     "Akara is free to use. No one needs to send a separate fee inside a trade.",
-    "",
-    referralPitch(),
-    "",
-    caption("The friend you refer just needs to complete a swap with you on Akara."),
   ].join("\n");
 }
 
@@ -51,7 +47,7 @@ function safetyAssistantReply() {
     "",
     "Before you send money, check the amount, name, bank or MoMo details, and transaction reference.",
     "",
-    caption("Akara coordinates the trade trail, but does not hold or reverse external bank or mobile money transfers."),
+    caption("Akara records the exchange trail, but does not hold or reverse external bank or mobile money transfers."),
   ].join("\n");
 }
 
