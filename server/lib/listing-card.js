@@ -12,9 +12,9 @@ const CARD_WIDTH = 3200;
 const CARD_HEIGHT = 1600;
 const FIGMA_SOURCE_WIDTH = 800;
 const CARD_SCALE = CARD_WIDTH / FIGMA_SOURCE_WIDTH;
-const LISTING_NUMBER_FONT_SIZE = 120 * CARD_SCALE;
-const LISTING_NUMBER_LETTER_SPACING = 2 * CARD_SCALE;
-const RECEIPT_NUMBER_FONT_SIZE = 240 * CARD_SCALE;
+const LISTING_NUMBER_FONT_SIZE = 111 * CARD_SCALE;
+const LISTING_NUMBER_LETTER_SPACING = 2;
+const RECEIPT_NUMBER_FONT_SIZE = 222 * CARD_SCALE;
 const RECEIPT_META_FONT_SIZE = 12 * CARD_SCALE;
 const RECEIPT_SITE_FONT_SIZE = 22 * CARD_SCALE;
 const cacheDir = path.join(rootDir, ".cache", "listing-cards");
@@ -98,8 +98,8 @@ function amountFontSize(text) {
 
 function amountTextLength(text) {
   const value = String(text || "").trim();
-  if (value === "1,000,000") return 1024;
-  if (value === "1,150,000") return 992;
+  if (value === "1,000,000") return 974;
+  if (value === "1,150,000") return 948;
 
   const advance = {
     "0": 34.5,
@@ -155,6 +155,9 @@ function completionAmountFontSize(text) {
 }
 
 function completionAmountTextLength(text) {
+  const value = String(text || "").trim();
+  if (value === "1,000,000") return 2048;
+  if (value === "1,150,000") return 1993;
   return amountTextLength(text) * 2;
 }
 
@@ -166,7 +169,7 @@ function completionScaleX(text) {
 
 function completionTextX(text) {
   const scale = Number(completionScaleX(text));
-  const visualLeft = 540;
+  const visualLeft = 535;
   return (visualLeft / scale).toFixed(3);
 }
 
@@ -252,10 +255,10 @@ function listingCardSvg(listing) {
   ${base ? `<image href="${base}" x="0" y="0" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" preserveAspectRatio="none"/>` : cardBackground({ footerBand: true })}
 
   <g transform="scale(${amountScaleX(haveAmount)} 1)">
-    <text x="${scaledTextPlacement({ centerX: 860, width: amountTextLength(haveAmount), scaleX: amountScaleX(haveAmount) })}" y="787" class="amount" font-size="${haveSize}">${escapeXml(haveAmount)}</text>
+    <text x="${scaledTextPlacement({ centerX: 842, width: amountTextLength(haveAmount), scaleX: amountScaleX(haveAmount) })}" y="782" class="amount" font-size="${haveSize}">${escapeXml(haveAmount)}</text>
   </g>
   <g transform="scale(${amountScaleX(wantAmount)} 1)">
-    <text x="${scaledTextPlacement({ centerX: 2356, width: amountTextLength(wantAmount), scaleX: amountScaleX(wantAmount) })}" y="787" class="amount" font-size="${wantSize}">${escapeXml(wantAmount)}</text>
+    <text x="${scaledTextPlacement({ centerX: 2338, width: amountTextLength(wantAmount), scaleX: amountScaleX(wantAmount) })}" y="780" class="amount" font-size="${wantSize}">${escapeXml(wantAmount)}</text>
   </g>
 
   <text x="1088" y="1000" text-anchor="middle" class="currency-text" fill="${currencyColors[String(listing.have_currency || "").toUpperCase()]?.text || "#000000"}">${escapeXml(String(listing.have_currency || "").toUpperCase())}</text>
@@ -311,7 +314,7 @@ function exchangeCompletionSvg(deal, role) {
     ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
     ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
     ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
-    .amount { font-family: 'CoolveticaCompressedHeavy'; font-weight: 900; fill: #fff; letter-spacing: -0.02em; }
+    .amount { font-family: 'CoolveticaCompressedHeavy'; font-weight: 900; fill: #fff; letter-spacing: 0; }
     .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 54px; fill: #fff; letter-spacing: 18px; }
     .header-strong { font-weight: 900; letter-spacing: 12px; }
     .meta { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_META_FONT_SIZE}px; fill: #fff; letter-spacing: 8px; }
@@ -329,10 +332,10 @@ function exchangeCompletionSvg(deal, role) {
   </text>
 
   <g transform="scale(${completionScaleX(receiveAmount)} 1)">
-    <text x="${completionTextX(receiveAmount)}" y="1004" class="amount" font-size="${receiveSize}">${escapeXml(receiveAmount)}</text>
+    <text x="${completionTextX(receiveAmount)}" y="1016" class="amount" font-size="${receiveSize}">${escapeXml(receiveAmount)}</text>
   </g>
   ${currencyChip({ x: 708, y: 616, currency: youReceive.currency, width: 344, height: 176, fontSize: 88 })}
-  ${stamp ? `<image href="${stamp}" x="2320" y="220" width="600" height="600" opacity="0.9" preserveAspectRatio="xMidYMid meet"/>` : ""}
+  ${stamp ? `<image href="${stamp}" x="2320" y="220" width="600" height="600" preserveAspectRatio="xMidYMid meet"/>` : ""}
 
   <text x="565" y="1280" class="meta">EXCHANGED</text>
   <text x="565" y="1370" class="meta">
