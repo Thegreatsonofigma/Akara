@@ -952,6 +952,19 @@ async function handleCreateListing(text, user, session) {
     const missing = missingListingFields(details);
     if (!missing.length) return prepareListingPreview(user, details);
 
+    // A bare currency ("GHS") carries no amount, so parseListingDetails finds
+    // nothing — accept it as the have side instead of re-asking for it.
+    const bareCurrency = !details.have_currency && normalizeCurrency(text);
+    if (bareCurrency) {
+      details.have_currency = bareCurrency;
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "want_currency", details);
+      return [
+        "What currency do you want in return?",
+        "",
+        currencyHelpLine(bareCurrency),
+      ].join("\n");
+    }
+
     await upsertSession(user, user.whatsapp_phone, "create_listing", missing[0], details);
     return explainMissingListing(missing, details);
   }

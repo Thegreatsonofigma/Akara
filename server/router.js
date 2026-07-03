@@ -668,6 +668,7 @@ async function routeMessage(text, user, session, incoming = {}) {
   // Unverified users and the verification flow only ever get predetermined
   // copy — never a model-written caption or heading.
   const skipAnswer = ANSWER_ACTIONS.has(interpreted.action)
+    || interpreted.action === "flow_reply"
     || !isVerified(user)
     || session?.current_flow === "verification";
   return skipAnswer ? reply : applyInterpretedAnswer(reply, interpreted.answer);
@@ -689,7 +690,7 @@ async function routeInterpreted(interpreted, text, user, session, incoming = {})
         "",
         stepPrompt,
         "",
-        "Type cancel to pause.",
+        `Type ${action("cancel")} to pause.`,
       ].join("\n");
     }
     if (!incoming.media?.id && isFreshRequestAction(interpreted.action) && interpreted.action !== "verify") {
@@ -700,7 +701,7 @@ async function routeInterpreted(interpreted, text, user, session, incoming = {})
         "",
         stepPrompt,
         "",
-        "Type cancel to pause.",
+        `Type ${action("cancel")} to pause.`,
       ].join("\n");
     }
     return handleVerification(text, user, session, incoming);
