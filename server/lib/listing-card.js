@@ -743,11 +743,58 @@ function verificationSuccessSvg() {
 </svg>`;
 }
 
+function upgradeSuccessSvg() {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    ${fontFace("CamptonCard", fontFiles.camptonBook, 400)}
+    ${fontFace("CamptonCard", fontFiles.camptonSemiBold, 600)}
+    ${fontFace("CamptonCard", fontFiles.camptonBold, 700)}
+    ${fontFace("CamptonCard", fontFiles.camptonBlack, 900)}
+    .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 54px; fill: #fff; letter-spacing: 20px; }
+    .header-strong { font-weight: 900; letter-spacing: 14px; }
+    .verified { font-family: 'CamptonCard', Arial, sans-serif; font-size: 500px; font-weight: 900; fill: #fff; letter-spacing: -22px; }
+    .pill { font-family: 'CamptonCard', Arial, sans-serif; font-size: 58px; font-weight: 900; fill: #000; letter-spacing: -2px; }
+    .body { font-family: 'CamptonCard', Arial, sans-serif; font-size: 50px; fill: #fff; letter-spacing: 9px; }
+    .body-strong { font-weight: 900; letter-spacing: 7px; }
+  </style>
+
+  ${cardBackground()}
+  ${akaraLogo({ x: 510, y: 60, size: 220, opacity: 0.96 })}
+
+  <text x="1600" y="178" text-anchor="middle" class="header">
+    <tspan>TIER</tspan><tspan dx="34" class="header-strong">STATUS</tspan>
+  </text>
+
+  <text x="1600" y="1000" text-anchor="middle" class="verified">Upgraded!</text>
+
+  <rect x="1904" y="544" width="520" height="150" rx="12" fill="#E8FF00" stroke="#030303" stroke-width="14"/>
+  <text x="2164" y="642" text-anchor="middle" class="pill">Tier 3 unlocked</text>
+
+  <text x="1600" y="1212" text-anchor="middle" class="body">
+    <tspan>YOUR PROFILE IS NOW</tspan><tspan dx="18" class="body-strong">TIER 3,</tspan><tspan dx="18">READY FOR</tspan><tspan dx="18" class="body-strong">HIGHER VALUE TRADES,</tspan>
+  </text>
+  <text x="1600" y="1300" text-anchor="middle" class="body">
+    <tspan>CREATE LARGER</tspan><tspan dx="18" class="body-strong">RATE LISTINGS</tspan><tspan dx="18">AND CONTINUE</tspan><tspan dx="18" class="body-strong">BORDERLESS CONVERSIONS.</tspan>
+  </text>
+</svg>`;
+}
+
 async function verificationSuccessPng() {
   fs.mkdirSync(cacheDir, { recursive: true });
   const svgPath = path.join(cacheDir, "verification-success.svg");
   const pngPath = path.join(cacheDir, "verification-success.png");
   fs.writeFileSync(svgPath, verificationSuccessSvg());
+
+  await renderPngWithAvailableTool(svgPath, pngPath);
+  return fs.readFileSync(pngPath);
+}
+
+async function upgradeSuccessPng() {
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const svgPath = path.join(cacheDir, "upgrade-success.svg");
+  const pngPath = path.join(cacheDir, "upgrade-success.png");
+  fs.writeFileSync(svgPath, upgradeSuccessSvg());
 
   await renderPngWithAvailableTool(svgPath, pngPath);
   return fs.readFileSync(pngPath);
@@ -957,6 +1004,14 @@ async function sendVerificationSuccessCard(to, caption = "") {
   return sendWhatsAppMedia(to, "image", mediaId, caption);
 }
 
+async function sendUpgradeSuccessCard(to, caption = "") {
+  if (!to) return null;
+  const png = await upgradeSuccessPng();
+  const mediaId = await uploadWhatsAppMedia(png, "image/png", "akara-tier-upgrade.png");
+  if (!mediaId) return null;
+  return sendWhatsAppMedia(to, "image", mediaId, caption);
+}
+
 module.exports = {
   listingCardSvg,
   listingCardVersion,
@@ -965,8 +1020,11 @@ module.exports = {
   exchangeCompletionPng,
   verificationSuccessSvg,
   verificationSuccessPng,
+  upgradeSuccessSvg,
+  upgradeSuccessPng,
   handleListingCardRoute,
   sendListingCard,
   sendExchangeCompletionCard,
   sendVerificationSuccessCard,
+  sendUpgradeSuccessCard,
 };

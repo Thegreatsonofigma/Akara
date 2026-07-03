@@ -3,8 +3,8 @@ const { rootDir, config } = require("./config");
 const { jsonResponse, readJsonBody } = require("./lib/http");
 const { supabaseRequest, filterValue, createStorageSignedUrl } = require("./lib/supabase");
 const { sendWhatsAppText } = require("./lib/whatsapp");
-const { sendVerificationSuccessCard } = require("./lib/listing-card");
-const { updateUser } = require("./db/users");
+const { sendVerificationSuccessCard, sendUpgradeSuccessCard } = require("./lib/listing-card");
+const { getUserById, updateUser } = require("./db/users");
 const { mainMenu } = require("./messages/copy");
 const { title } = require("./lib/format");
 const { displayReference } = require("./db/listings");
@@ -44,6 +44,26 @@ function countBy(items, fieldOrGetter) {
     counts[label] = (counts[label] || 0) + 1;
     return counts;
   }, {});
+}
+
+async function resumeApprovedUserAction(user) {
+  const sessions = await supabaseRequest(
+    `message_sessions?user_id=eq.${filterValue(user.id)}&limit=1`
+  );
+  const session = sessions[0];
+  const context = session?.context_json || {};
+  if (session?.current_flow !== "kyc_upgrade" || context.return_flow !== "publish_listing" || !context.pending_listing) {
+    return false;
+  }
+
+  const { publishListing } = require("./flows/listing");
+  const reply = await publishListing(user, context.pending_listing);
+  if (reply) {
+    await sendWhatsAppText(user.whatsapp_phone, reply).catch((error) => {
+      console.error(`[admin] approval resume reply failed for ${user.whatsapp_phone}: ${error.message}`);
+    });
+  }
+  return true;
 }
 
 function dealParticipantPhones(deal = {}) {
@@ -305,6 +325,8 @@ async function handleAdminApi(req, res, url) {
 
     const approved = decision === "approve";
     const status = approved ? "verified_manual" : "rejected";
+    const previousUser = await getUserById(request.user_id);
+    const isTierUpgrade = approved && ["verified_auto", "verified_manual"].includes(previousUser?.verification_status);
     const rows = await supabaseRequest(`verification_requests?id=eq.${filterValue(request.id)}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -321,15 +343,29 @@ async function handleAdminApi(req, res, url) {
     });
 
     if (approved) {
-      const caption = [
-        title("Verified"),
-        "",
-        "Your Akara profile is approved.",
-        "",
-        "You can now see offers, create listings, open Akara Trades, and manage payout details.",
-      ].join("\n");
-      await sendVerificationSuccessCard(user.whatsapp_phone, caption).catch((error) => {
-        console.error(`[admin] verification card failed for ${user.whatsapp_phone}: ${error.message}`);
+      if (isTierUpgrade) {
+        const caption = [
+          title("Tier upgraded ✅"),
+          "",
+          "Your profile is now Tier 3 and can handle higher value exchanges.",
+        ].join("\n");
+        await sendUpgradeSuccessCard(user.whatsapp_phone, caption).catch((error) => {
+          console.error(`[admin] tier upgrade card failed for ${user.whatsapp_phone}: ${error.message}`);
+        });
+      } else {
+        const caption = [
+          title("Verified"),
+          "",
+          "Your Akara profile is approved.",
+          "",
+          "You can now see offers, create listings, open Akara Trades, and manage payout details.",
+        ].join("\n");
+        await sendVerificationSuccessCard(user.whatsapp_phone, caption).catch((error) => {
+          console.error(`[admin] verification card failed for ${user.whatsapp_phone}: ${error.message}`);
+        });
+      }
+      await resumeApprovedUserAction(user).catch((error) => {
+        console.error(`[admin] approval resume failed for ${user.whatsapp_phone}: ${error.message}`);
       });
       await sendWhatsAppText(user.whatsapp_phone, mainMenu()).catch((error) => {
         console.error(`[admin] verification menu failed for ${user.whatsapp_phone}: ${error.message}`);

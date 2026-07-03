@@ -36,6 +36,19 @@ function fundsDisclaimer() {
   return "Akara records the exchange trail and keeps both sides aligned. Funds still move directly through bank or mobile money, so confirm the recipient details before sending.";
 }
 
+async function holdListingForTierReview(user, context, tierBlock) {
+  await upsertSession(user, user.whatsapp_phone, "kyc_upgrade", "pending_admin", {
+    return_flow: "publish_listing",
+    pending_listing: context,
+  });
+
+  return [
+    tierBlock,
+    "",
+    "I saved this listing draft. Once your higher tier is approved, Akara will publish it for you.",
+  ].join("\n");
+}
+
 function listingLiveMessage(heading, listingCode, listing, shareUrl) {
   const code = displayReference(listingCode, "listing");
   return [
@@ -272,7 +285,7 @@ async function prepareListingPreview(user, details, intro = "") {
 
 async function publishListing(user, context) {
   const tierBlock = tierLimitBlockForListing(user, context);
-  if (tierBlock) return tierBlock;
+  if (tierBlock) return holdListingForTierReview(user, context, tierBlock);
 
   const duplicate = await findActiveDuplicateListing(user, context);
   if (duplicate) {

@@ -330,6 +330,33 @@ async function run() {
   check("duplicate listing points to existing reference", reply.includes("AKR-LIST-001"), reply);
   check("duplicate listing does not open review", !reply.includes("*Review listing*"), reply);
 
+  const DORA = "250700000004";
+  const doraRow = seedVerifiedUser(DORA, "Promise Uchenna Steven");
+  seedPayout(doraRow, "NGN");
+  reply = await send(DORA, "I have 10k NGN and want 12k RWF");
+  check("missing receive payout starts payout setup", reply.includes("*Add payout detail*") && reply.includes("RWF"), reply);
+  reply = await send(DORA, "mtn");
+  check("momo network asks for registered name", reply.includes("Quick option") && reply.includes("Promise Uchenna Steven"), reply);
+  reply = await send(DORA, "option 1");
+  check("verified name shortcut advances to momo number", reply.toLowerCase().includes("mobile money phone number"), reply);
+  reply = await send(DORA, "0788123456");
+  check("momo number advances to payout review", reply.includes("Review payout detail"), reply);
+  reply = await send(DORA, "save payout");
+  check("saving payout resumes listing review", reply.includes("Payout detail saved") && reply.includes("*Review listing*"), reply);
+
+  const TIER = "250700000005";
+  const tierRow = seedVerifiedUser(TIER, "Tier One User");
+  tierRow.verification_status = "verified_auto";
+  tierRow.verification_score = 65;
+  seedPayout(tierRow, "NGN");
+  seedPayout(tierRow, "RWF");
+  reply = await send(TIER, "I have 150k NGN and want 170k RWF");
+  check("tier one high value can reach review", reply.includes("*Review listing*"), reply);
+  reply = await send(TIER, "publish");
+  check("tier one publish is blocked by limit", reply.includes("Tier 1 limit reached"), reply);
+  const tierSession = await getSession(TIER);
+  check("tier limit stores pending publish", tierSession?.current_flow === "kyc_upgrade" && tierSession?.context_json?.return_flow === "publish_listing", JSON.stringify(tierSession));
+
   const { listingCardVersion } = require("../lib/listing-card");
   check("listing card version changes with dynamic values", listingCardVersion({
     listing_code: "AKR-LIST-001",
