@@ -23,6 +23,16 @@ function isMainMenuReply(reply = "") {
   return String(reply || "").trim().startsWith("*Akara menu*");
 }
 
+function splitReplyWithMainMenu(reply = "") {
+  const text = String(reply || "");
+  const menuIndex = text.indexOf("*Akara menu*");
+  if (menuIndex <= 0) return null;
+  return {
+    intro: text.slice(0, menuIndex).trim(),
+    menu: text.slice(menuIndex).trim(),
+  };
+}
+
 function mainMenuListPayload() {
   return {
     body: "Choose what you want to do next on Akara.",
@@ -44,6 +54,17 @@ function mainMenuListPayload() {
 
 async function sendAkaraReply(to, reply) {
   if (!reply) return null;
+  const splitMenu = splitReplyWithMainMenu(reply);
+  if (splitMenu) {
+    if (splitMenu.intro) await sendWhatsAppText(to, splitMenu.intro);
+    try {
+      return await sendWhatsAppList(to, mainMenuListPayload());
+    } catch (error) {
+      console.error(`[webhook] menu list failed for ${to}: ${error.message}`);
+      return sendWhatsAppText(to, splitMenu.menu);
+    }
+  }
+
   if (isMainMenuReply(reply)) {
     try {
       return await sendWhatsAppList(to, mainMenuListPayload());

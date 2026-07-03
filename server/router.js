@@ -45,6 +45,7 @@ const { prepareListingPreview, reserveListingByCode, handleCreateListing, handle
 const {
   continueSearchOrShowMatches,
   showOfferMatches,
+  showBrowseOffers,
   showBrowseOrPairMatches,
   handleFindOffer,
   handleSearchResults,
@@ -126,8 +127,8 @@ async function resolveQuotedReply(text, user, incoming = {}) {
       return makeOfferPrompt();
     }
     if (number === 2) {
-      await upsertSession(user, user.whatsapp_phone, "find_offer", "quick", {});
-      return findOfferPrompt();
+      await clearSession(user, user.whatsapp_phone);
+      return showBrowseOffers(user);
     }
     if (number === 3) return getMyListingsReply(user);
     if (number === 4) return getMyDealsReply(user);
@@ -574,6 +575,11 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   if (command === "find match" || command === "find offer" || command === "find offers" || command === "find money" || command === "2" || interpretedAction === "find_offer" || intent === "find_offer") {
     if (isOnHold(user)) return accountOnHoldReply(user);
 
+    if (command === "find offers" || command === "2") {
+      await clearSession(user, user.whatsapp_phone);
+      return showBrowseOffers(user);
+    }
+
     const searchDetails = mergePresentDetails(parseSearchDetails(text), interpretedExchangeDetails);
     if (searchDetails.have_currency && searchDetails.want_currency) {
       return continueSearchOrShowMatches(user, searchDetails);
@@ -628,7 +634,9 @@ async function routeMessage(text, user, session, incoming = {}) {
           title("Stopped"),
           caption("That flow is closed."),
           "",
-          "Tell Akara what you want to do next.",
+          "Choose what you want to do next.",
+          "",
+          mainMenu(),
         ].join("\n")
       : "No problem. Verification paused. Type verify when you are ready.";
   }

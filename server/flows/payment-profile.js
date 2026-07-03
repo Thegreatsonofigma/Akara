@@ -267,7 +267,7 @@ function formatPayoutReview(context) {
         labeled("Bank", context.payment_bank_name),
         labeled("Account", context.payment_account_number),
         labeled("Name", context.payment_account_name),
-        // ...(context.payment_account_resolved ? [caption("Account name confirmed by the bank ✅")] : []),
+        ...(context.payment_account_resolved ? [caption("Account name confirmed by the bank ✅")] : []),
       ]
     : [
         labeled("Type", `${currency} mobile money`),

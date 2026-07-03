@@ -325,6 +325,11 @@ async function run() {
   reply = await send(ALICE, "my listings");
   check("listing appears in scoped view", reply.includes("AKR-LIST-001"), reply);
 
+  reply = await send(ALICE, "I have 50k naira and want 55k RWF");
+  check("duplicate live listing is blocked", reply.includes("*Listing already live*"), reply);
+  check("duplicate listing points to existing reference", reply.includes("AKR-LIST-001"), reply);
+  check("duplicate listing does not open review", !reply.includes("*Review listing*"), reply);
+
   const { listingCardVersion } = require("../lib/listing-card");
   check("listing card version changes with dynamic values", listingCardVersion({
     listing_code: "AKR-LIST-001",
@@ -463,11 +468,11 @@ async function run() {
   check("question answered mid-flow", reply.includes("Akara is free"), reply);
   check("flow survives a question", (await sessionFlow(ALICE)) === "create_listing");
 
-  reply = await send(ALICE, "i wan move 50k naira make i get 55k rwf", {
-    interpret: { action: "create_listing", have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 55000 },
+  reply = await send(ALICE, "i wan move 51k naira make i get 55k rwf", {
+    interpret: { action: "create_listing", have_currency: "NGN", have_amount: 51000, want_currency: "RWF", want_amount: 55000 },
   });
   check("model slots complete the listing", reply.includes("*Review listing*"), reply);
-  check("model direction beats regex misread", reply.includes("*You send:* 50,000 NGN"), reply);
+  check("model direction beats regex misread", reply.includes("*You send:* 51,000 NGN"), reply);
   check("model want side kept", reply.includes("*You receive:* 55,000 RWF"), reply);
 
   reply = await send(ALICE, "make it 60k instead", {
@@ -501,10 +506,8 @@ async function run() {
   // ---------- guided find flow with deterministic escape
   scenario("guided find flow");
   reply = await send(ALICE, "find offers");
-  check("find opens flow", reply.includes("Tell me what currency you need"), reply);
-
-  reply = await send(ALICE, "rwf");
-  check("asks for have currency once", reply.includes("What currency do you have?"), reply);
+  check("find opens marketplace", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
+  check("find does not ask follow-up questions", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you have?"), reply);
 
   reply = await send(ALICE, "menu");
   check("menu escapes find flow", reply.includes("*Akara menu*"), reply);
