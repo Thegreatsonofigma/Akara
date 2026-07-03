@@ -198,18 +198,33 @@ function listingAmountPath(text, { centerX, topY }) {
   return `<g fill="#FFFFFF" transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${(CARD_SCALE * scaleX).toFixed(4)} ${CARD_SCALE})">${glyphs}</g>`;
 }
 
-function amountOutlinePath(text, { fontSize, tracking, leftX = null, centerX = null, topY, targetWidth = null }) {
+function amountOutlinePlacement(text, { fontSize, tracking, leftX = null, centerX = null, topY, targetWidth = null }) {
   const outline = trackedTextPath(text, fontSize, tracking);
   const box = outline.getBoundingBox();
   const naturalWidth = (box.x2 - box.x1) * CARD_SCALE;
   const scaleX = targetWidth ? Math.max(0.72, Math.min(1.18, targetWidth / naturalWidth)) : 1;
   const width = naturalWidth * scaleX;
-  const visualLeft = leftX ?? centerX - width / 2;
+  const visualLeft = leftX ?? (centerX ?? CARD_WIDTH / 2) - width / 2;
   const x = visualLeft - box.x1 * CARD_SCALE * scaleX;
   const y = topY - box.y1 * CARD_SCALE;
+
+  return {
+    box,
+    scaleX,
+    width,
+    visualLeft,
+    visualRight: visualLeft + width,
+    x,
+    y,
+  };
+}
+
+function amountOutlinePath(text, options) {
+  const { fontSize, tracking } = options;
+  const placement = amountOutlinePlacement(text, options);
   const glyphs = amountGlyphs(text, fontSize, tracking);
 
-  return `<g fill="#FFFFFF" transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${(CARD_SCALE * scaleX).toFixed(4)} ${CARD_SCALE})">${glyphs}</g>`;
+  return `<g fill="#FFFFFF" transform="translate(${placement.x.toFixed(3)} ${placement.y.toFixed(3)}) scale(${(CARD_SCALE * placement.scaleX).toFixed(4)} ${CARD_SCALE})">${glyphs}</g>`;
 }
 
 function textOutlineGroup({ text, fontFile, fontSize, centerX, centerY, fill, tracking = 0, targetWidth = null, strokeWidth = 0 }) {
@@ -318,14 +333,37 @@ function completionAmountTextLength(text) {
   return amountTextLength(text) * 2;
 }
 
-function completionAmountPath(text) {
-  return amountOutlinePath(text, {
+function completionAmountLayout(text) {
+  const options = {
     fontSize: RECEIPT_NUMBER_SOURCE_SIZE,
     tracking: RECEIPT_NUMBER_TRACKING,
-    leftX: 535,
+    centerX: CARD_WIDTH / 2,
     topY: 392,
     targetWidth: completionAmountTextLength(text),
-  });
+  };
+  const placement = amountOutlinePlacement(text, options);
+  const glyphs = amountGlyphs(text, RECEIPT_NUMBER_SOURCE_SIZE, RECEIPT_NUMBER_TRACKING);
+
+  return {
+    svg: `<g fill="#FFFFFF" transform="translate(${placement.x.toFixed(3)} ${placement.y.toFixed(3)}) scale(${(CARD_SCALE * placement.scaleX).toFixed(4)} ${CARD_SCALE})">${glyphs}</g>`,
+    bounds: placement,
+  };
+}
+
+function completionAmountPath(text) {
+  return completionAmountLayout(text).svg;
+}
+
+function completionCurrencyChipX(bounds) {
+  if (bounds.width >= 1800) return 708;
+  return Math.max(560, Math.min(bounds.visualLeft + 180, 1220));
+}
+
+function completionStampImage(stamp, bounds) {
+  if (!stamp) return "";
+  const stampSize = 600;
+  const stampX = Math.max(1540, Math.min(bounds.visualRight - stampSize * 0.48, CARD_WIDTH - stampSize - 280));
+  return `<image href="${stamp}" x="${stampX.toFixed(0)}" y="220" width="${stampSize}" height="${stampSize}" preserveAspectRatio="xMidYMid meet"/>`;
 }
 
 function pillWidth(currency) {
@@ -472,6 +510,8 @@ function exchangeCompletionSvg(deal, role) {
   const completedAt = compactDay(deal.completed_at || new Date());
   const receiveAmount = numberText(youReceive.amount);
   const stamp = assetDataUri("success-stamp.png");
+  const amountLayout = completionAmountLayout(receiveAmount);
+  const chipX = completionCurrencyChipX(amountLayout.bounds);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -500,9 +540,9 @@ function exchangeCompletionSvg(deal, role) {
     <tspan>EXCHANGE</tspan><tspan dx="34" class="header-strong">COMPLETED</tspan>
   </text>
 
-  ${completionAmountPath(receiveAmount)}
-  ${currencyChip({ x: 708, y: 616, currency: youReceive.currency, width: 344, height: 176, fontSize: 92 })}
-  ${stamp ? `<image href="${stamp}" x="2320" y="220" width="600" height="600" preserveAspectRatio="xMidYMid meet"/>` : ""}
+  ${amountLayout.svg}
+  ${currencyChip({ x: chipX, y: 616, currency: youReceive.currency, width: 344, height: 176, fontSize: 92 })}
+  ${completionStampImage(stamp, amountLayout.bounds)}
 
   <text x="565" y="1280" class="meta">EXCHANGED</text>
   <text x="565" y="1370" class="meta">
