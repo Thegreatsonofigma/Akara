@@ -61,6 +61,14 @@ const statusLabels = {
   open: "Open",
 };
 
+const disputeOutcomes = {
+  none: "No trade change",
+  keep_reviewing: "Keep paused",
+  resume_trade: "Resume trade",
+  close_refunded: "Close as refunded",
+  close_completed: "Close as completed",
+};
+
 function $(selector) {
   return document.querySelector(selector);
 }
@@ -450,16 +458,31 @@ function renderDeals(rows) {
 function renderDisputes(rows) {
   attachTable("disputes-table", [
     { label: "Deal", render: (row) => escapeHtml(row.deals?.deal_code || "-") },
+    { label: "Deal status", render: (row) => chip(row.deals?.status) },
     { label: "Opened By", render: (row) => escapeHtml(row.users?.display_name || row.users?.whatsapp_phone || "-") },
     { label: "Category", render: (row) => escapeHtml(row.category) },
     { label: "Status", render: (row) => chip(row.status) },
     { label: "Description", render: (row) => escapeHtml(row.description || "-") },
+    { label: "Resolution", render: (row) => escapeHtml(row.resolution || "-") },
     { label: "Created", render: (row) => escapeHtml(date(row.created_at)) },
     {
       label: "Action",
-      render: (row) => select("status", row.id, row.status, ["open", "waiting_for_user", "under_review", "resolved", "rejected"], "dispute"),
+      render: (row) => disputeControls(row),
     },
   ], rows);
+}
+
+function disputeControls(row) {
+  return `
+    <div class="dispute-actions" data-dispute-id="${escapeHtml(row.id)}">
+      ${select("status", row.id, row.status, ["open", "waiting_for_user", "under_review", "resolved", "rejected"], "dispute-draft")}
+      <select data-dispute-outcome="${escapeHtml(row.id)}">
+        ${Object.entries(disputeOutcomes).map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join("")}
+      </select>
+      <textarea data-dispute-resolution="${escapeHtml(row.id)}" placeholder="Resolution note">${escapeHtml(row.resolution || "")}</textarea>
+      <button class="mini-button" data-dispute-apply="${escapeHtml(row.id)}">Apply</button>
+    </div>
+  `;
 }
 
 function select(field, id, value, options, type) {
@@ -527,6 +550,38 @@ async function updateStatus(selectElement) {
   await loadView(state.view);
 }
 
+async function applyDisputeUpdate(button) {
+  const id = button.dataset.disputeApply;
+  const container = button.closest(".dispute-actions");
+  const status = container.querySelector("select[data-type='dispute-draft']").value;
+  const dealOutcome = container.querySelector("select[data-dispute-outcome]").value;
+  const resolution = container.querySelector("textarea[data-dispute-resolution]").value.trim();
+
+  if (["resolved", "rejected"].includes(status) && !resolution) {
+    throw new Error("Add a short resolution note before closing a report.");
+  }
+
+  if (status === "resolved" && dealOutcome === "none") {
+    throw new Error("Choose what should happen to the trade before marking this report resolved.");
+  }
+
+  if (!["resolved", "rejected"].includes(status) && !["none", "keep_reviewing"].includes(dealOutcome)) {
+    throw new Error("Move the report to resolved before closing or resuming the trade.");
+  }
+
+  await api(`/admin/api/disputes/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status,
+      deal_outcome: dealOutcome,
+      resolution,
+    }),
+  });
+
+  showNotice("Report updated and users notified.");
+  await loadView(state.view);
+}
+
 async function openVerificationDocument(button) {
   const signed = await api("/admin/api/storage-signed-url", {
     method: "POST",
@@ -574,7 +629,7 @@ function bindEvents() {
   });
 
   document.addEventListener("change", (event) => {
-    if (event.target.matches("select[data-type]")) {
+    if (event.target.matches("select[data-type='user'], select[data-type='listing']")) {
       updateStatus(event.target).catch((error) => showNotice(error.message, true));
     }
   });
@@ -586,6 +641,10 @@ function bindEvents() {
 
     if (event.target.matches("button[data-decision]")) {
       decideVerification(event.target).catch((error) => showNotice(error.message, true));
+    }
+
+    if (event.target.matches("button[data-dispute-apply]")) {
+      applyDisputeUpdate(event.target).catch((error) => showNotice(error.message, true));
     }
   });
 }
