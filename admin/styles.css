@@ -848,6 +848,35 @@ td {
   gap: 8px;
 }
 
+.dispute-actions {
+  display: grid;
+  width: min(360px, 52vw);
+  gap: 8px;
+  white-space: normal;
+}
+
+.dispute-actions select,
+.dispute-actions textarea,
+.dispute-actions button {
+  width: 100%;
+}
+
+.dispute-actions textarea {
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 8px 10px;
+  outline: 0;
+}
+
+.dispute-actions textarea:focus {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
 .mini-button {
   min-height: 32px;
   border: 1px solid var(--line);

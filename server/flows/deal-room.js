@@ -143,13 +143,49 @@ function disputeGuidance(role, dealCode) {
   return [
     title(`Dispute review ${dealCode}`),
     "",
-    "Do not send any new payment for this trade until admin reviews it.",
+    "This trade is paused while Akara reviews it.",
+    "Do not send a new payment unless Akara confirms the next step.",
     "Keep your receipt, payment alert, bank or MoMo history, and chat trail ready.",
     role === "maker"
       ? "Because this is your listing, do not release or resend value unless Akara confirms the review outcome."
       : "Because you opened or joined this trade, do not repeat the transfer unless Akara confirms the review outcome.",
     "",
     caption("Admin will compare the transaction reference, receipts, payout names, amounts, and timestamps."),
+  ].join("\n");
+}
+
+async function dealHasAnyProof(dealId, firstUserId, secondUserId) {
+  const [firstHasProof, secondHasProof] = await Promise.all([
+    dealUserHasProof(dealId, firstUserId),
+    dealUserHasProof(dealId, secondUserId),
+  ]);
+  return Boolean(firstHasProof || secondHasProof);
+}
+
+function dealHasTradeActivity(deal) {
+  return Boolean(
+    deal?.maker_sent_at ||
+    deal?.taker_sent_at ||
+    deal?.maker_received_at ||
+    deal?.taker_received_at
+  );
+}
+
+function cannotCancelTradeReply(deal, role, dealCode, reason) {
+  const { youSend, youReceive } = dealPartySummary(role, deal);
+  return [
+    title("Cannot close from chat"),
+    "",
+    reason,
+    "",
+    `Transaction ref: ${dealCode}`,
+    `You send: ${formatMoney(youSend.amount, youSend.currency)}`,
+    `You receive: ${formatMoney(youReceive.amount, youReceive.currency)}`,
+    "",
+    "If this trade needs to stop, open a dispute for this transaction.",
+    "If money has moved, Akara will only close it after refund proof and receipt confirmation are clear.",
+    "",
+    `${action(`dispute ${dealCode}`)} to start the review`,
   ].join("\n");
 }
 
@@ -235,7 +271,7 @@ async function notifyExchangeCompleteForOtherUser(otherUserId, deal, otherRole) 
     feeIncludedNote(),
   ].join("\n"));
   if (target?.whatsapp_phone) {
-    sendExchangeCompletionCard(
+    await sendExchangeCompletionCard(
       target.whatsapp_phone,
       deal,
       otherRole,
@@ -301,14 +337,16 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
   await notifyExchangeCompleteForOtherUser(otherUserId, completedDeal, otherRole).catch((error) => {
     console.error(`[deal] completion notice failed for ${dealCode}: ${error.message}`);
   });
-  sendExchangeCompletionCard(
-    user.whatsapp_phone,
-    completedDeal,
-    role,
-    `Exchange receipt for ${dealCode}`
-  ).catch((error) => {
-    console.error(`[deal] completion card failed for ${user.whatsapp_phone}: ${error.message}`);
-  });
+  if (user.whatsapp_phone) {
+    await sendExchangeCompletionCard(
+      user.whatsapp_phone,
+      completedDeal,
+      role,
+      `Exchange receipt for ${dealCode}`
+    ).catch((error) => {
+      console.error(`[deal] completion card failed for ${user.whatsapp_phone}: ${error.message}`);
+    });
+  }
   await clearSession(user, user.whatsapp_phone);
 
   const { youSend } = dealPartySummary(role, deal);
@@ -396,14 +434,16 @@ async function handleDealRoom(text, user, session, incoming = {}) {
   }
 
   if (isCancelTradeIntent(command)) {
-    const otherHasReceipt = await dealUserHasProof(dealId, otherUserId);
-    if (otherHasReceipt) {
-      return [
-        "This trade cannot be cancelled from chat.",
-        "",
-        "Your trade partner has already uploaded a receipt.",
-        "Reply received if the money landed, or dispute if anything looks wrong.",
-      ].join("\n");
+    const proofExists = await dealHasAnyProof(dealId, user.id, otherUserId);
+    if (dealHasTradeActivity(deal) || proofExists) {
+      return cannotCancelTradeReply(
+        deal,
+        role,
+        dealCode,
+        proofExists
+          ? "A receipt has already been uploaded for this trade."
+          : "Payment activity has already been recorded for this trade."
+      );
     }
 
     const cancellations = Number(user.cancelled_deals_24h || 0) + 1;
@@ -594,6 +634,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
 
   if (incoming.media?.id || isSentIntent(command)) {
     const userAlreadyReceived = Boolean(deal[dealReceivedField(role)]);
+    const otherAlreadySent = Boolean(deal[dealSentField(otherRole)]);
     let proof = null;
     let proofDelivery = { sent: false, url: "" };
     if (incoming.media?.id) {
@@ -625,7 +666,9 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       `Payment marked sent ✅ ${dealCode}`,
       "",
       `Expected amount: ${formatMoney(otherSummary.youReceive.amount, otherSummary.youReceive.currency)}`,
-      "Check your bank or MoMo app before sending your side.",
+      otherAlreadySent
+        ? "Your side is already marked paid. Check your bank or MoMo app, then reply received once the funds land."
+        : "Check your bank or MoMo app before sending your side.",
       proofDelivery.sent ? "Receipt attached in this chat." : "",
       proofDelivery.url ? `View receipt: ${proofDelivery.url}` : "",
       "",

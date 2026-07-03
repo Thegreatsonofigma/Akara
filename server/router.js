@@ -573,6 +573,10 @@ async function routeMessage(text, user, session, incoming = {}) {
   }
 
   if (command === "cancel" || command === "stop") {
+    if (session?.current_flow === "deal_room") {
+      return handleDealRoom("cancel trade", user, session, incoming);
+    }
+
     await clearSession(user, user.whatsapp_phone);
     return isVerified(user)
       ? [

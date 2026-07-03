@@ -6,6 +6,7 @@ const { sendWhatsAppText } = require("./lib/whatsapp");
 const { sendVerificationSuccessCard } = require("./lib/listing-card");
 const { updateUser } = require("./db/users");
 const { mainMenu } = require("./messages/copy");
+const { displayReference } = require("./db/listings");
 
 function requireAdmin(req) {
   const token = req.headers["x-akara-admin-token"];
@@ -42,6 +43,141 @@ function countBy(items, fieldOrGetter) {
     counts[label] = (counts[label] || 0) + 1;
     return counts;
   }, {});
+}
+
+function dealParticipantPhones(deal = {}) {
+  return [
+    deal.maker?.whatsapp_phone,
+    deal.taker?.whatsapp_phone,
+  ].filter(Boolean);
+}
+
+function deriveDealStatusAfterDispute(deal = {}) {
+  if (deal.maker_received_at && deal.taker_received_at) return "closed";
+  if ((deal.maker_sent_at && deal.taker_sent_at) || deal.maker_received_at || deal.taker_received_at) return "partially_confirmed";
+  if (deal.maker_sent_at) return "maker_sent";
+  if (deal.taker_sent_at) return "taker_sent";
+  return "reserved";
+}
+
+function disputeStatusLabel(status) {
+  const labels = {
+    open: "Open",
+    waiting_for_user: "Waiting for user",
+    under_review: "Under review",
+    resolved: "Resolved",
+    rejected: "Rejected",
+  };
+  return labels[status] || String(status || "Updated").replaceAll("_", " ");
+}
+
+function disputeOutcomeLabel(outcome) {
+  const labels = {
+    none: "No trade change",
+    keep_reviewing: "Trade remains paused",
+    resume_trade: "Trade can continue",
+    close_refunded: "Trade closed after refund",
+    close_completed: "Trade completed",
+  };
+  return labels[outcome] || labels.none;
+}
+
+function disputeNotice(dispute, outcome) {
+  const dealCode = displayReference(dispute.deals?.deal_code, "deal");
+  const lines = [
+    `Dispute update for ${dealCode}`,
+    "",
+    `Status: ${disputeStatusLabel(dispute.status)}`,
+  ];
+
+  if (dispute.resolution) lines.push(`Admin note: ${dispute.resolution}`);
+
+  if (outcome && outcome !== "none") {
+    lines.push("", `Trade outcome: ${disputeOutcomeLabel(outcome)}`);
+  }
+
+  if (outcome === "keep_reviewing" || ["open", "waiting_for_user", "under_review"].includes(dispute.status)) {
+    lines.push("This trade remains paused. Do not send new money until Akara gives the next update.");
+  } else if (outcome === "resume_trade") {
+    lines.push("You can continue this trade from the transaction room. Check the latest status before sending anything.");
+  } else if (outcome === "close_refunded") {
+    lines.push("This trade is closed as refunded. Do not send more money for this transaction.");
+  } else if (outcome === "close_completed") {
+    lines.push("This trade is closed as completed. Both sides should keep their receipts for records.");
+  } else if (dispute.status === "rejected") {
+    lines.push("The dispute was not accepted based on the current review. You can continue the trade if it is still active.");
+  }
+
+  return lines.join("\n");
+}
+
+async function getDisputeWithDeal(disputeId) {
+  const rows = await supabaseRequest(
+    [
+      "disputes?select=id,deal_id,opened_by_user_id,category,description,status,resolution,created_at,resolved_at,",
+      "deals!disputes_deal_id_fkey(id,deal_code,status,maker_user_id,taker_user_id,have_currency,want_currency,have_amount,want_amount,maker_sent_at,taker_sent_at,maker_received_at,taker_received_at,",
+      "maker:users!deals_maker_user_id_fkey(whatsapp_phone,display_name),taker:users!deals_taker_user_id_fkey(whatsapp_phone,display_name)),",
+      "users!disputes_opened_by_user_id_fkey(whatsapp_phone,display_name)",
+      `&id=eq.${filterValue(disputeId)}`,
+      "&limit=1",
+    ].join("")
+  );
+
+  const dispute = rows[0];
+  if (!dispute) return null;
+  if (dispute.deals?.id && (dispute.deals?.maker || dispute.deals?.taker)) return dispute;
+
+  const dealRows = await supabaseRequest(`deals?id=eq.${filterValue(dispute.deal_id)}&limit=1`);
+  const deal = dealRows[0] || dispute.deals || null;
+  if (!deal) return dispute;
+
+  const [makerRows, takerRows] = await Promise.all([
+    supabaseRequest(`users?id=eq.${filterValue(deal.maker_user_id)}&select=whatsapp_phone,display_name&limit=1`),
+    supabaseRequest(`users?id=eq.${filterValue(deal.taker_user_id)}&select=whatsapp_phone,display_name&limit=1`),
+  ]);
+  dispute.deals = {
+    ...deal,
+    maker: makerRows[0] || {},
+    taker: takerRows[0] || {},
+  };
+  return dispute;
+}
+
+async function applyDisputeDealOutcome(dispute, outcome, status) {
+  const deal = dispute?.deals;
+  if (!deal?.id) return;
+
+  const now = new Date().toISOString();
+  let patch = null;
+  if (["open", "waiting_for_user", "under_review"].includes(status) || outcome === "keep_reviewing") {
+    patch = { status: "disputed" };
+  } else if (outcome === "resume_trade") {
+    patch = { status: deriveDealStatusAfterDispute(deal) };
+  } else if (outcome === "close_refunded") {
+    patch = {
+      status: "cancelled",
+      cancelled_at: now,
+      cancellation_reason: "Dispute resolved after refund confirmation.",
+    };
+  } else if (outcome === "close_completed") {
+    patch = {
+      status: "closed",
+      completed_at: now,
+    };
+  } else if (status === "rejected") {
+    patch = { status: deriveDealStatusAfterDispute(deal) };
+  }
+
+  if (!patch) return;
+  await supabaseRequest(`deals?id=eq.${filterValue(deal.id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+async function notifyDisputeParticipants(dispute, outcome) {
+  const message = disputeNotice(dispute, outcome);
+  await Promise.allSettled(dealParticipantPhones(dispute.deals).map((phone) => sendWhatsAppText(phone, message)));
 }
 
 async function getAdminOverview() {
@@ -135,7 +271,7 @@ async function handleAdminApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/admin/api/disputes") {
     const disputes = await supabaseRequest(
-      "disputes?select=id,category,description,status,resolution,created_at,resolved_at,deals!disputes_deal_id_fkey(deal_code,status),users!disputes_opened_by_user_id_fkey(whatsapp_phone,display_name)&order=created_at.desc&limit=100"
+      "disputes?select=id,deal_id,category,description,status,resolution,created_at,resolved_at,deals!disputes_deal_id_fkey(id,deal_code,status,maker_user_id,taker_user_id,maker_sent_at,taker_sent_at,maker_received_at,taker_received_at,maker:users!deals_maker_user_id_fkey(whatsapp_phone,display_name),taker:users!deals_taker_user_id_fkey(whatsapp_phone,display_name)),users!disputes_opened_by_user_id_fkey(whatsapp_phone,display_name)&order=created_at.desc&limit=100"
     );
     return jsonResponse(res, 200, { ok: true, data: disputes });
   }
@@ -221,6 +357,8 @@ async function handleAdminApi(req, res, url) {
   if (req.method === "PATCH" && disputeStatusMatch) {
     const body = await readJsonBody(req);
     const allowed = ["open", "waiting_for_user", "under_review", "resolved", "rejected"];
+    const allowedOutcomes = ["none", "keep_reviewing", "resume_trade", "close_refunded", "close_completed"];
+    const outcome = allowedOutcomes.includes(body.deal_outcome) ? body.deal_outcome : "none";
     if (!allowed.includes(body.status)) return jsonResponse(res, 400, { ok: false, error: "Invalid dispute status." });
     const rows = await supabaseRequest(`disputes?id=eq.${filterValue(disputeStatusMatch[1])}`, {
       method: "PATCH",
@@ -230,6 +368,13 @@ async function handleAdminApi(req, res, url) {
         resolved_at: ["resolved", "rejected"].includes(body.status) ? new Date().toISOString() : null,
       }),
     });
+
+    const dispute = await getDisputeWithDeal(disputeStatusMatch[1]);
+    if (dispute) {
+      await applyDisputeDealOutcome(dispute, outcome, body.status);
+      await notifyDisputeParticipants({ ...dispute, status: body.status, resolution: body.resolution || null }, outcome);
+    }
+
     return jsonResponse(res, 200, { ok: true, data: rows[0] });
   }
 

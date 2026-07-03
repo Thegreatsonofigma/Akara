@@ -305,7 +305,12 @@ async function run() {
 
   reply = await send(ALICE, "what's next for my trade?", { interpret: { action: "trade_action" } });
   check("trade recall reopens deal", reply.includes("AKR-TXN-001"), reply);
-  await send(ALICE, "cancel");
+  const recalledDeal = __table("deals").find((row) => row.deal_code === "AKR-TXN-001");
+  recalledDeal.taker_sent_at = new Date().toISOString();
+  reply = await send(ALICE, "cancel");
+  check("active trade cancel stays deal-specific", reply.includes("Cannot close from chat"), reply);
+  check("active trade cancel points to dispute", reply.includes("dispute AKR-TXN-001"), reply);
+  check("active trade cancel does not show profile actions", !reply.includes("Manage payout details"), reply);
 
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");
