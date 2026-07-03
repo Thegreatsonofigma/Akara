@@ -1,6 +1,6 @@
 const { supabaseRequest, filterValue, uploadSupabaseStorage } = require("../lib/supabase");
 const { getWhatsAppMedia, mediaExtension } = require("../lib/whatsapp");
-const { title, normalizeShortText } = require("../lib/format");
+const { title, action, normalizeShortText } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { getUserById, updateUser, latestVerificationRequest } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
@@ -78,7 +78,13 @@ async function startVerification(user) {
 
 async function finishVerificationSubmission(user, requestId) {
   const freshUser = await getUserById(user.id) || user;
-  const isTierOneReady = freshUser.verification_status === "verified_auto" && Number(freshUser.verification_score || 0) >= 65;
+  const request = await latestVerificationRequest(user.id);
+  const hasIdentityMedia = Boolean(request?.document_front_path && request?.selfie_path);
+  const hasLegalName = Boolean(freshUser.legal_name || request?.extracted_name);
+  const isTierOneReady = freshUser.verification_status === "verified_auto"
+    && Number(freshUser.verification_score || 0) >= 65
+    && hasIdentityMedia
+    && hasLegalName;
 
   await supabaseRequest(`verification_requests?id=eq.${filterValue(requestId)}`, {
     method: "PATCH",
@@ -86,8 +92,8 @@ async function finishVerificationSubmission(user, requestId) {
       status: isTierOneReady ? "verified_auto" : "pending_review",
       automated_decision: isTierOneReady ? "tier_1_approved" : "manual_review",
       automated_reason: isTierOneReady
-        ? "Tier 1 auto-check passed because payout account name matches the submitted KYC name. Higher limits still require admin review."
-        : "Identity documents and at least one payment profile collected. Admin review required.",
+        ? "Tier 1 auto-check passed because ID document, selfie, legal name, and payout account name were collected and matched against available profile signals."
+        : "Identity documents and at least one payment profile collected, but one or more auto-check signals need admin review.",
     }),
   });
 
@@ -97,16 +103,17 @@ async function finishVerificationSubmission(user, requestId) {
 
   await clearSession(user, user.whatsapp_phone);
   if (isTierOneReady) {
-    sendVerificationSuccessCard(user.whatsapp_phone).catch((error) => {
+    const successCaption = [
+      title("Verified"),
+      "",
+      "Your ID, selfie, and payout name checks passed.",
+      "",
+      "You can now see offers, create listings, open Akara Trades, and manage payout details.",
+    ].join("\n");
+    await sendVerificationSuccessCard(user.whatsapp_phone, successCaption).catch((error) => {
       console.error(`[verification] success card failed for ${user.whatsapp_phone}: ${error.message}`);
     });
-    return [
-      "Verification submitted ✅",
-      "",
-      "Tier 1 is active. Your payout name matches your KYC name, so you can start with smaller Akara trades while higher limits wait for review.",
-      "",
-      mainMenu(),
-    ].join("\n");
+    return mainMenu();
   }
 
   return [
@@ -278,7 +285,12 @@ async function handleVerification(text, user, session, incoming = {}) {
       return finishVerificationSubmission(user, requestId);
     }
 
-    return "Reply another to add one more, or submit to send for review.";
+    return [
+      "Choose what happens next.",
+      "",
+      `${action("another")} to add one more payout detail`,
+      `${action("submit")} to finish verification`,
+    ].join("\n");
   }
 
   await clearSession(user, user.whatsapp_phone);

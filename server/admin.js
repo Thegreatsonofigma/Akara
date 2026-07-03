@@ -6,6 +6,7 @@ const { sendWhatsAppText } = require("./lib/whatsapp");
 const { sendVerificationSuccessCard } = require("./lib/listing-card");
 const { updateUser } = require("./db/users");
 const { mainMenu } = require("./messages/copy");
+const { title } = require("./lib/format");
 const { displayReference } = require("./db/listings");
 
 function requireAdmin(req) {
@@ -319,22 +320,26 @@ async function handleAdminApi(req, res, url) {
       verification_score: approved ? 80 : 0,
     });
 
-    const notice = approved
-      ? [
-        "You are verified ✅",
-        "",
-        mainMenu(),
-        "",
-        "Try: I have 50k naira and want 55k RWF",
-      ].join("\n")
-      : "Your Akara verification was not approved. Reply verify to submit again with clearer details.";
-
-    sendWhatsAppText(user.whatsapp_phone, notice).catch((error) => {
-      console.error(`[admin] verification notice failed for ${user.whatsapp_phone}: ${error.message}`);
-    });
     if (approved) {
-      sendVerificationSuccessCard(user.whatsapp_phone).catch((error) => {
+      const caption = [
+        title("Verified"),
+        "",
+        "Your Akara profile is approved.",
+        "",
+        "You can now see offers, create listings, open Akara Trades, and manage payout details.",
+      ].join("\n");
+      await sendVerificationSuccessCard(user.whatsapp_phone, caption).catch((error) => {
         console.error(`[admin] verification card failed for ${user.whatsapp_phone}: ${error.message}`);
+      });
+      await sendWhatsAppText(user.whatsapp_phone, mainMenu()).catch((error) => {
+        console.error(`[admin] verification menu failed for ${user.whatsapp_phone}: ${error.message}`);
+      });
+    } else {
+      sendWhatsAppText(
+        user.whatsapp_phone,
+        "Your Akara verification was not approved. Reply verify to submit again with clearer details."
+      ).catch((error) => {
+        console.error(`[admin] verification notice failed for ${user.whatsapp_phone}: ${error.message}`);
       });
     }
 

@@ -152,19 +152,53 @@ function formatListingReview(context) {
 // "edit" reply and by a direct edit request from profile settings, so a user
 // who asks to edit is never bounced through the review screen first.
 async function startListingEdit(user, context, intro = title("Edit listing")) {
-  const editContext = {
-    ...(context.editing_listing_id ? { editing_listing_id: context.editing_listing_id } : {}),
-    ...(context.listing_code ? { listing_code: context.listing_code } : {}),
-    ...(context.previous_listing_status ? { previous_listing_status: context.previous_listing_status } : {}),
-  };
-  await upsertSession(user, user.whatsapp_phone, "create_listing", "have_currency", editContext);
+  const hasReviewDetails = context.have_currency && context.want_currency && context.have_amount && context.want_amount;
+  if (!hasReviewDetails) {
+    const editContext = {
+      ...(context.editing_listing_id ? { editing_listing_id: context.editing_listing_id } : {}),
+      ...(context.listing_code ? { listing_code: context.listing_code } : {}),
+      ...(context.previous_listing_status ? { previous_listing_status: context.previous_listing_status } : {}),
+    };
+    await upsertSession(user, user.whatsapp_phone, "create_listing", "have_currency", editContext);
+    return [
+      intro,
+      "",
+      "What currency do you have?",
+      "",
+      currencyHelpLine(),
+    ].join("\n");
+  }
+
+  await upsertSession(user, user.whatsapp_phone, "create_listing", "edit_choice", context);
+  return listingEditMenu(context);
+}
+
+function listingEditMenu(context, intro = title("What do you want to edit?")) {
   return [
     intro,
+    caption("Choose only the part you want to change."),
     "",
-    "What currency do you have?",
+    `1. ${action("send amount")} ${formatMoney(context.have_amount, context.have_currency)}`,
+    `2. ${action("receive amount")} ${formatMoney(context.want_amount, context.want_currency)}`,
+    `3. ${action("terms")} ${listingTypeLabel(context.listing_type || "fixed")}`,
+    `4. ${action("currencies")}`,
     "",
-    currencyHelpLine(),
+    `${action("publish")} to continue with publication`,
+    `${action("cancel")} to stop`,
   ].join("\n");
+}
+
+function listingEditChoice(text) {
+  const command = compactText(text);
+  if (/^(1|send amount|send|have amount|amount i send|amount to send)$/.test(command)) return "have_amount";
+  if (/^(2|receive amount|receive|get amount|want amount|amount i receive|amount to receive)$/.test(command)) return "want_amount";
+  if (/^(3|terms|term|rate terms|fixed|flexible|negotiable)$/.test(command)) return "terms";
+  if (/^(4|currencies|currency|pair|currency pair)$/.test(command)) return "currencies";
+  if (/\bsend\b.*\bamount\b/.test(command) || /\bhave\b.*\bamount\b/.test(command)) return "have_amount";
+  if (/\b(receive|get|want)\b.*\bamount\b/.test(command)) return "want_amount";
+  if (/\b(term|fixed|flexible|negotiable)\b/.test(command)) return "terms";
+  if (/\bcurrenc(y|ies)|pair\b/.test(command)) return "currencies";
+  return null;
 }
 
 async function prepareListingPreview(user, details, intro = "") {

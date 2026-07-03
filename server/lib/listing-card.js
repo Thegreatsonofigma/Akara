@@ -266,6 +266,28 @@ function textOutlineGroup({ text, fontFile, fontSize, centerX, centerY, fill, tr
   return `<g fill="${fill}"${stroke} transform="translate(${x.toFixed(3)} ${y.toFixed(3)})">${glyphs}</g>`;
 }
 
+function textRunGroup({ runs, x, y, fontSize, tracking = 0, fill = "#FFFFFF" }) {
+  const items = [];
+  runs.forEach((run) => {
+    const font = parsedFont(run.fontFile);
+    [...String(run.text || "")].forEach((char) => items.push({ char, font }));
+  });
+
+  let cursor = 0;
+  const glyphs = items
+    .map(({ char, font }, index) => {
+      const glyph = font.charToGlyph(char);
+      const glyphPath = glyph.getPath(Number(cursor.toFixed(2)), 0, fontSize);
+      cursor += (glyph.advanceWidth * fontSize) / font.unitsPerEm;
+      if (index < items.length - 1) cursor += tracking;
+      const data = closedPathData(glyphPath);
+      return data ? `<path d="${data}"/>` : "";
+    })
+    .join("");
+
+  return `<g fill="${fill}" transform="translate(${x} ${y})">${glyphs}</g>`;
+}
+
 function listingCurrencyTextWidth(currency) {
   const code = String(currency || "").toUpperCase();
   if (code === "NGN") return 202;
@@ -376,13 +398,16 @@ function completionAmountPath(text) {
 
 function completionCurrencyChipX(bounds) {
   if (bounds.width >= 1800) return 708;
-  return Math.max(560, Math.min(bounds.visualLeft + 180, 1220));
+  return 780;
 }
 
 function completionStampImage(stamp, bounds) {
   if (!stamp) return "";
   const stampSize = 600;
-  const stampX = Math.max(1540, Math.min(bounds.visualRight - stampSize * 0.48, CARD_WIDTH - stampSize - 280));
+  const stampX =
+    bounds.width >= 1800
+      ? Math.max(1540, Math.min(bounds.visualRight - stampSize * 0.48, CARD_WIDTH - stampSize - 280))
+      : Math.max(2100, Math.min(bounds.visualRight - 170, CARD_WIDTH - stampSize - 280));
   return `<image href="${stamp}" x="${stampX.toFixed(0)}" y="220" width="${stampSize}" height="${stampSize}" preserveAspectRatio="xMidYMid meet"/>`;
 }
 
@@ -560,9 +585,17 @@ function exchangeCompletionSvg(deal, role) {
   const chipX = completionCurrencyChipX(amountLayout.bounds);
   const timeParts = timeLabelParts(completedAt);
   const dateParts = dateLabelParts(completedAt);
+  const leftBlockX = 616;
+  const middleBlockX = 1148;
+  const rightBlockX = 1830;
   const lowerLine1Y = 1280;
   const lowerLine2Y = 1370;
   const lowerLine3Y = 1438;
+  const middleDateY = 1396;
+  const siteY = 1412;
+  const book = fontFiles.camptonBook;
+  const bold = fontFiles.camptonBlack;
+  const semiBold = fontFiles.camptonSemiBold;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -579,7 +612,7 @@ function exchangeCompletionSvg(deal, role) {
     .header { font-family: 'CamptonCard', Arial, sans-serif; font-size: 54px; fill: #fff; letter-spacing: 18px; }
     .header-strong { font-weight: 900; letter-spacing: 12px; }
     .receipt-meta { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_META_FONT_SIZE}px; fill: #fff; font-weight: 400; letter-spacing: ${RECEIPT_TEXT_TRACKING}px; text-transform: uppercase; }
-    .receipt-strong { font-weight: 700; }
+    .receipt-strong { font-weight: 900; }
     .receipt-caption { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_CAPTION_FONT_SIZE}px; fill: #fff; font-weight: 400; letter-spacing: ${RECEIPT_TEXT_TRACKING}px; text-transform: uppercase; }
     .receipt-site { font-family: 'CamptonCard', Arial, sans-serif; font-size: ${RECEIPT_SITE_FONT_SIZE}px; fill: #fff; font-weight: 600; letter-spacing: ${RECEIPT_TEXT_TRACKING}px; text-transform: uppercase; }
   </style>
@@ -595,23 +628,73 @@ function exchangeCompletionSvg(deal, role) {
   ${currencyChip({ x: chipX, y: 616, currency: youReceive.currency, width: 344, height: 176, fontSize: 92 })}
   ${completionStampImage(stamp, amountLayout.bounds)}
 
-  <text x="565" y="${lowerLine1Y}" class="receipt-meta">EXCHANGED</text>
-  <text x="565" y="${lowerLine2Y}" class="receipt-meta">
-    <tspan class="receipt-strong">${escapeXml(numberText(youSend.amount))}</tspan><tspan dx="24" class="receipt-strong">${escapeXml(String(youSend.currency || "").toUpperCase())}</tspan>
-  </text>
-  <text x="565" y="${lowerLine3Y}" class="receipt-meta">
-    <tspan>FOR</tspan><tspan dx="24" class="receipt-strong">${escapeXml(numberText(youReceive.amount))}</tspan><tspan dx="24" class="receipt-strong">${escapeXml(String(youReceive.currency || "").toUpperCase())}</tspan>
-  </text>
+  ${textRunGroup({
+    runs: [{ text: "EXCHANGED", fontFile: book }],
+    x: leftBlockX,
+    y: lowerLine1Y,
+    fontSize: RECEIPT_META_FONT_SIZE,
+    tracking: RECEIPT_TEXT_TRACKING,
+  })}
+  ${textRunGroup({
+    runs: [
+      { text: numberText(youSend.amount), fontFile: bold },
+      { text: ` ${String(youSend.currency || "").toUpperCase()}`, fontFile: bold },
+    ],
+    x: leftBlockX,
+    y: lowerLine2Y,
+    fontSize: RECEIPT_META_FONT_SIZE,
+    tracking: RECEIPT_TEXT_TRACKING,
+  })}
+  ${textRunGroup({
+    runs: [
+      { text: "FOR ", fontFile: book },
+      { text: numberText(youReceive.amount), fontFile: bold },
+      { text: ` ${String(youReceive.currency || "").toUpperCase()}`, fontFile: bold },
+    ],
+    x: leftBlockX,
+    y: lowerLine3Y,
+    fontSize: RECEIPT_META_FONT_SIZE,
+    tracking: RECEIPT_TEXT_TRACKING,
+  })}
 
-  <text x="1195" y="${lowerLine1Y}" class="receipt-meta">
-    <tspan>${escapeXml(timeParts.time)}</tspan><tspan dx="24" class="receipt-strong">${escapeXml(timeParts.period)}</tspan><tspan dx="24">- ${escapeXml(timeParts.weekday)}</tspan>
-  </text>
-  <text x="1195" y="${lowerLine3Y}" class="receipt-meta">
-    <tspan class="receipt-strong">${escapeXml(dateParts.day)}</tspan><tspan dx="24">-</tspan><tspan dx="24" class="receipt-strong">${escapeXml(dateParts.month)}</tspan><tspan dx="24">- ${escapeXml(dateParts.year)}</tspan>
-  </text>
+  ${textRunGroup({
+    runs: [
+      { text: timeParts.time, fontFile: book },
+      { text: ` ${timeParts.period}`, fontFile: bold },
+      { text: ` - ${timeParts.weekday}`, fontFile: book },
+    ],
+    x: middleBlockX,
+    y: lowerLine1Y,
+    fontSize: RECEIPT_META_FONT_SIZE,
+    tracking: RECEIPT_TEXT_TRACKING,
+  })}
+  ${textRunGroup({
+    runs: [
+      { text: dateParts.day, fontFile: bold },
+      { text: " - ", fontFile: book },
+      { text: dateParts.month, fontFile: bold },
+      { text: ` - ${dateParts.year}`, fontFile: book },
+    ],
+    x: middleBlockX,
+    y: middleDateY,
+    fontSize: RECEIPT_META_FONT_SIZE,
+    tracking: RECEIPT_TEXT_TRACKING,
+  })}
 
-  <text x="1996" y="${lowerLine1Y}" class="receipt-caption">READY TO SWAP? VISIT AKARA</text>
-  <text x="1996" y="${lowerLine3Y}" class="receipt-site">TRYAKARA.COM</text>
+  ${textRunGroup({
+    runs: [{ text: "READY TO SWAP? VISIT AKARA", fontFile: book }],
+    x: rightBlockX,
+    y: lowerLine1Y,
+    fontSize: RECEIPT_CAPTION_FONT_SIZE,
+    tracking: RECEIPT_TEXT_TRACKING,
+  })}
+  ${textRunGroup({
+    runs: [{ text: "TRYAKARA.COM", fontFile: semiBold }],
+    x: rightBlockX,
+    y: siteY,
+    fontSize: RECEIPT_SITE_FONT_SIZE,
+    tracking: RECEIPT_TEXT_TRACKING,
+  })}
 </svg>`;
 }
 

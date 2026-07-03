@@ -455,7 +455,7 @@ async function assessPayoutNameTrust(user, payoutName, { notifyVerificationSucce
         method: "PATCH",
         body: JSON.stringify({
           automated_decision: "tier_1_candidate",
-          automated_reason: "Payout account name matches the submitted KYC name. Tier 1 auto-check passed, pending higher-limit review.",
+          automated_reason: "Payout account name matches the submitted KYC name. Tier 1 auto-check passed.",
         }),
       });
     }
@@ -527,7 +527,7 @@ async function savePaymentProfile(user, context, { notifyVerificationSuccess = t
 
   if (context.payment_profile_id) {
     const rows = await supabaseRequest(
-      `payment_profiles?id=eq.${filterValue(context.payment_profile_id)}&user_id=eq.${filterValue(user.id)}`,
+      `payment_profiles?user_id=eq.${filterValue(user.id)}&currency=eq.${filterValue(currency)}`,
       {
         method: "PATCH",
         body: JSON.stringify({
@@ -540,6 +540,27 @@ async function savePaymentProfile(user, context, { notifyVerificationSuccess = t
       }
     );
     const profile = rows[0] || null;
+    await assessPayoutNameTrust(user, context.payment_account_name, { notifyVerificationSuccess }).catch((error) => {
+      console.error(`[kyc] payout name check failed for ${user.id}: ${error.message}`);
+    });
+    return profile;
+  }
+
+  const existingRows = await supabaseRequest(
+    `payment_profiles?user_id=eq.${filterValue(user.id)}&currency=eq.${filterValue(currency)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        ...body,
+        bank_name: method === "bank" ? body.bank_name : null,
+        account_number_encrypted: method === "bank" ? body.account_number_encrypted : null,
+        momo_network: method === "momo" ? body.momo_network : null,
+        momo_number_encrypted: method === "momo" ? body.momo_number_encrypted : null,
+      }),
+    }
+  );
+  if (existingRows.length) {
+    const profile = existingRows[0] || null;
     await assessPayoutNameTrust(user, context.payment_account_name, { notifyVerificationSuccess }).catch((error) => {
       console.error(`[kyc] payout name check failed for ${user.id}: ${error.message}`);
     });
@@ -573,7 +594,8 @@ async function finishPaymentProfileSave(user, flow, context) {
       "Payout detail saved ✅",
       "",
       "Add another payout method?",
-      "Reply another, or submit.",
+      `${action("another")} to add one more`,
+      `${action("submit")} to finish verification`,
     ].join("\n");
   }
 
