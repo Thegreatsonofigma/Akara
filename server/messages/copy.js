@@ -14,8 +14,8 @@ function menuOptionLines() {
 
 function mainMenu() {
   return [
-    title("Akara menu"),
-    caption("Choose a number or type the action."),
+    title("Find offers and trade with more confidence"),
+    caption("You trade directly, Akara keeps it fair. Post a rate, find a deal, or reserve one — select from the menu to start."),
     "",
     ...menuOptionLines(),
     "",

@@ -47,6 +47,18 @@ function stubModule(relativePath, exports) {
 stubModule("lib/supabase.js", fakeSupabase);
 stubModule("lib/openai.js", openaiStub);
 
+// Menu lists are sent directly (the reply is null); capture the payloads so
+// scenarios can assert on the list body instead of the returned text.
+const whatsapp = require("../lib/whatsapp");
+const listSends = [];
+whatsapp.sendWhatsAppList = async (to, payload) => {
+  listSends.push({ to, payload });
+  return { logged: true };
+};
+function lastListBody() {
+  return listSends.length ? String(listSends[listSends.length - 1].payload?.body || "") : "";
+}
+
 const { buildReply } = require("../router");
 const { sendIdleMenus } = require("../app");
 const { findOrCreateUser } = require("../db/users");
@@ -281,7 +293,7 @@ async function run() {
   // ---------- scoped views
   scenario("scoped views");
   reply = await send(ALICE, "menu");
-  check("menu shows core options", reply.includes("`make offer`") && reply.includes("`find offers`"), reply);
+  check("menu shows core options", reply === null && lastListBody().includes("`make offer`") && lastListBody().includes("`find offers`"), JSON.stringify({ reply, body: lastListBody() }));
 
   reply = await send(ALICE, "profile");
   check("profile view title", reply.includes("*Your profile*"), reply);
@@ -460,7 +472,7 @@ async function run() {
   check("bob confirms receipt", reply.includes("Receipt confirmed ✅"), reply);
 
   reply = await send(ALICE, "menu");
-  check("menu escapes deal room", reply.includes("*Akara menu*"), reply);
+  check("menu escapes deal room", reply === null && lastListBody().includes("*Akara menu*"), JSON.stringify({ reply, body: lastListBody() }));
   check("deal room released", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "what's next for my trade?", { interpret: { action: "trade_action" } });
@@ -567,7 +579,7 @@ async function run() {
   check("find does not ask follow-up questions", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you have?"), reply);
 
   reply = await send(ALICE, "menu");
-  check("menu escapes find flow", reply.includes("*Akara menu*"), reply);
+  check("menu escapes find flow", reply === null && lastListBody().includes("*Akara menu*"), JSON.stringify({ reply, body: lastListBody() }));
   check("find flow released", (await sessionFlow(ALICE)) === null);
 
   // ---------- settings: edit instead of new payout + bulk confirm
@@ -613,11 +625,11 @@ async function run() {
   check("thanks mid-flow is warm", reply.includes("You're welcome"), reply);
   check("thanks keeps the flow", (await sessionFlow(ALICE)) === "create_listing");
   reply = await send(ALICE, "hi");
-  check("greeting mid-flow restarts", reply.includes("👋"), reply);
+  check("greeting mid-flow restarts with the menu list", reply === null && lastListBody().includes("*Akara menu*"), JSON.stringify({ reply, body: lastListBody() }));
   check("greeting releases flow", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "how far");
-  check("wellbeing reply", reply.includes("I dey alright"), reply);
+  check("wellbeing reply", reply === null && lastListBody().includes("I dey alright"), JSON.stringify({ reply, body: lastListBody() }));
 
   // ---------- reserve without context
   scenario("reserve guidance");

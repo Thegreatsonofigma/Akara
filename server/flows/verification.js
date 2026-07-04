@@ -1,12 +1,12 @@
 const crypto = require("node:crypto");
 const { config } = require("../config");
 const { supabaseRequest, filterValue, uploadSupabaseStorage } = require("../lib/supabase");
-const { getWhatsAppMedia, mediaExtension } = require("../lib/whatsapp");
+const { getWhatsAppMedia, mediaExtension, sendWhatsAppList } = require("../lib/whatsapp");
 const { title, action, normalizeShortText } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { getUserById, updateUser, latestVerificationRequest } = require("../db/users");
 const { getSession, upsertSession, clearSession } = require("../db/sessions");
-const { mainMenu } = require("../messages/copy");
+const { mainMenu, mainMenuListPayload } = require("../messages/copy");
 const { sendVerificationSuccessCard } = require("../lib/listing-card");
 const {
   paymentChoicePrompt,
@@ -342,13 +342,19 @@ async function finishVerificationSubmission(user, requestId) {
     await sendVerificationSuccessCard(user.whatsapp_phone, successCaption).catch((error) => {
       console.error(`[verification] success card failed for ${user.whatsapp_phone}: ${error.message}`);
     });
-    return mainMenu();
+    try {
+      await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(mainMenu()));
+      return null;
+    } catch (error) {
+      console.error(`[verification] menu list failed for ${user.whatsapp_phone}: ${error.message}`);
+      return mainMenu();
+    }
   }
 
   return [
     "Verification submitted ✅",
     "",
-    "Your profile is waiting for admin review. Once approved, your Akara menu opens up.",
+    "Your profile is waiting for admin review. Once approved, your menu opens up.",
     "",
     "I’ll message you when it’s done.",
   ].join("\n");
