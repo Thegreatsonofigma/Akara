@@ -18,6 +18,144 @@ Required submitted field names:
 
 The submitted response must include WhatsApp's `flow_token`. Akara also sends `challenge_token` in the Flow data payload, so you can pass that through as a backup field if the builder requires it. Akara uses that token to find the pending action, validate the passcode, then resume the exact payout edit, delete, or other protected request.
 
+## Flow JSON
+
+Replace Meta's default `Hello World` JSON with this:
+
+```json
+{
+  "version": "7.3",
+  "screens": [
+    {
+      "id": "SETUP_PIN",
+      "title": "Setup Akara Code",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "mode": {
+          "type": "string",
+          "__example__": "setup"
+        },
+        "challenge_token": {
+          "type": "string",
+          "__example__": "sample-token"
+        },
+        "action_label": {
+          "type": "string",
+          "__example__": "Edit payout detail"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "setup_pin_form",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Setup your Akara code"
+              },
+              {
+                "type": "TextBody",
+                "text": "Create a private 4 to 6 digit code for payout edits and other sensitive actions."
+              },
+              {
+                "type": "TextInput",
+                "name": "passcode",
+                "label": "Create code",
+                "input-type": "number",
+                "required": true
+              },
+              {
+                "type": "TextInput",
+                "name": "confirm",
+                "label": "Confirm code",
+                "input-type": "number",
+                "required": true
+              },
+              {
+                "type": "Footer",
+                "label": "Save code",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "mode": "${data.mode}",
+                    "challenge_token": "${data.challenge_token}",
+                    "action_label": "${data.action_label}",
+                    "passcode": "${form.passcode}",
+                    "confirm": "${form.confirm}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "AUTHORIZE_PIN",
+      "title": "Authorize Action",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "mode": {
+          "type": "string",
+          "__example__": "authorize"
+        },
+        "challenge_token": {
+          "type": "string",
+          "__example__": "sample-token"
+        },
+        "action_label": {
+          "type": "string",
+          "__example__": "Edit payout detail"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "authorize_pin_form",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Authorize this action"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.action_label}"
+              },
+              {
+                "type": "TextInput",
+                "name": "passcode",
+                "label": "Akara code",
+                "input-type": "number",
+                "required": true
+              },
+              {
+                "type": "Footer",
+                "label": "Authorize",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "mode": "${data.mode}",
+                    "challenge_token": "${data.challenge_token}",
+                    "action_label": "${data.action_label}",
+                    "passcode": "${form.passcode}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
 ## User Experience
 
 Setup:
