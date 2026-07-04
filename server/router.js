@@ -1,4 +1,5 @@
 const { title, caption, action, applyInterpretedAnswer } = require("./lib/format");
+const { sendWhatsAppList } = require("./lib/whatsapp");
 const { normalizeCurrency, currencyHelpLine, parsePaymentCurrency, parseCurrencyAmountPairs } = require("./nlp/currency");
 const {
   parseListingDetails,
@@ -38,7 +39,7 @@ const { isVerified, isOnHold } = require("./db/users");
 const { getSession, upsertSession, clearSession } = require("./db/sessions");
 const { extractListingCode, extractDealCode } = require("./db/listings");
 const { getDealByCodeForUser, getLatestOpenDealForUser } = require("./db/deals");
-const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply, explainMissingListing, menuOptionLines } = require("./messages/copy");
+const { mainMenu, verificationIntro, mainMenuListPayload, thanksReply, wellbeingReply, explainMissingListing, menuOptionLines } = require("./messages/copy");
 const { scopedAssistantReply } = require("./messages/assistant");
 const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
@@ -94,19 +95,17 @@ function findOfferPrompt() {
   ].join("\n");
 }
 
-function greetingReply() {
-  return [
-    title("Akara menu"),
-    caption("Choose an action or type the number."),
-    "",
-    ...menuOptionLines(),
-    "",
-    "_You can also type naturally:_",
-    "`I have 50k naira and want 55k rwf`",
-    "`I have 2k naira and want rwf, show me available deals`",
-    "",
-    "_At any time:_ `menu`, `history`, `profile`, or `start over`",
-  ].join("\n")
+
+// Sends the interactive menu list directly and returns null so the caller
+// sends nothing more; falls back to returning the text when the list fails.
+async function sendMenuList(user, body) {
+  try {
+    await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(body));
+    return null;
+  } catch (error) {
+    console.error(`[router] menu list failed for ${user.whatsapp_phone}: ${error.message}`);
+    return body;
+  }
 }
 
 function listingCodesFromText(text) {
@@ -137,7 +136,7 @@ async function resolveQuotedReply(text, user, incoming = {}) {
   const number = selectedOptionNumber(text);
   if (!quotedText || !number) return null;
 
-  if (/\*?Akara menu\*?/i.test(quotedText)) {
+  if (/\*?Find offers and trade with more confidence\*?/i.test(quotedText)) {
     if (number === 1) {
       await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {});
       return makeOfferPrompt();
@@ -252,7 +251,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   // flow was active: asking for something outside the flow serves it at once.
   if (interpretedAction === "menu" || isMenuCommand(text)) {
     await clearSession(user, user.whatsapp_phone);
-    return mainMenu();
+    return sendMenuList(user, mainMenu());
   }
 
   if (interpretedAction === "bulk_cancel_listings" || isBulkListingCancelIntent(text)) return requestBulkListingCancel(user);
@@ -509,16 +508,16 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   }
 
   if (interpretedAction === "wellbeing" || isWellbeingQuestion(text)){
-    return wellbeingReply(user);
+    return sendMenuList(user, wellbeingReply(user));
   }
 
   if (bareGreeting) {
     await clearSession(user, user.whatsapp_phone);
-    return `${welcomePrompt(user)}\n\n${mainMenu()}`;
+    return sendMenuList(user, mainMenu());
   }
 
   if (command === "verify" || command === "verify me" || interpretedAction === "verify") {
-    return "You are already verified ✅\n\n" + mainMenu();
+    return sendMenuList(user, "You are already verified ✅\n\n" + mainMenu());
   }
 
   const paymentSetupCurrency = parsePaymentCurrency(text) || details.payment_currency || null;

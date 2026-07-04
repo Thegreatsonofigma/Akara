@@ -28,12 +28,12 @@ const DEFAULT_IDLE_MENU_SCAN_MS = 60 * 1000;
 let idleMenuTimer = null;
 
 function isMainMenuReply(reply = "") {
-  return String(reply || "").trim().startsWith("*Akara menu*");
+  return String(reply || "").trim().startsWith("*Find offers and trade with more confidence*");
 }
 
 function splitReplyWithMainMenu(reply = "") {
   const text = String(reply || "");
-  const menuIndex = text.indexOf("*Akara menu*");
+  const menuIndex = text.indexOf("*Find offers and trade with more confidence*");
   if (menuIndex <= 0) return null;
   return {
     intro: text.slice(0, menuIndex).trim(),
