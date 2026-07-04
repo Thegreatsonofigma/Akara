@@ -669,8 +669,10 @@ async function routeMessage(text, user, session, incoming = {}) {
   // copy — never a model-written caption or heading.
   const skipAnswer = ANSWER_ACTIONS.has(interpreted.action)
     || interpreted.action === "flow_reply"
+    || interpreted.action === "add_payout"
     || !isVerified(user)
-    || session?.current_flow === "verification";
+    || session?.current_flow === "verification"
+    || session?.current_flow === "payment_profile";
   return skipAnswer ? reply : applyInterpretedAnswer(reply, interpreted.answer);
 }
 
@@ -710,8 +712,12 @@ async function routeInterpreted(interpreted, text, user, session, incoming = {})
   // Payment profile also collects prompted answers, but verified users can
   // walk away mid-setup: a clear outside request cancels the setup and is
   // served immediately. Questions are answered without losing progress.
+  // Only real questions short-circuit: an "unknown" mid-flow message is most
+  // likely the requested detail (a name, a number), so it must reach the flow
+  // handler — a model-written answer here would claim progress that never
+  // happened and the detail would never be saved.
   if (session?.current_flow === "payment_profile") {
-    if (interpreted.answer && ANSWER_ACTIONS.has(interpreted.action)) return interpreted.answer;
+    if (interpreted.answer && interpreted.action === "question") return interpreted.answer;
     if (!incoming.media?.id && paymentProfileInterrupt(interpreted.action)) {
       await clearSession(user, user.whatsapp_phone);
       return dispatchInterpretedAction(interpreted, text, user, null, incoming);
