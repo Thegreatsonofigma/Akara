@@ -1,7 +1,7 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { sendWhatsAppText } = require("../lib/whatsapp");
 const { config } = require("../config");
-const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber } = require("../lib/format");
+const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber, formatCooldown } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { normalizeCurrency, parseAmount, currencyHelpLine } = require("../nlp/currency");
 const {
@@ -16,6 +16,7 @@ const {
   isDeclineIntent,
   isSearchAgainIntent,
   isListingPublishIntent,
+  isReminderIntent,
 } = require("../nlp/intents");
 const { getUserById, isVerified, tierLimitBlockForAmount, tierLimitBlockForListing } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
@@ -31,6 +32,8 @@ const {
 } = require("../db/listings");
 const { mainMenu, feeIncludedText, listingShareCopy, explainMissingListing } = require("../messages/copy");
 const { startPaymentProfileForCurrency } = require("./payment-profile");
+
+const NEGOTIATION_REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 
 function fundsDisclaimer() {
   return "Akara records the exchange trail and keeps both sides aligned. Funds still move directly through bank or mobile money, so confirm the recipient details before sending.";
@@ -528,6 +531,81 @@ async function getNegotiableOfferById(offerId) {
   return rows[0] || null;
 }
 
+async function negotiationReminderCooldownRemainingMs(offerId, userId) {
+  const since = new Date(Date.now() - NEGOTIATION_REMINDER_COOLDOWN_MS).toISOString();
+  const rows = await supabaseRequest(
+    [
+      "audit_events?select=id,created_at",
+      "entity_type=eq.negotiable_offer",
+      `entity_id=eq.${filterValue(offerId)}`,
+      `actor_user_id=eq.${filterValue(userId)}`,
+      "event_name=eq.negotiation_reminder_sent",
+      `created_at=gte.${filterValue(since)}`,
+      "order=created_at.desc",
+      "limit=1",
+    ].join("&")
+  );
+
+  const latest = rows[0]?.created_at ? new Date(rows[0].created_at).getTime() : 0;
+  if (!latest) return 0;
+  return Math.max(0, NEGOTIATION_REMINDER_COOLDOWN_MS - (Date.now() - latest));
+}
+
+async function recordNegotiationReminderSent(offerId, actorUserId, targetUserId) {
+  await supabaseRequest("audit_events", {
+    method: "POST",
+    body: JSON.stringify({
+      actor_user_id: actorUserId,
+      actor_type: "user",
+      entity_type: "negotiable_offer",
+      entity_id: offerId,
+      event_name: "negotiation_reminder_sent",
+      event_payload: { target_user_id: targetUserId },
+    }),
+  });
+}
+
+async function sendNegotiationReminder({ user, offer, listing, targetUser }) {
+  if (!offer?.id || !targetUser?.whatsapp_phone) {
+    return [
+      title("Reminder not sent"),
+      "",
+      "I could not find the trader for this proposal.",
+    ].join("\n");
+  }
+
+  const cooldownMs = await negotiationReminderCooldownRemainingMs(offer.id, user.id);
+  if (cooldownMs > 0) {
+    return [
+      title("Reminder already sent"),
+      "",
+      `You can send another reminder in ${formatCooldown(cooldownMs)}.`,
+    ].join("\n");
+  }
+
+  const code = displayReference(listing.listing_code, "listing");
+  await sendWhatsAppText(targetUser.whatsapp_phone, [
+    title("Negotiation reminder"),
+    caption("Your trade partner is waiting on this proposal."),
+    "",
+    fieldBlock("Listing", code),
+    "",
+    fieldBlock("Proposal", `${formatMoney(offer.offered_amount, offer.offered_currency)} for ${formatMoney(listing.have_amount, listing.have_currency)}`),
+    "",
+    `${action("accept")} to open the trade`,
+    `${action("counter")} to suggest another value`,
+    `${action("decline")} to pass`,
+  ].join("\n"));
+
+  await recordNegotiationReminderSent(offer.id, user.id, targetUser.id);
+
+  return [
+    title("Reminder sent"),
+    "",
+    "You can send another reminder in 10 minutes.",
+  ].join("\n");
+}
+
 function flexibleListingPrompt(listing) {
   const code = displayReference(listing.listing_code, "listing");
   return [
@@ -561,6 +639,7 @@ function negotiationProposalMessage(listing, offer) {
     "",
     title("Actions"),
     `${action("accept")} to open this Akara Trade`,
+    `${action("remind")} if they are taking too long`,
     `${action("decline")} to pass`,
     `${action(`counter ${formatMoney(listing.want_amount, listing.want_currency)}`)} to suggest another value`,
   ].join("\n");
@@ -576,6 +655,7 @@ function negotiationWaitingMessage(listing, offer) {
     fieldBlock("You receive if accepted", formatMoney(listing.have_amount, listing.have_currency)),
     "",
     "I will update this chat once they accept, decline, or counter.",
+    `${action("remind")} if they are taking too long.`,
   ].join("\n");
 }
 
@@ -590,6 +670,7 @@ function negotiationCounterMessage(listing, offer) {
     "",
     title("Actions"),
     `${action("accept")} to open the trade`,
+    `${action("remind")} if they are taking too long`,
     `${action("decline")} to pass`,
     `${action(`counter ${formatMoney(offer.offered_amount, offer.offered_currency)}`)} to suggest another value`,
   ].join("\n");
@@ -760,6 +841,24 @@ async function createNegotiationOffer(user, listing, proposal) {
 async function handleNegotiation(text, user, session) {
   const context = session.context_json || {};
   const command = compactText(text);
+
+  if (isReminderIntent(command) && context.offer_id) {
+    const offer = await getNegotiableOfferById(context.offer_id);
+    if (!offer || !["pending", "countered"].includes(offer.status)) {
+      await clearSession(user, user.whatsapp_phone);
+      return "That proposal is no longer open.";
+    }
+
+    const listing = await getActiveListingById(offer.listing_id);
+    if (!listing) {
+      await clearSession(user, user.whatsapp_phone);
+      return "That flexible listing is no longer live.";
+    }
+
+    const targetUserId = listing.owner_user_id === user.id ? offer.offering_user_id : listing.owner_user_id;
+    const targetUser = await getUserById(targetUserId);
+    return sendNegotiationReminder({ user, offer, listing, targetUser });
+  }
 
   if (isCancelIntent(text) || isDeclineIntent(text)) {
     if (context.offer_id) {
@@ -1045,7 +1144,7 @@ async function handleCreateListing(text, user, session) {
     if (!missing.length) return prepareListingPreview(user, details);
 
     // A bare currency ("GHS") carries no amount, so parseListingDetails finds
-    // nothing — accept it as the have side instead of re-asking for it.
+    // nothing, accept it as the have side instead of re-asking for it.
     const bareCurrency = !details.have_currency && normalizeCurrency(text);
     if (bareCurrency) {
       details.have_currency = bareCurrency;
