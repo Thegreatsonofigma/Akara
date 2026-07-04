@@ -207,7 +207,7 @@ function disputeGuidance(role, dealCode, deal = null, reason = "") {
     fieldBlock("Status", "Open"),
     "",
     reason ? fieldBlock("Reason", reason) : "",
-    reason ? "" : "",
+    "",
     title("Caution"),
     paymentAlreadyMovedCaution(role, deal),
     "",
@@ -319,24 +319,13 @@ async function openUserDispute(user, deal, role, reason) {
 
   const dispute = rows[0] || null;
 
-  await notifyDealUser(otherUserId, [
-    title(`Dispute opened ${dealCode}`),
-    "",
-    fieldBlock("Reason", reason),
-    "",
-    disputeGuidance(otherRole, dealCode, deal, reason),
-  ].join("\n")).catch((error) => {
+  await notifyDealUser(otherUserId, disputeGuidance(otherRole, dealCode, deal, reason)).catch((error) => {
     console.error(`[deal] dispute notice failed for ${dealCode}: ${error.message}`);
   });
 
   return {
     dispute,
     reply: [
-      title(`Dispute opened ${dealCode}`),
-      caption("Admin can now review this trade."),
-      "",
-      fieldBlock("Reason", reason),
-      "",
       disputeGuidance(role, dealCode, deal, reason),
       "",
       caption("Upload a receipt, screenshot, or supporting image if you have one."),
@@ -576,7 +565,8 @@ async function handleDealRoom(text, user, session, incoming = {}) {
         "",
         proof?.public_url ? `View proof: ${proof.public_url}` : "The supporting file is saved for admin review.",
         "",
-        disputeGuidance(role, dealCode, deal),
+        title("Caution"),
+        paymentAlreadyMovedCaution(role, deal),
       ].filter(Boolean).join("\n\n");
     }
 
@@ -658,7 +648,8 @@ async function handleDealRoom(text, user, session, incoming = {}) {
         "",
         proof?.public_url ? `View proof: ${proof.public_url}` : "The supporting file is saved for admin review.",
         "",
-        disputeGuidance(role, dealCode, deal),
+        title("Caution"),
+        paymentAlreadyMovedCaution(role, deal),
       ].filter(Boolean).join("\n\n");
     }
 
