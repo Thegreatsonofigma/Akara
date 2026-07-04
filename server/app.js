@@ -6,17 +6,21 @@ const {
   extractMessages,
   sendWhatsAppText,
   sendWhatsAppList,
+  sendWhatsAppFlow,
   sendWhatsAppTyping,
   getOutboundTextByMessageId,
 } = require("./lib/whatsapp");
 const { handleReceiptRedirect } = require("./lib/receipts");
 const { handleListingCardRoute } = require("./lib/listing-card");
+const { handleSecurityRoute, handleSecurityFlowResponse } = require("./lib/security");
+const { handleVerificationFlowResponse } = require("./flows/verification");
 const { findOrCreateUser, getUserById, isVerified } = require("./db/users");
 const { getSession } = require("./db/sessions");
 const { buildReply } = require("./router");
 const { handleAdminApi, adminFilePath } = require("./admin");
 const { supabaseRequest, filterValue } = require("./lib/supabase");
-const { mainMenu } = require("./messages/copy");
+const { mainMenuListPayload, mainMenu } = require("./messages/copy");
+const { handleWebsiteRoute } = require("./website");
 
 const activeInboundMessageIds = new Set();
 const DEFAULT_IDLE_MENU_AFTER_MS = 5 * 60 * 1000;
@@ -24,12 +28,12 @@ const DEFAULT_IDLE_MENU_SCAN_MS = 60 * 1000;
 let idleMenuTimer = null;
 
 function isMainMenuReply(reply = "") {
-  return String(reply || "").trim().startsWith("*Akara menu*");
+  return String(reply || "").trim().startsWith("*Find offers and trade with more confidence*");
 }
 
 function splitReplyWithMainMenu(reply = "") {
   const text = String(reply || "");
-  const menuIndex = text.indexOf("*Akara menu*");
+  const menuIndex = text.indexOf("*Find offers and trade with more confidence*");
   if (menuIndex <= 0) return null;
   return {
     intro: text.slice(0, menuIndex).trim(),
@@ -37,32 +41,22 @@ function splitReplyWithMainMenu(reply = "") {
   };
 }
 
-function mainMenuListPayload() {
-  return {
-    body: "Choose what you want to do next on Akara.",
-    button: "Click to Select",
-    sections: [
-      {
-        title: "Akara actions",
-        rows: [
-          { id: "make_offer", title: "make offer", description: "Create a rate listing people can take." },
-          { id: "find_offers", title: "find offers", description: "Browse available currency offers." },
-          { id: "my_listings", title: "my listings", description: "Manage your live listings." },
-          { id: "history", title: "history", description: "See your past and active trades." },
-          { id: "profile", title: "profile", description: "Payouts, verification, and account details." },
-        ],
-      },
-    ],
-  };
-}
-
 async function sendAkaraReply(to, reply) {
   if (!reply) return null;
+  if (typeof reply === "object" && reply.type === "whatsapp_flow") {
+    try {
+      return await sendWhatsAppFlow(to, reply.flow);
+    } catch (error) {
+      console.error(`[webhook] WhatsApp Flow failed for ${to}: ${error.message}`);
+      if (reply.fallbackText) return sendWhatsAppText(to, reply.fallbackText);
+      throw error;
+    }
+  }
+
   const splitMenu = splitReplyWithMainMenu(reply);
   if (splitMenu) {
-    if (splitMenu.intro) await sendWhatsAppText(to, splitMenu.intro);
     try {
-      return await sendWhatsAppList(to, mainMenuListPayload());
+      return await sendWhatsAppList(to, mainMenuListPayload("Choose what you want to do next on Akara."));
     } catch (error) {
       console.error(`[webhook] menu list failed for ${to}: ${error.message}`);
       return sendWhatsAppText(to, splitMenu.menu);
@@ -71,7 +65,7 @@ async function sendAkaraReply(to, reply) {
 
   if (isMainMenuReply(reply)) {
     try {
-      return await sendWhatsAppList(to, mainMenuListPayload());
+      return await sendWhatsAppList(to, mainMenuListPayload("Choose what you want to do next on Akara."));
     } catch (error) {
       console.error(`[webhook] menu list failed for ${to}: ${error.message}`);
     }
@@ -143,7 +137,7 @@ async function sendIdleMenus(options = {}) {
     }
 
     try {
-      await sendWhatsAppList(session.whatsapp_phone, mainMenuListPayload());
+      await sendWhatsAppList(session.whatsapp_phone, mainMenuListPayload("Choose what you want to do next on Akara."));
     } catch (error) {
       console.error(`[idle-menu] list failed for ${session.whatsapp_phone}: ${error.message}`);
       await sendWhatsAppText(session.whatsapp_phone, mainMenu());
@@ -240,7 +234,26 @@ async function handleWebhookPost(req, res) {
         });
       }
       const session = await getSession(incoming.from);
+      const securityFlowReply = await handleSecurityFlowResponse(incoming, user);
+      if (securityFlowReply !== undefined) {
+        await sendAkaraReply(incoming.from, securityFlowReply);
+        await markInboundMessageProcessed(incoming).catch((error) => {
+          console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
+        });
+        console.log(`[webhook] security flow ${securityFlowReply ? "replied" : "handled"} for ${incoming.from}`);
+        continue;
+      }
+      const verificationFlowReply = await handleVerificationFlowResponse(incoming, user);
+      if (verificationFlowReply !== undefined) {
+        await sendAkaraReply(incoming.from, verificationFlowReply);
+        await markInboundMessageProcessed(incoming).catch((error) => {
+          console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
+        });
+        console.log(`[webhook] verification flow ${verificationFlowReply ? "replied" : "handled"} for ${incoming.from}`);
+        continue;
+      }
       const reply = await buildReply(incoming.text, user, session, incoming);
+      // console.log({reply})
       await sendAkaraReply(incoming.from, reply);
       await markInboundMessageProcessed(incoming).catch((error) => {
         console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
@@ -312,6 +325,10 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname.startsWith("/secure/") && await handleSecurityRoute(req, res, url)) {
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/dev/message") {
       if (config.sendMode !== "log") {
         return jsonResponse(res, 404, { ok: false, error: "Not found" });
@@ -340,6 +357,10 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname.startsWith("/admin/api/")) {
       return await handleAdminApi(req, res, url);
+    }
+
+    if (await handleWebsiteRoute(req, res, url)) {
+      return;
     }
 
     return jsonResponse(res, 404, { ok: false, error: "Not found" });

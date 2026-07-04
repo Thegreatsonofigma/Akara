@@ -50,6 +50,8 @@ const config = {
   whatsappGraphVersion: process.env.WHATSAPP_GRAPH_VERSION || "v20.0",
   whatsappPhoneNumberId: optionalEnv("WHATSAPP_PHONE_NUMBER_ID"),
   akaraWhatsappNumber: optionalEnv("AKARA_WHATSAPP_NUMBER", "15556733907"),
+  akaraSecurityFlowId: optionalEnv("AKARA_SECURITY_FLOW_ID"),
+  akaraVerificationFlowId: optionalEnv("AKARA_VERIFICATION_FLOW_ID"),
   publicUrl: optionalEnv("AKARA_PUBLIC_URL"),
   openaiApiKey: optionalEnv("OPENAI_API_KEY"),
   openaiModel: optionalEnv("OPENAI_MODEL", "gpt-5-nano"),

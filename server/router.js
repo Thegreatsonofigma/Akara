@@ -1,4 +1,5 @@
 const { title, caption, action, applyInterpretedAnswer } = require("./lib/format");
+const { sendWhatsAppList } = require("./lib/whatsapp");
 const { normalizeCurrency, currencyHelpLine, parsePaymentCurrency, parseCurrencyAmountPairs } = require("./nlp/currency");
 const {
   parseListingDetails,
@@ -38,7 +39,7 @@ const { isVerified, isOnHold } = require("./db/users");
 const { getSession, upsertSession, clearSession } = require("./db/sessions");
 const { extractListingCode, extractDealCode } = require("./db/listings");
 const { getDealByCodeForUser, getLatestOpenDealForUser } = require("./db/deals");
-const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply, explainMissingListing } = require("./messages/copy");
+const { mainMenu, verificationIntro, mainMenuListPayload, thanksReply, wellbeingReply, explainMissingListing, menuOptionLines } = require("./messages/copy");
 const { scopedAssistantReply } = require("./messages/assistant");
 const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
@@ -94,6 +95,19 @@ function findOfferPrompt() {
   ].join("\n");
 }
 
+
+// Sends the interactive menu list directly and returns null so the caller
+// sends nothing more; falls back to returning the text when the list fails.
+async function sendMenuList(user, body) {
+  try {
+    await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(body));
+    return null;
+  } catch (error) {
+    console.error(`[router] menu list failed for ${user.whatsapp_phone}: ${error.message}`);
+    return body;
+  }
+}
+
 function listingCodesFromText(text) {
   const codes = [];
   const regex = /(?:^|\n)\*?\s*(\d{1,2})\.\s*(AKR-LIST-\d+)\*?/gi;
@@ -122,7 +136,7 @@ async function resolveQuotedReply(text, user, incoming = {}) {
   const number = selectedOptionNumber(text);
   if (!quotedText || !number) return null;
 
-  if (/\*?Akara menu\*?/i.test(quotedText)) {
+  if (/\*?Find offers and trade with more confidence\*?/i.test(quotedText)) {
     if (number === 1) {
       await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {});
       return makeOfferPrompt();
@@ -237,7 +251,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   // flow was active: asking for something outside the flow serves it at once.
   if (interpretedAction === "menu" || isMenuCommand(text)) {
     await clearSession(user, user.whatsapp_phone);
-    return mainMenu();
+    return sendMenuList(user, mainMenu());
   }
 
   if (interpretedAction === "bulk_cancel_listings" || isBulkListingCancelIntent(text)) return requestBulkListingCancel(user);
@@ -268,8 +282,6 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return [
       title("Done"),
       caption("That session is closed."),
-      "",
-      "Choose what you want to do next.",
       "",
       mainMenu(),
     ].join("\n");
@@ -495,15 +507,17 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     }
   }
 
-  if (interpretedAction === "wellbeing" || isWellbeingQuestion(text)) return wellbeingReply(user);
+  if (interpretedAction === "wellbeing" || isWellbeingQuestion(text)){
+    return sendMenuList(user, wellbeingReply(user));
+  }
 
   if (bareGreeting) {
     await clearSession(user, user.whatsapp_phone);
-    return welcomePrompt(user);
+    return sendMenuList(user, mainMenu());
   }
 
   if (command === "verify" || command === "verify me" || interpretedAction === "verify") {
-    return "You are already verified ✅\n\n" + mainMenu();
+    return sendMenuList(user, "You are already verified ✅\n\n" + mainMenu());
   }
 
   const paymentSetupCurrency = parsePaymentCurrency(text) || details.payment_currency || null;
@@ -638,6 +652,17 @@ async function routeMessage(text, user, session, incoming = {}) {
     return handleVerification(text, user, session, incoming);
   }
 
+  // Media can mean a payment receipt, verification upload, or dispute proof.
+  // When the active saved state is waiting for dispute proof, that evidence
+  // must never fall through into the normal "payment already noted" receipt
+  // guard.
+  if (incoming.media?.id) {
+    const liveSession = session?.current_flow ? session : await getSession(user.whatsapp_phone);
+    if (liveSession?.current_flow === "deal_room" && liveSession.current_step === "awaiting_dispute_proof") {
+      return handleDealRoom(text, user, liveSession, incoming);
+    }
+  }
+
   if (command === "cancel" || command === "stop") {
     if (session?.current_flow === "deal_room") {
       return handleDealRoom("cancel trade", user, session, incoming);
@@ -648,8 +673,6 @@ async function routeMessage(text, user, session, incoming = {}) {
       ? [
           title("Stopped"),
           caption("That flow is closed."),
-          "",
-          "Choose what you want to do next.",
           "",
           mainMenu(),
         ].join("\n")
@@ -691,8 +714,13 @@ async function routeMessage(text, user, session, incoming = {}) {
   // Unverified users and the verification flow only ever get predetermined
   // copy — never a model-written caption or heading.
   const skipAnswer = ANSWER_ACTIONS.has(interpreted.action)
+    || interpreted.action === "flow_reply"
+    || interpreted.action === "add_payout"
+    || interpreted.action === "greeting"
+    || interpreted.action === "wellbeing"
     || !isVerified(user)
-    || session?.current_flow === "verification";
+    || session?.current_flow === "verification"
+    || session?.current_flow === "payment_profile";
   return skipAnswer ? reply : applyInterpretedAnswer(reply, interpreted.answer);
 }
 
@@ -712,7 +740,7 @@ async function routeInterpreted(interpreted, text, user, session, incoming = {})
         "",
         stepPrompt,
         "",
-        "Type cancel to pause.",
+        `Type ${action("cancel")} to pause.`,
       ].join("\n");
     }
     if (!incoming.media?.id && isFreshRequestAction(interpreted.action) && interpreted.action !== "verify") {
@@ -723,7 +751,7 @@ async function routeInterpreted(interpreted, text, user, session, incoming = {})
         "",
         stepPrompt,
         "",
-        "Type cancel to pause.",
+        `Type ${action("cancel")} to pause.`,
       ].join("\n");
     }
     return handleVerification(text, user, session, incoming);
@@ -732,8 +760,12 @@ async function routeInterpreted(interpreted, text, user, session, incoming = {})
   // Payment profile also collects prompted answers, but verified users can
   // walk away mid-setup: a clear outside request cancels the setup and is
   // served immediately. Questions are answered without losing progress.
+  // Only real questions short-circuit: an "unknown" mid-flow message is most
+  // likely the requested detail (a name, a number), so it must reach the flow
+  // handler — a model-written answer here would claim progress that never
+  // happened and the detail would never be saved.
   if (session?.current_flow === "payment_profile") {
-    if (interpreted.answer && ANSWER_ACTIONS.has(interpreted.action)) return interpreted.answer;
+    if (interpreted.answer && interpreted.action === "question") return interpreted.answer;
     if (!incoming.media?.id && paymentProfileInterrupt(interpreted.action)) {
       await clearSession(user, user.whatsapp_phone);
       return dispatchInterpretedAction(interpreted, text, user, null, incoming);

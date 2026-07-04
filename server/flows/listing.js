@@ -1,9 +1,9 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { sendWhatsAppText } = require("../lib/whatsapp");
 const { config } = require("../config");
-const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber } = require("../lib/format");
+const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber, formatCooldown } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
-const { normalizeCurrency, parseAmount, currencyHelpLine } = require("../nlp/currency");
+const { normalizeCurrency, parseAmount, parseCurrencyAmountPairs, currencyHelpLine } = require("../nlp/currency");
 const {
   parseListingDetails,
   missingListingFields,
@@ -16,6 +16,7 @@ const {
   isDeclineIntent,
   isSearchAgainIntent,
   isListingPublishIntent,
+  isReminderIntent,
 } = require("../nlp/intents");
 const { getUserById, isVerified, tierLimitBlockForAmount, tierLimitBlockForListing } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
@@ -31,6 +32,8 @@ const {
 } = require("../db/listings");
 const { mainMenu, feeIncludedText, listingShareCopy, explainMissingListing } = require("../messages/copy");
 const { startPaymentProfileForCurrency } = require("./payment-profile");
+
+const NEGOTIATION_REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 
 function fundsDisclaimer() {
   return "Akara records the exchange trail and keeps both sides aligned. Funds still move directly through bank or mobile money, so confirm the recipient details before sending.";
@@ -528,6 +531,81 @@ async function getNegotiableOfferById(offerId) {
   return rows[0] || null;
 }
 
+async function negotiationReminderCooldownRemainingMs(offerId, userId) {
+  const since = new Date(Date.now() - NEGOTIATION_REMINDER_COOLDOWN_MS).toISOString();
+  const rows = await supabaseRequest(
+    [
+      "audit_events?select=id,created_at",
+      "entity_type=eq.negotiable_offer",
+      `entity_id=eq.${filterValue(offerId)}`,
+      `actor_user_id=eq.${filterValue(userId)}`,
+      "event_name=eq.negotiation_reminder_sent",
+      `created_at=gte.${filterValue(since)}`,
+      "order=created_at.desc",
+      "limit=1",
+    ].join("&")
+  );
+
+  const latest = rows[0]?.created_at ? new Date(rows[0].created_at).getTime() : 0;
+  if (!latest) return 0;
+  return Math.max(0, NEGOTIATION_REMINDER_COOLDOWN_MS - (Date.now() - latest));
+}
+
+async function recordNegotiationReminderSent(offerId, actorUserId, targetUserId) {
+  await supabaseRequest("audit_events", {
+    method: "POST",
+    body: JSON.stringify({
+      actor_user_id: actorUserId,
+      actor_type: "user",
+      entity_type: "negotiable_offer",
+      entity_id: offerId,
+      event_name: "negotiation_reminder_sent",
+      event_payload: { target_user_id: targetUserId },
+    }),
+  });
+}
+
+async function sendNegotiationReminder({ user, offer, listing, targetUser }) {
+  if (!offer?.id || !targetUser?.whatsapp_phone) {
+    return [
+      title("Reminder not sent"),
+      "",
+      "I could not find the trader for this proposal.",
+    ].join("\n");
+  }
+
+  const cooldownMs = await negotiationReminderCooldownRemainingMs(offer.id, user.id);
+  if (cooldownMs > 0) {
+    return [
+      title("Reminder already sent"),
+      "",
+      `You can send another reminder in ${formatCooldown(cooldownMs)}.`,
+    ].join("\n");
+  }
+
+  const code = displayReference(listing.listing_code, "listing");
+  await sendWhatsAppText(targetUser.whatsapp_phone, [
+    title("Negotiation reminder"),
+    caption("Your trade partner is waiting on this proposal."),
+    "",
+    fieldBlock("Listing", code),
+    "",
+    fieldBlock("Proposal", `${formatMoney(offer.offered_amount, offer.offered_currency)} for ${formatMoney(listing.have_amount, listing.have_currency)}`),
+    "",
+    `${action("accept")} to open the trade`,
+    `${action("counter")} to suggest another value`,
+    `${action("decline")} to pass`,
+  ].join("\n"));
+
+  await recordNegotiationReminderSent(offer.id, user.id, targetUser.id);
+
+  return [
+    title("Reminder sent"),
+    "",
+    "You can send another reminder in 10 minutes.",
+  ].join("\n");
+}
+
 function flexibleListingPrompt(listing) {
   const code = displayReference(listing.listing_code, "listing");
   return [
@@ -542,7 +620,8 @@ function flexibleListingPrompt(listing) {
     "",
     title("Actions"),
     `${action("accept terms")} to open the trade now`,
-    `${action(`offer ${formatMoney(listing.want_amount, listing.want_currency)}`)} to propose a value`,
+    `${action(`offer ${formatMoney(listing.want_amount, listing.want_currency)}`)} to propose what you send`,
+    `${action(`offer ${formatMoney(listing.have_amount, listing.have_currency)}`)} to propose what you receive`,
     `${action("cancel")} to stop`,
   ].join("\n");
 }
@@ -551,18 +630,20 @@ function negotiationProposalMessage(listing, offer) {
   const code = displayReference(listing.listing_code, "listing");
   return [
     title("New proposal"),
-    caption("A verified trader wants different terms on your flexible listing."),
+    caption("A verified trader is trying to negotiate on your listing"),
     "",
     fieldBlock("Listing", code),
     "",
-    fieldBlock("They send", formatMoney(offer.offered_amount, offer.offered_currency)),
+    fieldBlock("They send you", formatMoney(offerWantAmount(listing, offer), listing.want_currency)),
     "",
-    fieldBlock("They receive", formatMoney(listing.have_amount, listing.have_currency)),
+    fieldBlock("You send them", formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)),
     "",
     title("Actions"),
     `${action("accept")} to open this Akara Trade`,
+    `${action("remind")} if they are taking too long`,
     `${action("decline")} to pass`,
-    `${action(`counter ${formatMoney(listing.want_amount, listing.want_currency)}`)} to suggest another value`,
+    `${action(`counter ${formatMoney(offerWantAmount(listing, offer), listing.want_currency)}`)} to change what you receive`,
+    `${action(`counter ${formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)}`)} to change what you send`,
   ].join("\n");
 }
 
@@ -571,11 +652,12 @@ function negotiationWaitingMessage(listing, offer) {
     title("Proposal sent"),
     caption("I sent your value to the listing owner."),
     "",
-    fieldBlock("You offered", formatMoney(offer.offered_amount, offer.offered_currency)),
+    fieldBlock("You offered", formatMoney(offerWantAmount(listing, offer), listing.want_currency)),
     "",
-    fieldBlock("You receive if accepted", formatMoney(listing.have_amount, listing.have_currency)),
+    fieldBlock("You receive if accepted", formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)),
     "",
     "I will update this chat once they accept, decline, or counter.",
+    `${action("remind")} if they are taking too long.`,
   ].join("\n");
 }
 
@@ -584,24 +666,55 @@ function negotiationCounterMessage(listing, offer) {
     title("Counter proposal"),
     caption("The listing owner suggested a new value."),
     "",
-    fieldBlock("You send", formatMoney(offer.offered_amount, offer.offered_currency)),
+    fieldBlock("You send", formatMoney(offerWantAmount(listing, offer), listing.want_currency)),
     "",
-    fieldBlock("You receive", formatMoney(listing.have_amount, listing.have_currency)),
+    fieldBlock("You receive", formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)),
     "",
     title("Actions"),
     `${action("accept")} to open the trade`,
+    `${action("remind")} if they are taking too long`,
     `${action("decline")} to pass`,
-    `${action(`counter ${formatMoney(offer.offered_amount, offer.offered_currency)}`)} to suggest another value`,
+    `${action(`counter ${formatMoney(offerWantAmount(listing, offer), listing.want_currency)}`)} to change what you send`,
+    `${action(`counter ${formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)}`)} to change what you receive`,
   ].join("\n");
 }
 
-function parseNegotiatedSendAmount(text, defaultCurrency) {
-  const amount = parseAmount(text);
-  if (!amount) return null;
-  return {
-    amount,
-    currency: normalizeCurrency(text) || defaultCurrency,
-  };
+// A proposal or counter can adjust either side of the trade: an amount in the
+// listing's want currency moves what the taker sends, an amount in the have
+// currency moves what the taker receives, and one message can carry both. A
+// bare number keeps the historical meaning (the want side). Returns null when
+// no amount is found, or { error } when a currency doesn't belong here.
+function parseNegotiationProposal(text, listing) {
+  const pairs = parseCurrencyAmountPairs(text);
+  if (!pairs.length) {
+    const amount = parseAmount(text);
+    if (!amount) return null;
+    return { want_amount: amount };
+  }
+
+  const proposal = {};
+  for (const pair of pairs) {
+    if (pair.currency === listing.want_currency) {
+      proposal.want_amount = pair.amount;
+    } else if (pair.currency === listing.have_currency) {
+      proposal.have_amount = pair.amount;
+    } else {
+      return {
+        error: `This listing trades ${listing.want_currency} for ${listing.have_currency}, so counter with an amount in ${listing.want_currency}, ${listing.have_currency}, or both.`,
+      };
+    }
+  }
+  return proposal;
+}
+
+// The negotiated values, falling back to the listing terms for any side the
+// offer has not touched.
+function offerWantAmount(listing, offer) {
+  return moneyNumber(offer?.offered_amount || listing.want_amount);
+}
+
+function offerReceiveAmount(listing, offer) {
+  return moneyNumber(offer?.receive_amount || listing.have_amount);
 }
 
 async function openListingTrade(user, listing, options = {}) {
@@ -748,8 +861,10 @@ async function createNegotiationOffer(user, listing, proposal) {
     body: JSON.stringify({
       listing_id: listing.id,
       offering_user_id: user.id,
-      offered_amount: proposal.amount,
-      offered_currency: proposal.currency,
+      offered_amount: proposal.want_amount || moneyNumber(listing.want_amount),
+      offered_currency: listing.want_currency,
+      receive_amount: proposal.have_amount || null,
+      receive_currency: proposal.have_amount ? listing.have_currency : null,
       status: "pending",
       message: proposal.message || null,
     }),
@@ -757,9 +872,40 @@ async function createNegotiationOffer(user, listing, proposal) {
   return rows[0];
 }
 
+// Merges a counter into the offer, carrying forward any side the message did
+// not mention so a one-sided counter never resets the other side.
+function mergedOfferPatch(listing, offer, proposal) {
+  const wantAmount = proposal.want_amount || offerWantAmount(listing, offer);
+  const receiveAmount = proposal.have_amount || (offer.receive_amount ? moneyNumber(offer.receive_amount) : null);
+  return {
+    offered_amount: wantAmount,
+    offered_currency: listing.want_currency,
+    receive_amount: receiveAmount,
+    receive_currency: receiveAmount ? listing.have_currency : null,
+  };
+}
+
 async function handleNegotiation(text, user, session) {
   const context = session.context_json || {};
   const command = compactText(text);
+
+  if (isReminderIntent(command) && context.offer_id) {
+    const offer = await getNegotiableOfferById(context.offer_id);
+    if (!offer || !["pending", "countered"].includes(offer.status)) {
+      await clearSession(user, user.whatsapp_phone);
+      return "That proposal is no longer open.";
+    }
+
+    const listing = await getActiveListingById(offer.listing_id);
+    if (!listing) {
+      await clearSession(user, user.whatsapp_phone);
+      return "That flexible listing is no longer live.";
+    }
+
+    const targetUserId = listing.owner_user_id === user.id ? offer.offering_user_id : listing.owner_user_id;
+    const targetUser = await getUserById(targetUserId);
+    return sendNegotiationReminder({ user, offer, listing, targetUser });
+  }
 
   if (isCancelIntent(text) || isDeclineIntent(text)) {
     if (context.offer_id) {
@@ -796,19 +942,16 @@ async function handleNegotiation(text, user, session) {
       });
     }
 
-    const proposal = parseNegotiatedSendAmount(text, listing.want_currency);
+    const proposal = parseNegotiationProposal(text, listing);
     if (!proposal) {
       return [
         title("Send a proposal"),
-        caption(`Tell me what you want to send in ${listing.want_currency}.`),
+        caption(`Tell me what you want to send in ${listing.want_currency}, what you want to receive in ${listing.have_currency}, or both.`),
         "",
-        `${action(`offer ${formatMoney(listing.want_amount, listing.want_currency)}`)} or ${action("accept terms")}`,
+        `${action(`offer ${formatMoney(listing.want_amount, listing.want_currency)}`)} or ${action(`offer ${formatMoney(listing.have_amount, listing.have_currency)}`)} or ${action("accept terms")}`,
       ].join("\n");
     }
-
-    if (proposal.currency !== listing.want_currency) {
-      return `For this listing, propose what you will send in ${listing.want_currency}.`;
-    }
+    if (proposal.error) return proposal.error;
 
     const offer = await createNegotiationOffer(user, listing, {
       ...proposal,
@@ -862,6 +1005,7 @@ async function handleNegotiation(text, user, session) {
       return openListingTrade(taker, listing, {
         force: true,
         want_amount: offer.offered_amount,
+        have_amount: offer.receive_amount,
         returnRole: "maker",
         takerIntro: "Your proposal was accepted, so I opened the trade room.",
         makerIntro: "You accepted a flexible proposal, so I opened the trade room.",
@@ -888,30 +1032,28 @@ async function handleNegotiation(text, user, session) {
       return "Proposal declined. No trade was opened.";
     }
 
-    const proposal = parseNegotiatedSendAmount(text, listing.want_currency);
+    const proposal = parseNegotiationProposal(text, listing);
     if (!proposal) {
       return [
         title("Reply to proposal"),
         "",
         `${action("accept")} to open the trade`,
         `${action("decline")} to pass`,
-        `${action(`counter ${formatMoney(listing.want_amount, listing.want_currency)}`)} to suggest another value`,
+        `${action(`counter ${formatMoney(offerWantAmount(listing, offer), listing.want_currency)}`)} to change what you receive`,
+        `${action(`counter ${formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)}`)} to change what you send`,
       ].join("\n");
     }
+    if (proposal.error) return proposal.error;
 
-    if (proposal.currency !== listing.want_currency) {
-      return `Counter in ${listing.want_currency}, because that is what you receive on this listing.`;
-    }
-
+    const patch = mergedOfferPatch(listing, offer, proposal);
     const updated = (await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
       method: "PATCH",
       body: JSON.stringify({
         status: "countered",
-        offered_amount: proposal.amount,
-        offered_currency: proposal.currency,
+        ...patch,
         message: text,
       }),
-    }))[0] || { ...offer, offered_amount: proposal.amount, offered_currency: proposal.currency };
+    }))[0] || { ...offer, ...patch };
 
     await upsertSession(taker, taker.whatsapp_phone, "negotiation", "counter_review", {
       offer_id: offer.id,
@@ -926,7 +1068,9 @@ async function handleNegotiation(text, user, session) {
     return [
       title("Counter sent"),
       "",
-      fieldBlock("You suggested", formatMoney(proposal.amount, proposal.currency)),
+      fieldBlock("You receive", formatMoney(offerWantAmount(listing, updated), listing.want_currency)),
+      "",
+      fieldBlock("You send", formatMoney(offerReceiveAmount(listing, updated), listing.have_currency)),
       "",
       "I will update you if they accept or decline.",
     ].join("\n");
@@ -963,6 +1107,7 @@ async function handleNegotiation(text, user, session) {
       return reserveListing(user, listing, {
         force: true,
         want_amount: offer.offered_amount,
+        have_amount: offer.receive_amount,
         takerIntro: "You accepted the counter proposal.",
         makerIntro: "The trader accepted your counter proposal.",
       });
@@ -981,19 +1126,19 @@ async function handleNegotiation(text, user, session) {
       return "Counter declined. No trade was opened.";
     }
 
-    const proposal = parseNegotiatedSendAmount(text, listing.want_currency);
+    const proposal = parseNegotiationProposal(text, listing);
     if (!proposal) return negotiationCounterMessage(listing, offer);
-    if (proposal.currency !== listing.want_currency) return `Propose what you will send in ${listing.want_currency}.`;
+    if (proposal.error) return proposal.error;
 
+    const patch = mergedOfferPatch(listing, offer, proposal);
     const updated = (await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
       method: "PATCH",
       body: JSON.stringify({
         status: "pending",
-        offered_amount: proposal.amount,
-        offered_currency: proposal.currency,
+        ...patch,
         message: text,
       }),
-    }))[0] || { ...offer, offered_amount: proposal.amount, offered_currency: proposal.currency };
+    }))[0] || { ...offer, ...patch };
     const owner = await getUserById(listing.owner_user_id);
     if (owner?.whatsapp_phone) {
       await upsertSession(owner, owner.whatsapp_phone, "negotiation", "owner_review", {
@@ -1043,6 +1188,19 @@ async function handleCreateListing(text, user, session) {
     const details = parseListingDetails(text);
     const missing = missingListingFields(details);
     if (!missing.length) return prepareListingPreview(user, details);
+
+    // A bare currency ("GHS") carries no amount, so parseListingDetails finds
+    // nothing, accept it as the have side instead of re-asking for it.
+    const bareCurrency = !details.have_currency && normalizeCurrency(text);
+    if (bareCurrency) {
+      details.have_currency = bareCurrency;
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "want_currency", details);
+      return [
+        "What currency do you want in return?",
+        "",
+        currencyHelpLine(bareCurrency),
+      ].join("\n");
+    }
 
     await upsertSession(user, user.whatsapp_phone, "create_listing", missing[0], details);
     return explainMissingListing(missing, details);

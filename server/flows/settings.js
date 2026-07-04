@@ -24,6 +24,7 @@ const {
   paymentContextFromProfile,
 } = require("./payment-profile");
 const { startListingEdit } = require("./listing");
+const { requestSecurityAuthorization } = require("../lib/security");
 
 function parseNumberedAction(text, actionWords, nounWords) {
   const value = compactText(text);
@@ -214,6 +215,18 @@ async function requestBulkPayoutDelete(user) {
     ].join("\n");
   }
 
+  const securityReply = await requestSecurityAuthorization(user, {
+    purpose: "delete_all_payouts",
+    actionLabel: `Delete ${rows.length} payout detail${rows.length === 1 ? "" : "s"}`,
+    returnFlow: "settings",
+    returnStep: "confirm_bulk_action",
+    returnContext: {
+      bulk_action: "delete_payouts",
+      bulk_count: rows.length,
+    },
+  });
+  if (securityReply) return securityReply;
+
   await upsertSession(user, user.whatsapp_phone, "settings", "confirm_bulk_action", {
     bulk_action: "delete_payouts",
     bulk_count: rows.length,
@@ -347,6 +360,16 @@ async function handleSettings(text, user, session) {
     const editContext = paymentContextFromProfile(profile, {
       return_flow: "settings",
     });
+
+    const securityReply = await requestSecurityAuthorization(user, {
+      purpose: "edit_payout",
+      actionLabel: `Edit ${profile.currency} payout detail`,
+      returnFlow: "payment_profile",
+      returnStep: "payment_edit_menu",
+      returnContext: editContext,
+    });
+    if (securityReply) return securityReply;
+
     await upsertSession(user, user.whatsapp_phone, "payment_profile", "payment_edit_menu", editContext);
     return paymentEditMenuPrompt(editContext);
   }
@@ -355,6 +378,18 @@ async function handleSettings(text, user, session) {
   if (deletePayoutNumber) {
     const payoutId = context.payout_map?.[String(deletePayoutNumber)];
     if (!payoutId) return profileSettingsReply(user, "Choose a valid payout number.");
+
+    const securityReply = await requestSecurityAuthorization(user, {
+      purpose: "delete_payout",
+      actionLabel: "Delete payout detail",
+      returnFlow: "settings",
+      returnStep: "confirm_delete_payout",
+      returnContext: {
+        ...context,
+        pending_payout_id: payoutId,
+      },
+    });
+    if (securityReply) return securityReply;
 
     await upsertSession(user, user.whatsapp_phone, "settings", "confirm_delete_payout", {
       ...context,

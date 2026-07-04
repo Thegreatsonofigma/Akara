@@ -97,6 +97,8 @@ Allowed listing types:
 - offering_user_id
 - offered_amount
 - offered_currency
+- receive_amount (nullable — negotiated have-side amount; null means the listing terms apply)
+- receive_currency (nullable)
 - status
 - message
 - created_at

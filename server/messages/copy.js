@@ -14,8 +14,8 @@ function menuOptionLines() {
 
 function mainMenu() {
   return [
-    title("Akara menu"),
-    caption("Choose a number or type the action."),
+    title("Find offers and trade with more confidence"),
+    caption("You trade directly, Akara keeps it fair. Post a rate, find a deal, or reserve one — select from the menu to start."),
     "",
     ...menuOptionLines(),
     "",
@@ -113,9 +113,30 @@ function wellbeingReply(user) {
     "",
     "What can I help you exchange today?",
     "",
+    ...menuOptionLines(),
+    "",
     "You can type naturally, like:",
     "I have 2k naira and want rwf, show me available deals",
   ].join("\n");
+}
+
+function mainMenuListPayload(body = "Choose what you want to do next on Akara.") {
+  return {
+    body,
+    button: "Click to Select",
+    sections: [
+      {
+        title: "Akara actions",
+        rows: [
+          { id: "make_offer", title: "make offer", description: "Create a rate listing people can take." },
+          { id: "find_offers", title: "find offers", description: "Browse available currency offers." },
+          { id: "my_listings", title: "my listings", description: "Manage your live listings." },
+          { id: "history", title: "history", description: "See your past and active trades." },
+          { id: "profile", title: "profile", description: "Payouts, verification, and account details." },
+        ],
+      },
+    ],
+  };
 }
 
 function referralPitch() {
@@ -172,4 +193,6 @@ module.exports = {
   feeIncludedNote,
   listingShareCopy,
   explainMissingListing,
+  mainMenuListPayload,
+  menuOptionLines
 };
