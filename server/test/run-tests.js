@@ -45,6 +45,7 @@ stubModule("lib/supabase.js", fakeSupabase);
 stubModule("lib/openai.js", openaiStub);
 
 const { buildReply } = require("../router");
+const { sendIdleMenus } = require("../app");
 const { findOrCreateUser } = require("../db/users");
 const { getSession } = require("../db/sessions");
 const intents = require("../nlp/intents");
@@ -285,7 +286,33 @@ async function run() {
   check("profile counts completed deals from records", reply.includes("*Completed trades:* 3"), reply);
   check("profile has no bank numbers", !reply.includes("0123456789"), reply);
   check("profile has no payout list", !reply.includes("*Payouts*"), reply);
+
+  reply = await send(ALICE, "okay thanks");
+  check("session closure returns the menu", reply.includes("*Akara menu*"), reply);
+  check("session closure is calm", reply.includes("*Done*"), reply);
   removeSeededDeals(completedProfileDeals);
+
+  // ---------- inactivity menu nudge
+  scenario("inactivity menu nudge");
+  const IDLE = "250700000004";
+  const idleUser = seedVerifiedUser(IDLE, "Idle User");
+  const idleTime = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+  __table("message_sessions").push({
+    id: crypto.randomUUID(),
+    user_id: idleUser.id,
+    whatsapp_phone: IDLE,
+    current_flow: null,
+    current_step: null,
+    context_json: {},
+    last_message_at: idleTime,
+    created_at: idleTime,
+  });
+  const idleResult = await sendIdleMenus({ now: new Date(), idleMs: 5 * 60 * 1000, limit: 10 });
+  const idleSession = __table("message_sessions").find((row) => row.whatsapp_phone === IDLE);
+  check("idle scan sends one menu", idleResult.sent === 1, JSON.stringify(idleResult));
+  check("idle scan marks the session", Boolean(idleSession?.context_json?.idle_menu_sent_at), JSON.stringify(idleSession));
+  const idleRepeat = await sendIdleMenus({ now: new Date(), idleMs: 5 * 60 * 1000, limit: 10 });
+  check("idle scan does not repeat before new activity", idleRepeat.sent === 0, JSON.stringify(idleRepeat));
 
   reply = await send(ALICE, "bank details");
   check("payouts view title", reply.includes("Bank & payout details"), reply);

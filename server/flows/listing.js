@@ -41,12 +41,47 @@ async function holdListingForTierReview(user, context, tierBlock) {
     return_flow: "publish_listing",
     pending_listing: context,
   });
+  await createTierReviewRequest(user, context, tierBlock);
 
   return [
     tierBlock,
     "",
     "I saved this listing draft. Once your higher tier is approved, Akara will publish it for you.",
   ].join("\n");
+}
+
+async function createTierReviewRequest(user, context, tierBlock) {
+  const reason = [
+    "Tier upgrade needed before this listing can go live.",
+    `Draft: ${formatMoney(context.have_amount, context.have_currency)} for ${formatMoney(context.want_amount, context.want_currency)}.`,
+    compactText(tierBlock),
+  ].filter(Boolean).join(" ");
+
+  const existing = await supabaseRequest(
+    `verification_requests?user_id=eq.${filterValue(user.id)}&status=eq.pending_review&order=created_at.desc&limit=1`
+  );
+
+  const payload = {
+    status: "pending_review",
+    automated_decision: "tier_upgrade_required",
+    automated_reason: reason,
+  };
+
+  if (existing[0]) {
+    await supabaseRequest(`verification_requests?id=eq.${filterValue(existing[0].id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+    return;
+  }
+
+  await supabaseRequest("verification_requests", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: user.id,
+      ...payload,
+    }),
+  });
 }
 
 function listingLiveMessage(heading, listingCode, listing, shareUrl) {

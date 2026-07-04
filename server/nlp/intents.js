@@ -13,6 +13,13 @@ function isThanksMessage(text) {
     && value.length <= 40;
 }
 
+function isSessionClosureMessage(text) {
+  const value = compactText(text).replace(/[?!.]+$/, "").trim();
+  if (!value || value.length > 60) return false;
+  return /^(ok|okay|ok thanks|okay thanks|alright|alright thanks|noted|cool|cool thanks|got it|got you|i get|i understand|that is fine|that's fine|fine|done|seen|sure thanks)$/.test(value)
+    || isThanksMessage(value);
+}
+
 function isWellbeingQuestion(text) {
   const value = compactText(text).replace(/[?!.]+$/, "").trim();
   return /^(how are you|how you dey|how far|how'?s it going|how is it going|you good|you dey|hope you good)$/.test(value);
@@ -234,6 +241,7 @@ function selectedOptionNumber(text) {
 module.exports = {
   isGreeting,
   isThanksMessage,
+  isSessionClosureMessage,
   isWellbeingQuestion,
   isMenuCommand,
   isHistoryCommand,
