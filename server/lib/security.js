@@ -1,5 +1,5 @@
 const crypto = require("node:crypto");
-const { getPublicUrl } = require("../config");
+const { config, getPublicUrl } = require("../config");
 const { supabaseRequest, filterValue } = require("./supabase");
 const { sendWhatsAppText } = require("./whatsapp");
 const { title, caption, action, labeled } = require("./format");
@@ -100,6 +100,34 @@ function authorizationPrompt(url, actionLabel) {
   ].join("\n");
 }
 
+function securityFlowPrompt(type, token, actionLabel) {
+  if (!config.akaraSecurityFlowId) return null;
+
+  const setup = type === "setup";
+  return {
+    type: "whatsapp_flow",
+    fallbackText: setup
+      ? setupPrompt(challengeUrl(type, token), actionLabel)
+      : authorizationPrompt(challengeUrl(type, token), actionLabel),
+    flow: {
+      flowId: config.akaraSecurityFlowId,
+      flowToken: token,
+      screen: setup ? "SETUP_PIN" : "AUTHORIZE_PIN",
+      headerText: setup ? "Setup Akara code" : "Authorize action",
+      body: setup
+        ? "Set your Akara code securely inside WhatsApp. It protects payout changes and other sensitive actions."
+        : `Approve this action with your Akara code: ${actionLabel}`,
+      button: setup ? "Set code" : "Authorize",
+      footerText: "This expires in 10 minutes.",
+      data: {
+        mode: setup ? "setup" : "authorize",
+        challenge_token: token,
+        action_label: actionLabel,
+      },
+    },
+  };
+}
+
 async function requestSecurityAuthorization(user, options = {}) {
   if (!securityEnabled()) return null;
 
@@ -114,10 +142,14 @@ async function requestSecurityAuthorization(user, options = {}) {
     returnContext: options.returnContext,
   });
 
+  const actionLabel = options.actionLabel || "Sensitive account action";
+  const flowPrompt = securityFlowPrompt(type, token, actionLabel);
+  if (flowPrompt) return flowPrompt;
+
   const url = challengeUrl(type, token);
   return hasPasscode
-    ? authorizationPrompt(url, options.actionLabel || "Sensitive account action")
-    : setupPrompt(url, options.actionLabel || "Sensitive account action");
+    ? authorizationPrompt(url, actionLabel)
+    : setupPrompt(url, actionLabel);
 }
 
 async function getPendingChallenge(token) {
@@ -219,6 +251,124 @@ async function resumeChallengeAction(user, challenge) {
     "",
     "You can return to WhatsApp and continue.",
   ].join("\n"));
+}
+
+function passcodeFromFlowResponse(response = {}) {
+  return String(
+    response.passcode ||
+    response.pin ||
+    response.code ||
+    response.transaction_pin ||
+    response.akara_code ||
+    ""
+  ).trim();
+}
+
+function confirmFromFlowResponse(response = {}) {
+  return String(
+    response.confirm ||
+    response.confirm_passcode ||
+    response.confirm_pin ||
+    response.confirm_code ||
+    response.confirm_transaction_pin ||
+    ""
+  ).trim();
+}
+
+function tokenFromFlowIncoming(incoming = {}) {
+  const response = incoming.flowResponse || {};
+  return String(
+    response.flow_token ||
+    response.challenge_token ||
+    response.security_token ||
+    response.token ||
+    incoming.flowToken ||
+    ""
+  ).trim();
+}
+
+async function handleSecurityFlowResponse(incoming, currentUser) {
+  if (!incoming?.flowResponse) return undefined;
+
+  const token = tokenFromFlowIncoming(incoming);
+  if (!token) {
+    return [
+      title("Security check"),
+      caption("Akara could not read that authorization session."),
+      "",
+      "Please try the protected action again.",
+    ].join("\n");
+  }
+
+  const { challenge, user, state } = await getPendingChallenge(token);
+  if (state !== "pending") {
+    return [
+      title("Security check expired"),
+      caption(state === "expired"
+        ? "That authorization window has expired."
+        : "That authorization has already been used."),
+      "",
+      "Please try the protected action again.",
+    ].join("\n");
+  }
+
+  if (currentUser?.id && user?.id && currentUser.id !== user.id) {
+    return [
+      title("Security check blocked"),
+      caption("That authorization belongs to another Akara profile."),
+      "",
+      "Please start the action from your own chat.",
+    ].join("\n");
+  }
+
+  const setup = challenge.purpose === "setup_passcode" || incoming.flowResponse.mode === "setup";
+  const passcode = passcodeFromFlowResponse(incoming.flowResponse);
+  const confirm = confirmFromFlowResponse(incoming.flowResponse);
+
+  if (!validPasscode(passcode) || (setup && passcode !== confirm)) {
+    return [
+      title(setup ? "Code not saved" : "Security check"),
+      caption(setup
+        ? "Use matching 4 to 6 digit codes."
+        : "Enter your 4 to 6 digit Akara code."),
+      "",
+      "Please try the action again.",
+    ].join("\n");
+  }
+
+  if (setup) {
+    await updateUserPasscode(user.id, passcode);
+    const updated = await updateChallenge(challenge.id, {
+      status: "approved",
+      approved_at: new Date().toISOString(),
+    });
+    await resumeChallengeAction({ ...user, security_passcode_hash: true }, updated || challenge);
+    return null;
+  }
+
+  if (!verifyPasscode(passcode, user.security_passcode_hash)) {
+    const attempts = Number(challenge.attempt_count || 0) + 1;
+    await updateChallenge(challenge.id, {
+      attempt_count: attempts,
+      ...(attempts >= MAX_ATTEMPTS ? { status: "failed" } : {}),
+    });
+
+    return [
+      title(attempts >= MAX_ATTEMPTS ? "Security check locked" : "Wrong code"),
+      caption(attempts >= MAX_ATTEMPTS
+        ? "Too many failed attempts. Start the action again later."
+        : "That code did not match your Akara code."),
+      "",
+      attempts >= MAX_ATTEMPTS ? "" : "Please try the action again.",
+    ].filter(Boolean).join("\n");
+  }
+
+  const updated = await updateChallenge(challenge.id, {
+    status: "approved",
+    approved_at: new Date().toISOString(),
+  });
+  await resumeChallengeAction(user, updated || challenge);
+  return null;
 }
 
 function escapeHtml(value) {
@@ -395,6 +545,7 @@ async function handleSecurityRoute(req, res, url) {
 module.exports = {
   requestSecurityAuthorization,
   handleSecurityRoute,
+  handleSecurityFlowResponse,
   hashPasscode,
   verifyPasscode,
   securityEnabled,

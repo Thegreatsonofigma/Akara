@@ -6,12 +6,13 @@ const {
   extractMessages,
   sendWhatsAppText,
   sendWhatsAppList,
+  sendWhatsAppFlow,
   sendWhatsAppTyping,
   getOutboundTextByMessageId,
 } = require("./lib/whatsapp");
 const { handleReceiptRedirect } = require("./lib/receipts");
 const { handleListingCardRoute } = require("./lib/listing-card");
-const { handleSecurityRoute } = require("./lib/security");
+const { handleSecurityRoute, handleSecurityFlowResponse } = require("./lib/security");
 const { findOrCreateUser, getUserById, isVerified } = require("./db/users");
 const { getSession } = require("./db/sessions");
 const { buildReply } = require("./router");
@@ -59,6 +60,16 @@ function mainMenuListPayload() {
 
 async function sendAkaraReply(to, reply) {
   if (!reply) return null;
+  if (typeof reply === "object" && reply.type === "whatsapp_flow") {
+    try {
+      return await sendWhatsAppFlow(to, reply.flow);
+    } catch (error) {
+      console.error(`[webhook] WhatsApp Flow failed for ${to}: ${error.message}`);
+      if (reply.fallbackText) return sendWhatsAppText(to, reply.fallbackText);
+      throw error;
+    }
+  }
+
   const splitMenu = splitReplyWithMainMenu(reply);
   if (splitMenu) {
     if (splitMenu.intro) await sendWhatsAppText(to, splitMenu.intro);
@@ -241,6 +252,15 @@ async function handleWebhookPost(req, res) {
         });
       }
       const session = await getSession(incoming.from);
+      const securityFlowReply = await handleSecurityFlowResponse(incoming, user);
+      if (securityFlowReply !== undefined) {
+        await sendAkaraReply(incoming.from, securityFlowReply);
+        await markInboundMessageProcessed(incoming).catch((error) => {
+          console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
+        });
+        console.log(`[webhook] security flow ${securityFlowReply ? "replied" : "handled"} for ${incoming.from}`);
+        continue;
+      }
       const reply = await buildReply(incoming.text, user, session, incoming);
       await sendAkaraReply(incoming.from, reply);
       await markInboundMessageProcessed(incoming).catch((error) => {
