@@ -40,7 +40,7 @@ loadEnv(path.join(rootDir, ".env"));
 
 const config = {
   host: process.env.HOST || "127.0.0.1",
-  port: Number(process.env.PORT || 3001),
+  port: Number(process.env.PORT || 3000),
   adminToken: optionalEnv("AKARA_ADMIN_TOKEN", "local-admin"),
   supabaseUrl: requiredEnv("SUPABASE_URL"),
   supabaseServiceRoleKey: requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
