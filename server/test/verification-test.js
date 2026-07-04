@@ -280,11 +280,23 @@ async function run() {
   check("account number advances to review", reply.includes("Review payout detail"), reply);
   check("review shows the matched name", reply.includes("John Doe"), reply);
 
+  reply = await send(U1, "edit");
+  check("unsaved payout can open edit menu", reply.includes("Edit NGN payout"), reply);
+
+  reply = await send(U1, "name");
+  check("edit name offers the verified quick option", reply.includes("Quick option") && reply.includes("John Doe"), reply);
+
+  reply = await send(U1, "1");
+  check("edited verified name returns to payout review", reply.includes("Review payout detail") && reply.includes("John Doe"), reply);
+
   reply = await send(U1, "save payout");
   check("payout saved", reply.includes("Payout detail saved"), reply);
   check("saved payout asks another or submit", reply.includes("another") && reply.includes("submit"), reply);
   check("matched name auto-verifies tier 1", userRow(U1).verification_status === "verified_auto", userRow(U1).verification_status);
   check("matched name sets score 65+", Number(userRow(U1).verification_score) >= 65, userRow(U1).verification_score);
+
+  reply = await send(U1, "edit payout");
+  check("saved payout locked until verification completes", reply.includes("Payout already saved") && reply.includes("profile is approved"), reply);
 
   reply = await send(U1, "what now");
   check("gibberish at payment_more re-prompts", reply.includes("another") && reply.includes("submit"), reply);

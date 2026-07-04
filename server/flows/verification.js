@@ -450,6 +450,17 @@ async function handleVerification(text, user, session, incoming = {}) {
 
   if (step === "payment_more") {
     const command = compactText(text);
+    if (/\b(edit|update|change|correct|fix)\b.*\b(payout|payment|bank|momo|mobile money|account|details?)\b/.test(command)) {
+      return [
+        title("Payout already saved"),
+        "",
+        "For verification, saved payout details stay locked until your profile is approved.",
+        "",
+        `${action("another")} to add a different payout method`,
+        `${action("submit")} to finish verification`,
+      ].join("\n");
+    }
+
     const wantsAnother = /\b(add|another)\b/.test(command);
 
     if (!wantsAnother && /\b(submit|done|finish|finished|complete|review|no|nope|nothing)\b/.test(command)) {
