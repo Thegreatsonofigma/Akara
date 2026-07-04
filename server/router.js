@@ -1,5 +1,4 @@
 const { title, caption, action, applyInterpretedAnswer } = require("./lib/format");
-const { sendWhatsAppList } = require("./lib/whatsapp");
 const { normalizeCurrency, currencyHelpLine, parsePaymentCurrency, parseCurrencyAmountPairs } = require("./nlp/currency");
 const {
   parseListingDetails,
@@ -39,7 +38,7 @@ const { isVerified, isOnHold } = require("./db/users");
 const { getSession, upsertSession, clearSession } = require("./db/sessions");
 const { extractListingCode, extractDealCode } = require("./db/listings");
 const { getDealByCodeForUser, getLatestOpenDealForUser } = require("./db/deals");
-const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply, explainMissingListing, mainMenuListPayload, menuOptionLines } = require("./messages/copy");
+const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply, explainMissingListing, menuOptionLines } = require("./messages/copy");
 const { scopedAssistantReply } = require("./messages/assistant");
 const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
@@ -510,14 +509,12 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   }
 
   if (interpretedAction === "wellbeing" || isWellbeingQuestion(text)){
-    //  return wellbeingReply(user);
-    await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(wellbeingReply(user)));
-    }
+    return wellbeingReply(user);
+  }
 
   if (bareGreeting) {
     await clearSession(user, user.whatsapp_phone);
-    // welcomePrompt(user)
-    return await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(greetingReply()));
+    return `${welcomePrompt(user)}\n\n${mainMenu()}`;
   }
 
   if (command === "verify" || command === "verify me" || interpretedAction === "verify") {

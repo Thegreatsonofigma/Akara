@@ -109,7 +109,7 @@ function thanksReply(user) {
 function wellbeingReply(user) {
   const name = firstName(user);
   return [
-    `I'm good${name ? `, ${name}` : ""} 😄 Thanks for asking.`,
+    `I dey alright${name ? `, ${name}` : ""} 😄 Thanks for asking.`,
     "",
     "What can I help you exchange today?",
     "",

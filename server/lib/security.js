@@ -287,8 +287,18 @@ function tokenFromFlowIncoming(incoming = {}) {
   ).trim();
 }
 
+function isSecurityFlowResponse(incoming = {}) {
+  const response = incoming.flowResponse || {};
+  return response.mode === "setup" ||
+    response.mode === "authorize" ||
+    Boolean(response.challenge_token) ||
+    Boolean(response.security_token) ||
+    Boolean(response.action_label && (response.passcode || response.confirm));
+}
+
 async function handleSecurityFlowResponse(incoming, currentUser) {
   if (!incoming?.flowResponse) return undefined;
+  if (!isSecurityFlowResponse(incoming)) return undefined;
 
   const token = tokenFromFlowIncoming(incoming);
   if (!token) {

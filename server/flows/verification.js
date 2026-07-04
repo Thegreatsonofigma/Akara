@@ -1,9 +1,11 @@
+const crypto = require("node:crypto");
+const { config } = require("../config");
 const { supabaseRequest, filterValue, uploadSupabaseStorage } = require("../lib/supabase");
 const { getWhatsAppMedia, mediaExtension } = require("../lib/whatsapp");
 const { title, action, normalizeShortText } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { getUserById, updateUser, latestVerificationRequest } = require("../db/users");
-const { upsertSession, clearSession } = require("../db/sessions");
+const { getSession, upsertSession, clearSession } = require("../db/sessions");
 const { mainMenu } = require("../messages/copy");
 const { sendVerificationSuccessCard } = require("../lib/listing-card");
 const {
@@ -31,6 +33,16 @@ const SELFIE_PROMPT = [
 ].join("\n");
 const MEDIA_RETRY_PROMPT = "I could not read that file. Please send it again as a clear photo or PDF.";
 const PAYMENT_MORE_PROMPT = `Reply ${action("another")} to add one more payout method, or ${action("submit")} to send for review.`;
+const VERIFICATION_FLOW_SCREEN = "KYC_DETAILS";
+const COUNTRY_LABELS = {
+  NG: "Nigeria",
+  RW: "Rwanda",
+  GH: "Ghana",
+  KE: "Kenya",
+  CM: "Cameroon",
+  GA: "Gabon",
+  OTHER: "Other",
+};
 
 function idTypePrompt() {
   return [
@@ -122,6 +134,69 @@ function normalizeIdType(input) {
   return aliases[value] || null;
 }
 
+function flowValue(value) {
+  if (value == null) return "";
+  if (typeof value === "object") {
+    return String(value.id || value.title || value.value || value.label || "").trim();
+  }
+  return String(value).trim();
+}
+
+function countryFromFlow(value) {
+  const raw = flowValue(value);
+  if (!raw) return "";
+  const upper = raw.toUpperCase();
+  return COUNTRY_LABELS[upper] || normalizeShortText(raw, 60);
+}
+
+function hashIdNumber(value) {
+  const normalized = String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+  if (!normalized) return "";
+  return crypto.createHash("sha256").update(normalized).digest("hex");
+}
+
+function verificationFlowToken(incoming = {}) {
+  const response = incoming.flowResponse || {};
+  return String(
+    response.verification_token ||
+    response.flow_token ||
+    response.token ||
+    incoming.flowToken ||
+    ""
+  ).trim();
+}
+
+function isVerificationFlowResponse(incoming = {}) {
+  const response = incoming.flowResponse || {};
+  return response.mode === "verification" ||
+    Boolean(response.verification_token) ||
+    Boolean(response.legal_name && response.id_type && response.id_number);
+}
+
+function verificationFlowPrompt(token) {
+  return {
+    type: "whatsapp_flow",
+    fallbackText: [
+      "Let's verify your Akara profile.",
+      "",
+      LEGAL_NAME_PROMPT,
+      "",
+      "If the verification tray does not open, reply with your legal name to continue in chat.",
+    ].join("\n"),
+    flow: {
+      flowId: config.akaraVerificationFlowId,
+      flowToken: token,
+      screen: VERIFICATION_FLOW_SCREEN,
+      button: "Start verification",
+      body: "Let's collect your verification details in one clean step. Your ID photo and selfie still happen here in chat after this.",
+      data: {
+        mode: "verification",
+        verification_token: token,
+      },
+    },
+  };
+}
+
 // Downloads and stores an uploaded document. A download or upload failure is
 // reported back as `failed` so the step can re-prompt instead of crashing the
 // webhook mid-verification.
@@ -168,6 +243,16 @@ async function startVerification(user) {
   }
 
   await updateUser(user.id, { verification_status: "pending_input", verification_score: 10 });
+
+  if (config.akaraVerificationFlowId) {
+    const token = crypto.randomBytes(18).toString("base64url");
+    await upsertSession(user, user.whatsapp_phone, "verification", "flow_details", {
+      request_id: requestId,
+      verification_flow_token: token,
+    });
+    return verificationFlowPrompt(token);
+  }
+
   await upsertSession(user, user.whatsapp_phone, "verification", "legal_name", {
     request_id: requestId,
   });
@@ -269,6 +354,93 @@ async function finishVerificationSubmission(user, requestId) {
   ].join("\n");
 }
 
+async function handleVerificationFlowResponse(incoming, user) {
+  if (!isVerificationFlowResponse(incoming)) return undefined;
+
+  const response = incoming.flowResponse || {};
+  const session = await getSession(user.whatsapp_phone);
+  const context = session?.context_json || {};
+  const token = verificationFlowToken(incoming);
+
+  if (context.verification_flow_token && token && context.verification_flow_token !== token) {
+    return [
+      title("Verification tray expired"),
+      "",
+      "Please start verification again so Akara can collect fresh details.",
+    ].join("\n");
+  }
+
+  let requestId = context.request_id;
+  if (!requestId) {
+    const request = await latestVerificationRequest(user.id);
+    requestId = request?.id;
+  }
+
+  if (!requestId) return startVerification(user);
+
+  const legalName = normalizeShortText(flowValue(response.legal_name), 120);
+  const nationality = countryFromFlow(response.nationality);
+  const residenceCountry = countryFromFlow(response.residence_country);
+  const city = normalizeShortText(flowValue(response.city), 60);
+  const idType = normalizeIdType(flowValue(response.id_type));
+  const idCountry = countryFromFlow(response.id_country);
+  const idNumber = normalizeShortText(flowValue(response.id_number), 80);
+
+  if (!isValidPersonName(legalName) || !isValidPlaceName(nationality)
+      || !isValidPlaceName(residenceCountry) || !isValidPlaceName(city)
+      || !idType || !isValidPlaceName(idCountry) || idNumber.length < 4) {
+    await upsertSession(user, user.whatsapp_phone, "verification", "flow_details", {
+      ...context,
+      request_id: requestId,
+      verification_flow_token: token || context.verification_flow_token,
+    });
+    return [
+      title("Check your details"),
+      "",
+      "Some verification details were missing or too short.",
+      "",
+      "Tap the verification button again and submit the full form.",
+    ].join("\n");
+  }
+
+  await updateUser(user.id, {
+    legal_name: legalName,
+    nationality,
+    residence_country: residenceCountry,
+    city,
+  });
+
+  await supabaseRequest(`verification_requests?id=eq.${filterValue(requestId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      id_type: idType,
+      id_country: idCountry,
+      extracted_id_hash: hashIdNumber(idNumber),
+      automated_decision: "collecting_documents",
+      automated_reason: "Identity text details were submitted through the WhatsApp verification Flow. Waiting for ID document and selfie uploads in chat.",
+    }),
+  });
+
+  await upsertSession(user, user.whatsapp_phone, "verification", "document_front", {
+    request_id: requestId,
+    legal_name: legalName,
+    nationality,
+    residence_country: residenceCountry,
+    city,
+    id_type: idType,
+    id_country: idCountry,
+    id_number_last4: idNumber.slice(-4),
+  });
+
+  return [
+    title("Details received"),
+    "",
+    "Now send your ID document here in chat.",
+    "",
+    mediaPrompt(DOCUMENT_LABEL),
+  ].join("\n");
+}
+
 async function handleVerification(text, user, session, incoming = {}) {
   const context = session.context_json || {};
   const step = session.current_step;
@@ -281,6 +453,27 @@ async function handleVerification(text, user, session, incoming = {}) {
   }
 
   if (!requestId) return startVerification(user);
+
+  if (step === "flow_details") {
+    if (String(text || "").trim()) {
+      const fallbackContext = { request_id: requestId };
+      await upsertSession(user, user.whatsapp_phone, "verification", "legal_name", fallbackContext);
+      return handleVerification(text, user, {
+        ...session,
+        current_step: "legal_name",
+        context_json: fallbackContext,
+      }, incoming);
+    }
+
+    if (config.akaraVerificationFlowId) {
+      const token = context.verification_flow_token || crypto.randomBytes(18).toString("base64url");
+      await upsertSession(user, user.whatsapp_phone, "verification", "flow_details", {
+        request_id: requestId,
+        verification_flow_token: token,
+      });
+      return verificationFlowPrompt(token);
+    }
+  }
 
   if (String(text || "").trim() && isBareCommandWord(text)) {
     return [
@@ -485,5 +678,6 @@ async function handleVerification(text, user, session, incoming = {}) {
 module.exports = {
   startVerification,
   handleVerification,
+  handleVerificationFlowResponse,
   verificationStepPrompt,
 };

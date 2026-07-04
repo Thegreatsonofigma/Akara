@@ -17,6 +17,8 @@ process.env.COIN_PROFILE_API_URL = "replace_with_disabled";
 process.env.COIN_PROFILE_API_KEY = "replace_with_disabled";
 process.env.COIN_PROFILE_USERNAME = "replace_with_disabled";
 process.env.AKARA_TYPING_INDICATOR = "false";
+process.env.AKARA_SECURITY_FLOW_ID = "replace_with_disabled";
+process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
 
 const path = require("node:path");
 
@@ -58,8 +60,10 @@ listingCard.sendVerificationSuccessCard = async (to) => {
 };
 
 const { buildReply } = require("../router");
+const { config } = require("../config");
 const { findOrCreateUser } = require("../db/users");
 const { getSession } = require("../db/sessions");
+const { startVerification, handleVerificationFlowResponse } = require("../flows/verification");
 
 const { __table, __reset } = fakeSupabase;
 
@@ -459,6 +463,45 @@ async function run() {
   check("verify after cancel resumes the flow", reply.toLowerCase().includes("legal name"), reply);
   check("resume reuses the open request", requestsFor(U4).length === 1, JSON.stringify(requestsFor(U4).map((row) => row.status)));
   check("resume restores the flow", (await sessionState(U4)).flow === "verification");
+
+  // ---------- native WhatsApp Flow tray
+  scenario("verification WhatsApp Flow");
+  const U6 = "250711000006";
+  const oldFlowId = config.akaraVerificationFlowId;
+  config.akaraVerificationFlowId = "flow_verification_test";
+
+  try {
+    const flowUser = await findOrCreateUser(U6, "Flow User");
+    const trayReply = await startVerification(flowUser);
+    check("verification can start as WhatsApp Flow", trayReply?.type === "whatsapp_flow", JSON.stringify(trayReply));
+    check("verification Flow uses KYC screen", trayReply?.flow?.screen === "KYC_DETAILS", JSON.stringify(trayReply?.flow || {}));
+
+    const token = trayReply.flow.flowToken;
+    reply = await handleVerificationFlowResponse({
+      from: U6,
+      flowToken: token,
+      flowResponse: {
+        mode: "verification",
+        verification_token: token,
+        legal_name: "Flow Test User",
+        nationality: "NG",
+        residence_country: "RW",
+        city: "Kigali",
+        id_type: "passport",
+        id_country: "NG",
+        id_number: "A1234567",
+      },
+    }, flowUser);
+
+    check("Flow response advances to ID upload", reply.includes("ID document") && reply.includes("front/main page"), reply);
+    check("Flow legal name saved", userRow(U6).legal_name === "Flow Test User", userRow(U6).legal_name);
+    check("Flow country ids decoded", userRow(U6).nationality === "Nigeria" && userRow(U6).residence_country === "Rwanda", JSON.stringify(userRow(U6)));
+    check("Flow ID type saved", requestsFor(U6)[0]?.id_type === "passport", JSON.stringify(requestsFor(U6)[0]));
+    check("Flow ID number hashed", String(requestsFor(U6)[0]?.extracted_id_hash || "").length === 64, requestsFor(U6)[0]?.extracted_id_hash);
+    check("Flow parks user at document upload", (await sessionState(U6)).step === "document_front");
+  } finally {
+    config.akaraVerificationFlowId = oldFlowId;
+  }
 }
 
 run()

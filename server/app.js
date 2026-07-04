@@ -13,6 +13,7 @@ const {
 const { handleReceiptRedirect } = require("./lib/receipts");
 const { handleListingCardRoute } = require("./lib/listing-card");
 const { handleSecurityRoute, handleSecurityFlowResponse } = require("./lib/security");
+const { handleVerificationFlowResponse } = require("./flows/verification");
 const { findOrCreateUser, getUserById, isVerified } = require("./db/users");
 const { getSession } = require("./db/sessions");
 const { buildReply } = require("./router");
@@ -240,6 +241,15 @@ async function handleWebhookPost(req, res) {
           console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
         });
         console.log(`[webhook] security flow ${securityFlowReply ? "replied" : "handled"} for ${incoming.from}`);
+        continue;
+      }
+      const verificationFlowReply = await handleVerificationFlowResponse(incoming, user);
+      if (verificationFlowReply !== undefined) {
+        await sendAkaraReply(incoming.from, verificationFlowReply);
+        await markInboundMessageProcessed(incoming).catch((error) => {
+          console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
+        });
+        console.log(`[webhook] verification flow ${verificationFlowReply ? "replied" : "handled"} for ${incoming.from}`);
         continue;
       }
       const reply = await buildReply(incoming.text, user, session, incoming);
