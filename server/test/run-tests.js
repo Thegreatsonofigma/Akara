@@ -55,6 +55,12 @@ whatsapp.sendWhatsAppList = async (to, payload) => {
   listSends.push({ to, payload });
   return { logged: true };
 };
+whatsapp.getWhatsAppMedia = async () => ({
+  buffer: Buffer.from("fake receipt"),
+  contentType: "image/png",
+  sha256: "fake-sha",
+});
+whatsapp.uploadWhatsAppMedia = async () => "fake-whatsapp-media-id";
 function lastListBody() {
   return listSends.length ? String(listSends[listSends.length - 1].payload?.body || "") : "";
 }
@@ -485,7 +491,13 @@ async function run() {
   check("active trade cancel does not show profile actions", !reply.includes("Manage payout details"), reply);
 
   reply = await send(ALICE, "dispute AKR-TXN-001 because amount did not arrive");
-  check("dispute opens with reason", reply.includes("*Dispute opened AKR-TXN-001*") && reply.includes("amount did not arrive"), reply);
+  check("dispute asks for proof", reply.includes("*Proof needed AKR-TXN-001*") && reply.includes("amount did not arrive"), reply);
+  check("dispute waits for proof", (await getSession(ALICE))?.current_step === "awaiting_dispute_proof", JSON.stringify(await getSession(ALICE)));
+
+  reply = await send(ALICE, "", {
+    media: { id: "proof-media-001", mimeType: "image/png", filename: "receipt.png" },
+  });
+  check("dispute opens after proof", reply.includes("*Dispute opened ✅*") && reply.includes("amount did not arrive"), reply);
 
   reply = await send(BOB, "close dispute");
   check("non opener cannot close dispute", reply.includes("Only the person who opened this dispute"), reply);

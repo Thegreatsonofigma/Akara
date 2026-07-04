@@ -11,7 +11,7 @@ if (nav && menuToggle) {
 }
 
 const revealTargets = document.querySelectorAll(
-  ".reveal, .risk-card, .step-card, .bento-card, .feature-card, .support-card, .legal-index-card, .legal-group-card, .persona-card, .security-console, .final-panel"
+  ".reveal, .risk-card, .step-card, .bento-card, .feature-card, .support-card, .legal-index-card, .legal-group-card, .persona-card, .security-console, .final-panel, .rhythm-card, .journey-step, .corridor-list article, .offer-stack article"
 );
 
 if ("IntersectionObserver" in window) {

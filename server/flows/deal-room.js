@@ -20,7 +20,7 @@ const {
   isCancelTradeIntent,
 } = require("../nlp/intents");
 const { updateUser, getUserById } = require("../db/users");
-const { upsertSession, clearSession } = require("../db/sessions");
+const { getSession, upsertSession, clearSession } = require("../db/sessions");
 const { getDefaultPaymentProfile, formatPaymentProfile, paymentDestinationTitle, paymentExpectationLine } = require("../db/payments");
 const { displayReference } = require("../db/listings");
 const {
@@ -170,6 +170,21 @@ function disputeReasonPrompt(dealCode) {
     title("Supporting proof"),
     caption("After the reason, upload a receipt, screenshot, or image that can help admin review it."),
   ].join("\n");
+}
+
+function disputeProofPrompt(dealCode, reason = "") {
+  return [
+    title(`Proof needed ${dealCode}`),
+    caption("A dispute needs evidence before Akara can open it."),
+    "",
+    reason ? fieldBlock("Reason", reason) : "",
+    "",
+    title("Upload one file"),
+    "Send a receipt, screenshot, PDF, or image that supports the dispute.",
+    "",
+    title("Actions"),
+    `${action("cancel")} to stop`,
+  ].filter(Boolean).join("\n\n");
 }
 
 function dealSafetyLine() {
@@ -472,6 +487,13 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
 }
 
 async function handleDealRoom(text, user, session, incoming = {}) {
+  if (incoming.media?.id && session?.current_step !== "awaiting_dispute_proof") {
+    const latestSession = await getSession(user.whatsapp_phone);
+    if (latestSession?.current_flow === "deal_room" && latestSession.current_step === "awaiting_dispute_proof") {
+      session = latestSession;
+    }
+  }
+
   const command = text.trim().toLowerCase();
   const context = session.context_json || {};
   const dealId = context.deal_id;
@@ -554,14 +576,19 @@ async function handleDealRoom(text, user, session, incoming = {}) {
   if (session.current_step === "awaiting_dispute_proof") {
     if (incoming.media?.id) {
       const proof = await storeDealProof(user, dealId, incoming);
+      const reason = context.dispute_reason || "Supporting proof uploaded for admin review.";
+      const result = await openUserDispute(user, deal, role, reason);
       await upsertSession(user, user.whatsapp_phone, "deal_room", "reserved", {
         deal_id: dealId,
         deal_code: deal.deal_code || context.deal_code,
+        opened_dispute_id: result.dispute?.id || null,
       });
       return [
-        title("Proof added ✅"),
+        title("Dispute opened ✅"),
         "",
         fieldBlock("Transaction ref", dealCode),
+        "",
+        fieldBlock("Reason", reason),
         "",
         proof?.public_url ? `View proof: ${proof.public_url}` : "The supporting file is saved for admin review.",
         "",
@@ -575,8 +602,16 @@ async function handleDealRoom(text, user, session, incoming = {}) {
         deal_id: dealId,
         deal_code: deal.deal_code || context.deal_code,
       });
-      return disputeGuidance(role, dealCode, deal);
+      return [
+        title("Dispute cancelled"),
+        "",
+        fieldBlock("Transaction ref", dealCode),
+        "",
+        "No dispute was opened.",
+      ].join("\n");
     }
+
+    return disputeProofPrompt(dealCode, context.dispute_reason || "");
   }
 
   if (isDisputeCloseIntent(command)) {
@@ -722,13 +757,12 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     const reason = disputeReasonFromText(text);
     if (!reason) return disputeReasonPrompt(dealCode);
 
-    const result = await openUserDispute(user, deal, role, reason);
     await upsertSession(user, user.whatsapp_phone, "deal_room", "awaiting_dispute_proof", {
       deal_id: dealId,
       deal_code: deal.deal_code || context.deal_code,
-      opened_dispute_id: result.dispute?.id || null,
+      dispute_reason: reason,
     });
-    return result.reply;
+    return disputeProofPrompt(dealCode, reason);
   }
 
   if (isDisputeIntent(command)) {
@@ -741,13 +775,12 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       return disputeReasonPrompt(dealCode);
     }
 
-    const result = await openUserDispute(user, deal, role, reason);
     await upsertSession(user, user.whatsapp_phone, "deal_room", "awaiting_dispute_proof", {
       deal_id: dealId,
       deal_code: deal.deal_code || context.deal_code,
-      opened_dispute_id: result.dispute?.id || null,
+      dispute_reason: reason,
     });
-    return result.reply;
+    return disputeProofPrompt(dealCode, reason);
   }
 
   if (session.current_step === "awaiting_receipt" && context.awaiting_receipt_user_id === user.id && !incoming.media?.id) {
@@ -775,7 +808,11 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     ].join("\n");
   }
 
-  if ((incoming.media?.id || isSentIntent(command)) && deal[dealSentField(role)]) {
+  if (
+    (incoming.media?.id || isSentIntent(command))
+    && deal[dealSentField(role)]
+    && session.current_step !== "awaiting_dispute_proof"
+  ) {
     clearReceiptDeadline(dealId, user.id);
     await upsertSession(user, user.whatsapp_phone, "deal_room", "reserved", {
       deal_id: dealId,

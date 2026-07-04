@@ -265,9 +265,10 @@ function cardAsset(file) {
 
 function nav(currentPath) {
   const items = [
-    ["/#how", "How it works"],
+    ["/product", "Product"],
+    ["/how-it-works", "How it works"],
     ["/trust", "Safety"],
-    ["/#currencies", "Currencies"],
+    ["/currencies", "Currencies"],
     ["/legal", "Legal"],
     ["/support", "Support"],
   ];
@@ -282,7 +283,7 @@ function nav(currentPath) {
       </a>
       <nav class="nav-links" aria-label="Primary">${links}</nav>
       <div class="nav-actions">
-        <a class="button button-small button-primary" href="https://wa.me/" aria-label="Try Akara on WhatsApp">${icon("chat")}Try Akara on WhatsApp</a>
+        <a class="button button-small button-primary" href="https://wa.me/" aria-label="Start a swap on WhatsApp">${icon("whatsapp")}Start a swap</a>
         <button class="menu-toggle" data-menu-toggle aria-label="Open menu" aria-expanded="false">Menu</button>
       </div>
     </header>
@@ -311,7 +312,7 @@ function footer() {
     <footer class="footer">
       <div class="footer-hero">
         <span>AKARA</span>
-        <p>Peer-listed currency exchange, guided inside WhatsApp.</p>
+        <p>A cleaner way to swap from chat.</p>
       </div>
       <div class="footer-grid">
         <div class="footer-about">
@@ -325,9 +326,10 @@ function footer() {
         </div>
         <div>
           <h3>Product</h3>
-          <a href="/#how">How it works</a>
+          <a href="/product">Product</a>
+          <a href="/how-it-works">How it works</a>
           <a href="/trust">Trust and safety</a>
-          <a href="/#currencies">Currencies</a>
+          <a href="/currencies">Currencies</a>
           <a href="/support">Support</a>
         </div>
         <div class="footer-legal">
@@ -388,6 +390,7 @@ function icon(name) {
     receipt: '<path d="M7 3h10v18l-2-1.2-2 1.2-2-1.2-2 1.2-2-1.2L5 21V5a2 2 0 0 1 2-2Z"/><path d="M8.5 8h7"/><path d="M8.5 12h7"/><path d="M8.5 16h4"/>',
     dispute: '<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 8v5"/><path d="M12 17h.01"/><path d="M17 3v5h5"/>',
     chat: '<path d="M4 5.5A3.5 3.5 0 0 1 7.5 2h9A3.5 3.5 0 0 1 20 5.5v6A3.5 3.5 0 0 1 16.5 15H10l-5 5v-5.8A3.5 3.5 0 0 1 4 11.5v-6Z"/>',
+    whatsapp: '<path d="M19.7 4.4A9.6 9.6 0 0 0 4.6 16l-1.1 4.1 4.2-1.1A9.6 9.6 0 0 0 21.6 10a9.5 9.5 0 0 0-1.9-5.6Z"/><path d="M8.6 7.7c.2-.4.4-.4.7-.4h.5c.2 0 .4.1.5.4l.7 1.7c.1.2.1.4 0 .6l-.4.5c-.1.2-.1.3 0 .5.4.8 1.2 1.6 2.1 2 .2.1.4.1.5-.1l.6-.7c.2-.2.4-.2.6-.1l1.7.8c.3.1.4.3.4.6 0 .7-.5 1.4-1.2 1.6-.7.2-1.6 0-2.8-.6-1.5-.7-2.7-1.9-3.5-3.4-.6-1.1-.9-2.2-.6-2.9Z"/>',
   };
   return `<svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name] || paths.chat}</svg>`;
 }
@@ -450,12 +453,25 @@ function productMockup() {
   `;
 }
 
+function commandStrip() {
+  return `
+    <div class="command-strip" aria-label="Natural Akara chat examples">
+      ${[
+        "Show me RWF offers",
+        "I have 50k naira and need francs",
+        "Open AKR-LIST-028",
+        "Paid, receipt attached",
+      ].map((item) => `<span>${esc(item)}</span>`).join("")}
+    </div>
+  `;
+}
+
 function personaCards() {
   const people = [
-    ["student", "International students", "Convert what you have before rent, food, and campus deadlines."],
-    ["traveller", "Frequent travellers", "Find peer-listed rates before the next border, flight, or work trip."],
-    ["freelancer", "Remote earners", "Move between invoices, family support, and local spending with a cleaner trail."],
-    ["community", "Community groups", "Share one listing card in a group and keep the actual trade inside Akara."],
+    ["student", "International students", "Rent, food, fees, and weekend money without hunting through old group chats."],
+    ["traveller", "Frequent travellers", "Find a cleaner route before the next border, flight, or work trip."],
+    ["freelancer", "Remote earners", "Move between invoices, family support, and local spending with a better record."],
+    ["community", "Community groups", "Share one listing card. Keep the trade itself inside Akara."],
   ];
   return people.map(([tone, titleText, text]) => `
     <article class="persona-card ${tone}">
@@ -477,23 +493,34 @@ function homePage() {
       <div class="container hero-grid">
         <div class="hero-copy reveal">
           <p class="eyebrow">Akara, ${site.registrationNumber}</p>
-          <h1><span>Swap by chat.</span><span>Stay in control.</span></h1>
-          <p class="hero-lede">Find peer-listed exchange offers, open trades, upload receipts, and track every step inside WhatsApp.</p>
+          <h1><span>The currency desk</span><span>inside WhatsApp.</span></h1>
+          <p class="hero-lede">List, find, open, and track peer-to-peer currency swaps by texting Akara.</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="https://wa.me/">${icon("chat")}Try Akara on WhatsApp</a>
+            <a class="button button-primary" href="https://wa.me/">${icon("whatsapp")}Try Akara on WhatsApp</a>
             <a class="button button-secondary" href="#how">See the flow</a>
           </div>
-          <div class="badge-row">${["No custody", "Verified users", "Receipt trail", "WhatsApp-first", "5 launch currencies"].map(badge).join("")}</div>
+          ${commandStrip()}
+          <div class="badge-row">${["No custody", "Verified users", "Receipt trail", "5 launch currencies"].map(badge).join("")}</div>
         </div>
         ${productMockup()}
+      </div>
+    </section>
+
+    <section class="proof-band">
+      <div class="container proof-band-inner">
+        <span>Built for campus groups</span>
+        <span>Expat communities</span>
+        <span>Frequent travellers</span>
+        <span>Remote earners</span>
+        <span>Family support</span>
       </div>
     </section>
 
     <section class="section visual-proof">
       <div class="container">
         <div class="section-header">
-          <p class="eyebrow">Why Akara</p>
-          <h2>The exchange already happens in chat. Akara makes it safer to follow.</h2>
+          <p class="eyebrow">Why it clicks</p>
+          <h2>People already swap in chat. Akara gives the chat a system.</h2>
         </div>
         <div class="bento-grid">
           <article class="bento-card bento-large">
@@ -508,15 +535,15 @@ function homePage() {
             </div>
             <div>
               <span class="bento-icon">${icon("chat")}</span>
-              <h3>Search like a conversation.</h3>
-              <p>Ask naturally. Akara turns intent into listings, offers, trades, receipts, and history.</p>
+              <h3>Type what you mean.</h3>
+              <p>Akara reads intent and routes it to offers, listings, trades, receipts, or history.</p>
             </div>
           </article>
           ${[
-            ["verify", "Verified first", "KYC and payout names keep anonymous trading out."],
-            ["list", "Shareable listings", "Post a rate and share a card from WhatsApp."],
-            ["receipt", "Receipt trail", "Payments stay attached to the trade record."],
-            ["dispute", "Dispute ready", "Evidence and status are easier to review."],
+            ["verify", "Verified first", "KYC and payout names before serious actions."],
+            ["list", "Share the rate", "Post a card people can open from their own chat."],
+            ["receipt", "Proof attached", "Receipts stay with the exact trade."],
+            ["dispute", "Review ready", "Evidence and status stay clear for admins."],
           ].map(([name, title, text]) => `
             <article class="bento-card">
               <span class="bento-icon">${icon(name)}</span>
@@ -533,8 +560,8 @@ function homePage() {
         <div>
           <p class="eyebrow">How it works</p>
           <h2>A cleaner flow for peer-to-peer exchange.</h2>
-          <p>Akara coordinates the record. Users still pay each other directly through their own bank or mobile money accounts.</p>
-          <div class="notice-card">Akara does not hold, receive, escrow, custody, remit, convert, or move user funds.</div>
+          <p>Akara keeps the trail clean while users pay each other directly through their own bank or mobile money accounts.</p>
+          <div class="notice-card">No wallet. No escrow. No custody. Just verified coordination and a better record.</div>
         </div>
         <div class="flow-diagram" aria-label="No custody exchange diagram">
           <div class="flow-user">User A<br><small>Bank or mobile money</small></div>
@@ -548,7 +575,7 @@ function homePage() {
       <div class="container steps-grid">
         ${[
           ["verify", "Verify", "Identity and payout name checks."],
-          ["list", "Find", "Browse peer-listed offers."],
+          ["list", "Find", "Browse live peer listings."],
           ["trade", "Open", "Reveal payout details."],
           ["receipt", "Confirm", "Upload receipts and close safely."],
         ].map(([name, title, text]) => `
@@ -566,7 +593,7 @@ function homePage() {
         <div class="section-header">
           <p class="eyebrow">Currencies</p>
           <h2>Made for African corridors.</h2>
-          <p>Launch support covers the currencies people already ask for in student, expat, and community chats.</p>
+          <p>Launch support covers the currencies people already ask for in real WhatsApp groups.</p>
         </div>
         <div class="currency-board">${currencyChips()}</div>
         <div class="example-listing">
@@ -643,16 +670,171 @@ function homePage() {
     <section class="section final-cta">
       <div class="container final-panel">
         <p class="eyebrow">Start cleaner</p>
-        <h2>Start with a verified trade flow, not a messy group chat.</h2>
+        <h2>Bring the swap back into one clean thread.</h2>
         <p>Chat, list, pay directly, upload receipts, and close with a record.</p>
         <div class="hero-actions">
-          <a class="button button-primary" href="https://wa.me/">${icon("chat")}Try Akara on WhatsApp</a>
+          <a class="button button-primary" href="https://wa.me/">${icon("whatsapp")}Try Akara on WhatsApp</a>
           <a class="button button-secondary" href="/legal/no-custody-risk-disclosure">Read no-custody disclosure</a>
         </div>
       </div>
     </section>
   `;
   return layout({ path: "/", body });
+}
+
+function productPage() {
+  const body = `
+    <section class="subhero product-subhero">
+      <div class="container page-showcase">
+        <div>
+          <p class="eyebrow">Product</p>
+          <h1>The exchange desk that feels like a chat.</h1>
+          <p>Akara turns a message into offers, listings, trades, receipts, reminders, disputes, and history.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://wa.me/">${icon("whatsapp")}Try Akara on WhatsApp</a>
+            <a class="button button-secondary" href="/how-it-works">See how it works</a>
+          </div>
+        </div>
+        ${productMockup()}
+      </div>
+    </section>
+    <section class="section">
+      <div class="container product-rhythm">
+        ${[
+          ["chat", "Chat naturally", "Ask, list, open, pay, and confirm without learning a new app."],
+          ["verify", "Verify once", "Identity and payout checks happen before money moves."],
+          ["list", "Share the rate", "Turn a listing into a visual card for groups, status, or DMs."],
+          ["receipt", "Keep proof close", "Receipts, reminders, and disputes stay tied to the trade."],
+        ].map(([name, titleText, text]) => `
+          <article class="rhythm-card">
+            <span class="bento-icon">${icon(name)}</span>
+            <h2>${titleText}</h2>
+            <p>${text}</p>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+    <section class="section">
+      <div class="container split">
+        <div>
+          <p class="eyebrow">Shareable listings</p>
+          <h2>A rate can travel before the money does.</h2>
+          <p>Post a listing, share the card, and let interested people open the trade from their own WhatsApp chat.</p>
+        </div>
+        <div class="standalone-listing">${listingShot()}</div>
+      </div>
+    </section>
+  `;
+  return layout({ path: "/product", title: "Product", description: "Akara is a WhatsApp-first product for verified peer-to-peer currency exchange coordination.", body });
+}
+
+function howItWorksPage() {
+  const body = `
+    <section class="subhero">
+      <div class="container">
+        <p class="eyebrow">How it works</p>
+        <h1>From intent to receipt, still in chat.</h1>
+        <p>Akara guides the exchange without taking custody. Users send directly through their own bank or mobile money accounts.</p>
+      </div>
+    </section>
+    <section class="section">
+      <div class="container journey-grid">
+        ${[
+          ["verify", "1", "Verify", "Add identity and payout details."],
+          ["list", "2", "Browse or list", "See live offers or post your own rate."],
+          ["trade", "3", "Open", "Payout details reveal inside the trade."],
+          ["receipt", "4", "Upload proof", "Paid updates need receipts."],
+          ["dispute", "5", "Resolve", "Disputes keep reasons, proof, and outcomes together."],
+        ].map(([name, number, titleText, text]) => `
+          <article class="journey-step" data-step="${number}">
+            <span>${number}</span>
+            <div class="bento-icon">${icon(name)}</div>
+            <h2>${titleText}</h2>
+            <p>${text}</p>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+    <section class="section no-custody-section">
+      <div class="container split">
+        <div>
+          <p class="eyebrow">No custody</p>
+          <h2>Akara records the exchange. Users move the money.</h2>
+          <p>Akara does not hold, receive, escrow, custody, remit, convert, or move user funds.</p>
+        </div>
+        <div class="flow-diagram" aria-label="Akara exchange flow">
+          <div class="flow-user">Sender<br><small>Bank or mobile money</small></div>
+          <div class="flow-layer">
+            <span>Open</span><span>Pay</span><span>Receipt</span><span>Confirm</span>
+          </div>
+          <div class="flow-user">Receiver<br><small>Bank or mobile money</small></div>
+          <div class="direct-line">direct transfer outside Akara custody</div>
+        </div>
+      </div>
+    </section>
+  `;
+  return layout({ path: "/how-it-works", title: "How It Works", description: "How verified users browse offers, create listings, open trades, upload receipts, and complete peer-to-peer exchanges on Akara.", body });
+}
+
+function currenciesPage() {
+  const body = `
+    <section class="subhero">
+      <div class="container page-showcase">
+        <div>
+          <p class="eyebrow">Currencies</p>
+          <h1>Africa’s everyday corridors, in one chat.</h1>
+          <p>Akara starts with the currencies people already search for in student, travel, family, and community chats.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://wa.me/">${icon("whatsapp")}Browse offers</a>
+            <a class="button button-secondary" href="/legal/no-custody-risk-disclosure">Read safety notes</a>
+          </div>
+        </div>
+        <div class="currency-orbit" aria-label="Supported currencies">
+          ${currencies.map(([code, country], index) => `<span style="--i:${index}"><b>${code}</b><small>${country}</small></span>`).join("")}
+        </div>
+      </div>
+    </section>
+    <section class="section">
+      <div class="container">
+        <div class="section-header">
+          <p class="eyebrow">Launch support</p>
+          <h2>Five currencies first. More corridors later.</h2>
+        </div>
+        <div class="corridor-list">
+          ${currencies.map(([code, country]) => `
+            <article>
+              <span>${code}</span>
+              <h3>${country}</h3>
+              <p>Available for verified listings, payout setup, offer browsing, and Akara trade records.</p>
+            </article>
+          `).join("")}
+        </div>
+      </div>
+    </section>
+    <section class="section">
+      <div class="container split">
+        <div>
+          <p class="eyebrow">Marketplace view</p>
+          <h2>Browse first. Choose with your eyes.</h2>
+          <p>Ask for all offers, or any supported currency, then open the listing that works.</p>
+        </div>
+        <div class="offer-stack">
+          ${[
+            ["AKR-LIST-028", "You send", "50,000 NGN", "You receive", "55,000 RWF"],
+            ["AKR-LIST-031", "You send", "12,000 GHS", "You receive", "180,000 RWF"],
+            ["AKR-LIST-042", "You send", "40,000 KES", "You receive", "302,000 XAF"],
+          ].map(([ref, labelA, valueA, labelB, valueB]) => `
+            <article>
+              <b>${ref}</b>
+              <span>${labelA}</span><strong>${valueA}</strong>
+              <span>${labelB}</span><strong>${valueB}</strong>
+            </article>
+          `).join("")}
+        </div>
+      </div>
+    </section>
+  `;
+  return layout({ path: "/currencies", title: "Currencies", description: "Akara supports NGN, RWF, GHS, KES, and XAF launch currency corridors.", body });
 }
 
 function faqSection() {
@@ -667,7 +849,7 @@ function faqSection() {
       <div class="container split">
         <div>
           <p class="eyebrow">FAQ</p>
-          <h2>Clear answers before anyone moves money.</h2>
+          <h2>Clear answers before money moves.</h2>
         </div>
         <div class="faq-list">
           ${faqs.map(([question, answer]) => `
@@ -687,8 +869,8 @@ function trustPage() {
     <section class="subhero">
       <div class="container">
         <p class="eyebrow">Trust and safety</p>
-        <h1>Safer exchange starts before money moves.</h1>
-        <p>Akara verifies people, checks payout names, keeps receipts attached to trades, and gives disputes a clear review trail.</p>
+        <h1>Safety begins before the transfer.</h1>
+        <p>Akara verifies users, checks payout names, attaches receipts, and keeps disputes reviewable.</p>
       </div>
     </section>
     <section class="section">
@@ -711,7 +893,7 @@ function trustPage() {
         <div class="trust-copy">
           <p class="eyebrow">Control layer</p>
           <h2>Verified users, cleaner records, fewer blind swaps.</h2>
-          <p>${esc(noCustodyNotice)}</p>
+          <p>Akara does not hold funds. It keeps the exchange visible, timed, evidenced, and easier to review.</p>
           <div class="trust-metrics">
             <span><b>15 min</b> trade window</span>
             <span><b>24 to 72h</b> dispute target</span>
@@ -725,7 +907,7 @@ function trustPage() {
         <div>
           <p class="eyebrow">Disputes</p>
           <h2>When something feels wrong, evidence moves first.</h2>
-          <p>Akara can pause a trade, request proof, compare payout details, and share an admin outcome. Recovery still depends on the users, banks, or mobile money providers involved.</p>
+          <p>Akara can pause a trade, request proof, compare details, and share an admin outcome.</p>
         </div>
         <ol class="timeline large">
           <li>Reason submitted</li>
@@ -750,8 +932,8 @@ function supportPage() {
     <section class="subhero">
       <div class="container">
         <p class="eyebrow">Support</p>
-        <h1>Help that understands the trade.</h1>
-        <p>Support is available Monday to Saturday, 9:00 AM to 6:00 PM WAT/CAT. Most reviews receive a response within 24 to 72 hours.</p>
+        <h1>Support with the trade in view.</h1>
+        <p>Monday to Saturday, 9:00 AM to 6:00 PM WAT/CAT. Most reviews get a response within 24 to 72 hours.</p>
       </div>
     </section>
     <section class="section">
@@ -772,7 +954,7 @@ function supportPage() {
       <div class="container split">
         <div>
           <p class="eyebrow">What to include</p>
-          <h2>Send the details that let support understand the trade quickly.</h2>
+          <h2>Send the details that shorten the review.</h2>
         </div>
         <ul class="check-list big">
           <li>Registered WhatsApp number</li>
@@ -798,8 +980,8 @@ function legalIndexPage() {
     <section class="subhero legal-hero">
       <div class="container">
         <p class="eyebrow">Legal center</p>
-        <h1>The rules behind the exchange.</h1>
-        <p>Clear policies for verification, no-custody trading, receipts, disputes, records, and platform safety.</p>
+        <h1>The rules behind the swap.</h1>
+        <p>Verification, no-custody trading, receipts, disputes, records, and safety in one place.</p>
       </div>
     </section>
     <section class="section">
@@ -960,8 +1142,23 @@ async function handleWebsiteRoute(req, res, url) {
     return true;
   }
 
+  if (url.pathname === "/product") {
+    writeHtml(res, 200, productPage());
+    return true;
+  }
+
+  if (url.pathname === "/how-it-works") {
+    writeHtml(res, 200, howItWorksPage());
+    return true;
+  }
+
   if (url.pathname === "/trust") {
     writeHtml(res, 200, trustPage());
+    return true;
+  }
+
+  if (url.pathname === "/currencies") {
+    writeHtml(res, 200, currenciesPage());
     return true;
   }
 

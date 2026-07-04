@@ -55,7 +55,6 @@ async function sendAkaraReply(to, reply) {
 
   const splitMenu = splitReplyWithMainMenu(reply);
   if (splitMenu) {
-    if (splitMenu.intro) await sendWhatsAppText(to, splitMenu.intro);
     try {
       return await sendWhatsAppList(to, mainMenuListPayload("Choose what you want to do next on Akara."));
     } catch (error) {

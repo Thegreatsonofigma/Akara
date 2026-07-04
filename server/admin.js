@@ -3,8 +3,9 @@ const { rootDir, config } = require("./config");
 const { jsonResponse, readJsonBody } = require("./lib/http");
 const { supabaseRequest, filterValue, createStorageSignedUrl } = require("./lib/supabase");
 const { sendWhatsAppText } = require("./lib/whatsapp");
-const { sendVerificationSuccessCard, sendUpgradeSuccessCard } = require("./lib/listing-card");
+const { sendVerificationSuccessCard, sendUpgradeSuccessCard, sendExchangeCompletionCard } = require("./lib/listing-card");
 const { getUserById, updateUser } = require("./db/users");
+const { exchangeCompleteMessage, syncCompletedDealsCount } = require("./db/deals");
 const { mainMenu } = require("./messages/copy");
 const { title } = require("./lib/format");
 const { displayReference } = require("./db/listings");
@@ -229,6 +230,30 @@ async function applyDisputeDealOutcome(dispute, outcome, status) {
 async function notifyDisputeParticipants(dispute, outcome) {
   const message = disputeNotice(dispute, outcome);
   await Promise.allSettled(dealParticipantPhones(dispute.deals).map((phone) => sendWhatsAppText(phone, message)));
+  if (outcome === "close_completed") {
+    await notifyDisputeExchangeCompleted(dispute);
+  }
+}
+
+async function notifyDisputeExchangeCompleted(dispute) {
+  const deal = dispute?.deals;
+  if (!deal?.id) return;
+
+  await Promise.allSettled([
+    syncCompletedDealsCount(deal.maker_user_id),
+    syncCompletedDealsCount(deal.taker_user_id),
+  ]);
+
+  const dealCode = displayReference(deal.deal_code, "deal");
+  const recipients = [
+    { phone: deal.maker?.whatsapp_phone, role: "maker" },
+    { phone: deal.taker?.whatsapp_phone, role: "taker" },
+  ].filter((recipient) => recipient.phone);
+
+  await Promise.allSettled(recipients.flatMap(({ phone, role }) => [
+    sendWhatsAppText(phone, exchangeCompleteMessage(deal, role)),
+    sendExchangeCompletionCard(phone, deal, role, `Exchange receipt for ${dealCode}`),
+  ]));
 }
 
 async function getAdminOverview() {

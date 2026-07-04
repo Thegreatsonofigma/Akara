@@ -652,6 +652,17 @@ async function routeMessage(text, user, session, incoming = {}) {
     return handleVerification(text, user, session, incoming);
   }
 
+  // Media can mean a payment receipt, verification upload, or dispute proof.
+  // When the active saved state is waiting for dispute proof, that evidence
+  // must never fall through into the normal "payment already noted" receipt
+  // guard.
+  if (incoming.media?.id) {
+    const liveSession = session?.current_flow ? session : await getSession(user.whatsapp_phone);
+    if (liveSession?.current_flow === "deal_room" && liveSession.current_step === "awaiting_dispute_proof") {
+      return handleDealRoom(text, user, liveSession, incoming);
+    }
+  }
+
   if (command === "cancel" || command === "stop") {
     if (session?.current_flow === "deal_room") {
       return handleDealRoom("cancel trade", user, session, incoming);
