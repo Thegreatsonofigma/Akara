@@ -109,9 +109,11 @@ function thanksReply(user) {
 function wellbeingReply(user) {
   const name = firstName(user);
   return [
-    `I dey alright${name ? `, ${name}` : ""} 😄 Thanks for asking.`,
+    `I'm good${name ? `, ${name}` : ""} 😄 Thanks for asking.`,
     "",
     "What can I help you exchange today?",
+    "",
+    ...menuOptionLines(),
     "",
     "You can type naturally, like:",
     "I have 2k naira and want rwf, show me available deals",
@@ -191,5 +193,6 @@ module.exports = {
   feeIncludedNote,
   listingShareCopy,
   explainMissingListing,
-  mainMenuListPayload
+  mainMenuListPayload,
+  menuOptionLines
 };

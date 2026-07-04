@@ -111,6 +111,7 @@ async function handleWebhookPost(req, res) {
       }
       const session = await getSession(incoming.from);
       const reply = await buildReply(incoming.text, user, session, incoming);
+      // console.log({reply})
       await sendAkaraReply(incoming.from, reply);
       await markInboundMessageProcessed(incoming).catch((error) => {
         console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);

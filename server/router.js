@@ -38,7 +38,7 @@ const { isVerified, isOnHold } = require("./db/users");
 const { getSession, upsertSession, clearSession } = require("./db/sessions");
 const { extractListingCode, extractDealCode } = require("./db/listings");
 const { getDealByCodeForUser, getLatestOpenDealForUser } = require("./db/deals");
-const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply, explainMissingListing, mainMenuListPayload } = require("./messages/copy");
+const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply, explainMissingListing, mainMenuListPayload, menuOptionLines } = require("./messages/copy");
 const { scopedAssistantReply } = require("./messages/assistant");
 const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
@@ -495,7 +495,10 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     }
   }
 
-  if (interpretedAction === "wellbeing" || isWellbeingQuestion(text)) return wellbeingReply(user);
+  if (interpretedAction === "wellbeing" || isWellbeingQuestion(text)){
+    //  return wellbeingReply(user);
+    await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(wellbeingReply(user)));
+    }
 
   if (bareGreeting) {
     await clearSession(user, user.whatsapp_phone);
@@ -687,6 +690,8 @@ async function routeMessage(text, user, session, incoming = {}) {
   const skipAnswer = ANSWER_ACTIONS.has(interpreted.action)
     || interpreted.action === "flow_reply"
     || interpreted.action === "add_payout"
+    || interpreted.action === "greeting"
+    || interpreted.action === "wellbeing"
     || !isVerified(user)
     || session?.current_flow === "verification"
     || session?.current_flow === "payment_profile";
