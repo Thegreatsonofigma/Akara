@@ -280,18 +280,30 @@ async function run() {
   check("account number advances to review", reply.includes("Review payout detail"), reply);
   check("review shows the matched name", reply.includes("John Doe"), reply);
 
+  reply = await send(U1, "edit");
+  check("unsaved payout can open edit menu", reply.includes("Edit NGN payout"), reply);
+
+  reply = await send(U1, "name");
+  check("edit name offers the verified quick option", reply.includes("Quick option") && reply.includes("John Doe"), reply);
+
+  reply = await send(U1, "1");
+  check("edited verified name returns to payout review", reply.includes("Review payout detail") && reply.includes("John Doe"), reply);
+
   reply = await send(U1, "save payout");
   check("payout saved", reply.includes("Payout detail saved"), reply);
   check("saved payout asks another or submit", reply.includes("another") && reply.includes("submit"), reply);
   check("matched name auto-verifies tier 1", userRow(U1).verification_status === "verified_auto", userRow(U1).verification_status);
   check("matched name sets score 65+", Number(userRow(U1).verification_score) >= 65, userRow(U1).verification_score);
 
+  reply = await send(U1, "edit payout");
+  check("saved payout locked until verification completes", reply.includes("Payout already saved") && reply.includes("profile is approved"), reply);
+
   reply = await send(U1, "what now");
   check("gibberish at payment_more re-prompts", reply.includes("another") && reply.includes("submit"), reply);
 
   reply = await send(U1, "no more");
-  check("'no more' submits instead of adding another", reply.includes("Verification submitted"), reply);
-  check("tier 1 copy on submission", reply.includes("Tier 1"), reply);
+  check("'no more' submits instead of adding another", reply.includes("Akara menu"), reply);
+  check("tier 1 submission opens menu", reply.includes("make offer") && reply.includes("find offers"), reply);
   check("request finalized as tier 1", requestsFor(U1)[0].automated_decision === "tier_1_approved", requestsFor(U1)[0].automated_decision);
   check("session cleared after submission", (await sessionState(U1)).flow === null);
   check("success card sent once", cardSends.length === 1, JSON.stringify(cardSends));
@@ -384,7 +396,7 @@ async function run() {
   check("decline with saved payouts is not a dead end", (await sessionState(U3)).step === "payment_more");
 
   reply = await send(U3, "submit");
-  check("submit after decline completes verification", reply.includes("Verification submitted"), reply);
+  check("submit after decline completes verification", reply.includes("Akara menu"), reply);
 
   // ---------- documents AND payout are both required to complete
   scenario("incomplete verification cannot complete");
@@ -425,8 +437,8 @@ async function run() {
   check("selfie after redirect returns to payout menu", reply.includes("Payout details"), reply);
 
   reply = await send(U5, "submit");
-  check("complete verification now submits", reply.includes("Verification submitted"), reply);
-  check("late documents still earn tier 1", reply.includes("Tier 1"), reply);
+  check("complete verification now submits", reply.includes("Akara menu"), reply);
+  check("late documents still earn tier 1", userRow(U5).verification_status === "verified_auto", userRow(U5).verification_status);
   check("user verified only after documents and payout", userRow(U5).verification_status === "verified_auto", userRow(U5).verification_status);
 
   // ---------- cancel then resume without duplicates

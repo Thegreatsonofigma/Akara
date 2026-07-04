@@ -17,6 +17,7 @@ process.env.COIN_PROFILE_API_URL = "replace_with_disabled";
 process.env.COIN_PROFILE_API_KEY = "replace_with_disabled";
 process.env.COIN_PROFILE_USERNAME = "replace_with_disabled";
 process.env.AKARA_TYPING_INDICATOR = "false";
+process.env.AKARA_SECURITY_ENABLED = "false";
 
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -45,6 +46,7 @@ stubModule("lib/supabase.js", fakeSupabase);
 stubModule("lib/openai.js", openaiStub);
 
 const { buildReply } = require("../router");
+const { sendIdleMenus } = require("../app");
 const { findOrCreateUser } = require("../db/users");
 const { getSession } = require("../db/sessions");
 const intents = require("../nlp/intents");
@@ -285,7 +287,33 @@ async function run() {
   check("profile counts completed deals from records", reply.includes("*Completed trades:* 3"), reply);
   check("profile has no bank numbers", !reply.includes("0123456789"), reply);
   check("profile has no payout list", !reply.includes("*Payouts*"), reply);
+
+  reply = await send(ALICE, "okay thanks");
+  check("session closure returns the menu", reply.includes("*Akara menu*"), reply);
+  check("session closure is calm", reply.includes("*Done*"), reply);
   removeSeededDeals(completedProfileDeals);
+
+  // ---------- inactivity menu nudge
+  scenario("inactivity menu nudge");
+  const IDLE = "250700000004";
+  const idleUser = seedVerifiedUser(IDLE, "Idle User");
+  const idleTime = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+  __table("message_sessions").push({
+    id: crypto.randomUUID(),
+    user_id: idleUser.id,
+    whatsapp_phone: IDLE,
+    current_flow: null,
+    current_step: null,
+    context_json: {},
+    last_message_at: idleTime,
+    created_at: idleTime,
+  });
+  const idleResult = await sendIdleMenus({ now: new Date(), idleMs: 5 * 60 * 1000, limit: 10 });
+  const idleSession = __table("message_sessions").find((row) => row.whatsapp_phone === IDLE);
+  check("idle scan sends one menu", idleResult.sent === 1, JSON.stringify(idleResult));
+  check("idle scan marks the session", Boolean(idleSession?.context_json?.idle_menu_sent_at), JSON.stringify(idleSession));
+  const idleRepeat = await sendIdleMenus({ now: new Date(), idleMs: 5 * 60 * 1000, limit: 10 });
+  check("idle scan does not repeat before new activity", idleRepeat.sent === 0, JSON.stringify(idleRepeat));
 
   reply = await send(ALICE, "bank details");
   check("payouts view title", reply.includes("Bank & payout details"), reply);
@@ -324,6 +352,38 @@ async function run() {
 
   reply = await send(ALICE, "my listings");
   check("listing appears in scoped view", reply.includes("AKR-LIST-001"), reply);
+
+  reply = await send(ALICE, "I have 50k naira and want 55k RWF");
+  check("duplicate live listing is blocked", reply.includes("*Listing already live*"), reply);
+  check("duplicate listing points to existing reference", reply.includes("AKR-LIST-001"), reply);
+  check("duplicate listing does not open review", !reply.includes("*Review listing*"), reply);
+
+  const DORA = "250700000004";
+  const doraRow = seedVerifiedUser(DORA, "Promise Uchenna Steven");
+  seedPayout(doraRow, "NGN");
+  reply = await send(DORA, "I have 10k NGN and want 12k RWF");
+  check("missing receive payout starts payout setup", reply.includes("*Add payout detail*") && reply.includes("RWF"), reply);
+  reply = await send(DORA, "mtn");
+  check("momo network asks for registered name", reply.includes("Quick option") && reply.includes("Promise Uchenna Steven"), reply);
+  reply = await send(DORA, "option 1");
+  check("verified name shortcut advances to momo number", reply.toLowerCase().includes("mobile money phone number"), reply);
+  reply = await send(DORA, "0788123456");
+  check("momo number advances to payout review", reply.includes("Review payout detail"), reply);
+  reply = await send(DORA, "save payout");
+  check("saving payout resumes listing review", reply.includes("Payout detail saved") && reply.includes("*Review listing*"), reply);
+
+  const TIER = "250700000005";
+  const tierRow = seedVerifiedUser(TIER, "Tier One User");
+  tierRow.verification_status = "verified_auto";
+  tierRow.verification_score = 65;
+  seedPayout(tierRow, "NGN");
+  seedPayout(tierRow, "RWF");
+  reply = await send(TIER, "I have 150k NGN and want 170k RWF");
+  check("tier one high value can reach review", reply.includes("*Review listing*"), reply);
+  reply = await send(TIER, "publish");
+  check("tier one publish is blocked by limit", reply.includes("Tier 1 limit reached"), reply);
+  const tierSession = await getSession(TIER);
+  check("tier limit stores pending publish", tierSession?.current_flow === "kyc_upgrade" && tierSession?.context_json?.return_flow === "publish_listing", JSON.stringify(tierSession));
 
   const { listingCardVersion } = require("../lib/listing-card");
   check("listing card version changes with dynamic values", listingCardVersion({
@@ -463,11 +523,11 @@ async function run() {
   check("question answered mid-flow", reply.includes("Akara is free"), reply);
   check("flow survives a question", (await sessionFlow(ALICE)) === "create_listing");
 
-  reply = await send(ALICE, "i wan move 50k naira make i get 55k rwf", {
-    interpret: { action: "create_listing", have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 55000 },
+  reply = await send(ALICE, "i wan move 51k naira make i get 55k rwf", {
+    interpret: { action: "create_listing", have_currency: "NGN", have_amount: 51000, want_currency: "RWF", want_amount: 55000 },
   });
   check("model slots complete the listing", reply.includes("*Review listing*"), reply);
-  check("model direction beats regex misread", reply.includes("*You send:* 50,000 NGN"), reply);
+  check("model direction beats regex misread", reply.includes("*You send:* 51,000 NGN"), reply);
   check("model want side kept", reply.includes("*You receive:* 55,000 RWF"), reply);
 
   reply = await send(ALICE, "make it 60k instead", {
@@ -501,10 +561,8 @@ async function run() {
   // ---------- guided find flow with deterministic escape
   scenario("guided find flow");
   reply = await send(ALICE, "find offers");
-  check("find opens flow", reply.includes("Tell me what currency you need"), reply);
-
-  reply = await send(ALICE, "rwf");
-  check("asks for have currency once", reply.includes("What currency do you have?"), reply);
+  check("find opens marketplace", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
+  check("find does not ask follow-up questions", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you have?"), reply);
 
   reply = await send(ALICE, "menu");
   check("menu escapes find flow", reply.includes("*Akara menu*"), reply);

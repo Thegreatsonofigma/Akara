@@ -36,6 +36,54 @@ function fundsDisclaimer() {
   return "Akara records the exchange trail and keeps both sides aligned. Funds still move directly through bank or mobile money, so confirm the recipient details before sending.";
 }
 
+async function holdListingForTierReview(user, context, tierBlock) {
+  await upsertSession(user, user.whatsapp_phone, "kyc_upgrade", "pending_admin", {
+    return_flow: "publish_listing",
+    pending_listing: context,
+  });
+  await createTierReviewRequest(user, context, tierBlock);
+
+  return [
+    tierBlock,
+    "",
+    "I saved this listing draft. Once your higher tier is approved, Akara will publish it for you.",
+  ].join("\n");
+}
+
+async function createTierReviewRequest(user, context, tierBlock) {
+  const reason = [
+    "Tier upgrade needed before this listing can go live.",
+    `Draft: ${formatMoney(context.have_amount, context.have_currency)} for ${formatMoney(context.want_amount, context.want_currency)}.`,
+    compactText(tierBlock),
+  ].filter(Boolean).join(" ");
+
+  const existing = await supabaseRequest(
+    `verification_requests?user_id=eq.${filterValue(user.id)}&status=eq.pending_review&order=created_at.desc&limit=1`
+  );
+
+  const payload = {
+    status: "pending_review",
+    automated_decision: "tier_upgrade_required",
+    automated_reason: reason,
+  };
+
+  if (existing[0]) {
+    await supabaseRequest(`verification_requests?id=eq.${filterValue(existing[0].id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+    return;
+  }
+
+  await supabaseRequest("verification_requests", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: user.id,
+      ...payload,
+    }),
+  });
+}
+
 function listingLiveMessage(heading, listingCode, listing, shareUrl) {
   const code = displayReference(listingCode, "listing");
   return [
@@ -146,6 +194,38 @@ function formatListingReview(context) {
   ].join("\n");
 }
 
+async function findActiveDuplicateListing(user, context) {
+  if (!context.have_currency || !context.want_currency || !context.have_amount || !context.want_amount) return null;
+
+  const rows = await supabaseRequest([
+    "listings?select=id,listing_code,status,have_currency,want_currency,have_amount,want_amount,listing_type,created_at",
+    `owner_user_id=eq.${filterValue(user.id)}`,
+    "status=in.(active,reserved,paused)",
+    `have_currency=eq.${filterValue(context.have_currency)}`,
+    `want_currency=eq.${filterValue(context.want_currency)}`,
+    `have_amount=eq.${filterValue(moneyNumber(context.have_amount))}`,
+    `want_amount=eq.${filterValue(moneyNumber(context.want_amount))}`,
+    `listing_type=eq.${filterValue(context.listing_type || "fixed")}`,
+    "order=created_at.desc",
+    "limit=3",
+  ].join("&"));
+
+  return rows.find((listing) => listing.id !== context.editing_listing_id) || null;
+}
+
+function duplicateListingReply(listing) {
+  return [
+    title("Listing already live"),
+    "You already have this exact offer open on Akara.",
+    "",
+    labeled("Reference", displayReference(listing.listing_code, "listing")),
+    labeled("Status", listing.status === "active" ? "Live" : listing.status),
+    "",
+    `${action("my listings")} to manage it`,
+    `${action("find offers")} to browse the marketplace`,
+  ].join("\n");
+}
+
 // Opens the edit conversation for a listing draft: keeps only the edit
 // metadata (which listing is being edited, its code, and the status to
 // restore on cancel) and asks for fresh details. Used by the review screen's
@@ -213,6 +293,12 @@ async function prepareListingPreview(user, details, intro = "") {
     ...(details.previous_listing_status ? { previous_listing_status: details.previous_listing_status } : {}),
   };
 
+  const duplicate = await findActiveDuplicateListing(user, context);
+  if (duplicate) {
+    await clearSession(user, user.whatsapp_phone);
+    return duplicateListingReply(duplicate);
+  }
+
   const receiveProfile = await getDefaultPaymentProfile(user.id, context.want_currency);
   if (!receiveProfile) {
     const prompt = await startPaymentProfileForCurrency(user, context.want_currency, {
@@ -234,7 +320,13 @@ async function prepareListingPreview(user, details, intro = "") {
 
 async function publishListing(user, context) {
   const tierBlock = tierLimitBlockForListing(user, context);
-  if (tierBlock) return tierBlock;
+  if (tierBlock) return holdListingForTierReview(user, context, tierBlock);
+
+  const duplicate = await findActiveDuplicateListing(user, context);
+  if (duplicate) {
+    await clearSession(user, user.whatsapp_phone);
+    return duplicateListingReply(duplicate);
+  }
 
   const receiveProfile = await getDefaultPaymentProfile(user.id, context.want_currency);
   if (!receiveProfile) {

@@ -21,7 +21,7 @@ const {
 const { isVerified } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { displayReference, listingShareUrl, listingTypeLabel } = require("../db/listings");
-const { explainMissingListing } = require("../messages/copy");
+const { explainMissingListing, mainMenu } = require("../messages/copy");
 const { prepareListingPreview, reserveListing } = require("./listing");
 
 const LISTING_SEARCH_SELECT = "listings?select=id,listing_code,owner_user_id,have_currency,want_currency,have_amount,want_amount,rate,listing_type,created_at,users!listings_owner_user_id_fkey(completed_deals_count,verification_status)";
@@ -195,7 +195,7 @@ async function showOfferMatches(user, context) {
 }
 
 async function showBrowseOffers(user, currency = null, page = 0) {
-  const pageSize = 5;
+  const pageSize = 10;
   const offset = Math.max(0, Number(page || 0)) * pageSize;
   const query = [
     LISTING_SEARCH_SELECT,
@@ -291,7 +291,8 @@ async function handleFindOffer(text, user, session) {
       title("No problem"),
       "",
       "I have closed that search.",
-      "Tell me what you need next whenever you are ready.",
+      "",
+      mainMenu(),
     ].join("\n");
   }
 
@@ -410,7 +411,8 @@ async function handleSearchResults(text, user, session) {
       title("No problem"),
       "",
       "I have closed that selection.",
-      "Tell me what you need next whenever you are ready.",
+      "",
+      mainMenu(),
     ].join("\n");
   }
 

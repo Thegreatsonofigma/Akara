@@ -1,5 +1,6 @@
 drop table if exists public.audit_events cascade;
 drop table if exists public.message_sessions cascade;
+drop table if exists public.security_challenges cascade;
 drop table if exists public.penalties cascade;
 drop table if exists public.disputes cascade;
 drop table if exists public.fees cascade;
