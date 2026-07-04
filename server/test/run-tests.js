@@ -303,7 +303,7 @@ async function run() {
   check("profile has no payout list", !reply.includes("*Payouts*"), reply);
 
   reply = await send(ALICE, "okay thanks");
-  check("session closure returns the menu", reply.includes("*Akara menu*"), reply);
+  check("session closure returns the menu", reply.includes("*Find offers and trade with more confidence*"), reply);
   check("session closure is calm", reply.includes("*Done*"), reply);
   removeSeededDeals(completedProfileDeals);
 
@@ -472,7 +472,7 @@ async function run() {
   check("bob confirms receipt", reply.includes("Receipt confirmed ✅"), reply);
 
   reply = await send(ALICE, "menu");
-  check("menu escapes deal room", reply === null && lastListBody().includes("*Akara menu*"), JSON.stringify({ reply, body: lastListBody() }));
+  check("menu escapes deal room", reply === null && lastListBody().includes("*Find offers and trade with more confidence*"), JSON.stringify({ reply, body: lastListBody() }));
   check("deal room released", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "what's next for my trade?", { interpret: { action: "trade_action" } });
@@ -519,6 +519,39 @@ async function run() {
   check("owner acceptance opens trade", reply.includes("Akara Trade opened ✅"), reply);
   const negotiatedDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-091")?.id);
   check("negotiated amount becomes deal amount", Number(negotiatedDeal?.want_amount) === 105000, JSON.stringify(negotiatedDeal));
+
+  // ---------- two-way negotiation: counters can move either side
+  scenario("two-way negotiation");
+  seedListing(charlieRow, {
+    code: "AKR-LIST-092",
+    have_currency: "NGN",
+    have_amount: 100000,
+    want_currency: "RWF",
+    want_amount: 115000,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(BOB, "open AKR-LIST-092");
+  check("flexible prompt offers both sides", reply.includes("to propose what you send") && reply.includes("to propose what you receive"), reply);
+
+  reply = await send(BOB, "offer 110000 rwf for 102000 ngn");
+  check("proposal can set both sides at once", reply.includes("110,000 RWF") && reply.includes("102,000 NGN"), reply);
+
+  reply = await send(CHARLIE, "counter 55000 ghs");
+  check("foreign currency counter is rejected", reply.includes("RWF") && reply.includes("NGN") && reply.includes("counter with an amount"), reply);
+
+  reply = await send(CHARLIE, "counter 98000 ngn");
+  check("owner can counter the side they send", reply.includes("98,000 NGN"), reply);
+  check("owner counter keeps the taker send side", reply.includes("110,000 RWF"), reply);
+
+  reply = await send(BOB, "counter 105000 rwf");
+  check("taker re-counter moves only their send side", reply.includes("105,000 RWF") && reply.includes("98,000 NGN"), reply);
+
+  reply = await send(CHARLIE, "accept");
+  check("owner accepts two-way negotiation", reply.includes("Akara Trade opened ✅"), reply);
+  const twoWayDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-092")?.id);
+  check("deal keeps negotiated send side", Number(twoWayDeal?.want_amount) === 105000, JSON.stringify(twoWayDeal));
+  check("deal keeps negotiated receive side", Number(twoWayDeal?.have_amount) === 98000, JSON.stringify(twoWayDeal));
 
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");
@@ -579,7 +612,7 @@ async function run() {
   check("find does not ask follow-up questions", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you have?"), reply);
 
   reply = await send(ALICE, "menu");
-  check("menu escapes find flow", reply === null && lastListBody().includes("*Akara menu*"), JSON.stringify({ reply, body: lastListBody() }));
+  check("menu escapes find flow", reply === null && lastListBody().includes("*Find offers and trade with more confidence*"), JSON.stringify({ reply, body: lastListBody() }));
   check("find flow released", (await sessionFlow(ALICE)) === null);
 
   // ---------- settings: edit instead of new payout + bulk confirm
@@ -625,7 +658,7 @@ async function run() {
   check("thanks mid-flow is warm", reply.includes("You're welcome"), reply);
   check("thanks keeps the flow", (await sessionFlow(ALICE)) === "create_listing");
   reply = await send(ALICE, "hi");
-  check("greeting mid-flow restarts with the menu list", reply === null && lastListBody().includes("*Akara menu*"), JSON.stringify({ reply, body: lastListBody() }));
+  check("greeting mid-flow restarts with the menu list", reply === null && lastListBody().includes("*Find offers and trade with more confidence*"), JSON.stringify({ reply, body: lastListBody() }));
   check("greeting releases flow", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "how far");

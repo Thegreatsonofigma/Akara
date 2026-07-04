@@ -318,13 +318,13 @@ async function run() {
   const listSendsBeforeSubmit = listSends.length;
   reply = await send(U1, "no more");
   check("'no more' submits with the menu list", reply === null && listSends.length === listSendsBeforeSubmit + 1, JSON.stringify({ reply, listSends: listSends.length }));
-  check("tier 1 submission opens menu", lastListBody().includes("Akara menu") && lastListBody().includes("make offer") && lastListBody().includes("find offers"), lastListBody());
+  check("tier 1 submission opens menu", lastListBody().includes("Find offers and trade with more confidence") && lastListBody().includes("make offer") && lastListBody().includes("find offers"), lastListBody());
   check("request finalized as tier 1", requestsFor(U1)[0].automated_decision === "tier_1_approved", requestsFor(U1)[0].automated_decision);
   check("session cleared after submission", (await sessionState(U1)).flow === null);
   check("success card sent once", cardSends.length === 1, JSON.stringify(cardSends));
 
   reply = await send(U1, "menu");
-  check("tier 1 user reaches the menu", reply === null && lastListBody().includes("Akara menu"), JSON.stringify({ reply, body: lastListBody() }));
+  check("tier 1 user reaches the menu", reply === null && lastListBody().includes("Find offers and trade with more confidence"), JSON.stringify({ reply, body: lastListBody() }));
 
   // ---------- mismatched payout name → manual review
   scenario("payout mismatched name");
@@ -411,7 +411,7 @@ async function run() {
   check("decline with saved payouts is not a dead end", (await sessionState(U3)).step === "payment_more");
 
   reply = await send(U3, "submit");
-  check("submit after decline completes verification", reply === null && lastListBody().includes("Akara menu"), JSON.stringify({ reply, body: lastListBody() }));
+  check("submit after decline completes verification", reply === null && lastListBody().includes("Find offers and trade with more confidence"), JSON.stringify({ reply, body: lastListBody() }));
 
   // ---------- documents AND payout are both required to complete
   scenario("incomplete verification cannot complete");
@@ -452,7 +452,7 @@ async function run() {
   check("selfie after redirect returns to payout menu", reply.includes("Payout details"), reply);
 
   reply = await send(U5, "submit");
-  check("complete verification now submits", reply === null && lastListBody().includes("Akara menu"), JSON.stringify({ reply, body: lastListBody() }));
+  check("complete verification now submits", reply === null && lastListBody().includes("Find offers and trade with more confidence"), JSON.stringify({ reply, body: lastListBody() }));
   check("late documents still earn tier 1", userRow(U5).verification_status === "verified_auto", userRow(U5).verification_status);
   check("user verified only after documents and payout", userRow(U5).verification_status === "verified_auto", userRow(U5).verification_status);
 
