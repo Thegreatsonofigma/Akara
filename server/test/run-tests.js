@@ -17,6 +17,7 @@ process.env.COIN_PROFILE_API_URL = "replace_with_disabled";
 process.env.COIN_PROFILE_API_KEY = "replace_with_disabled";
 process.env.COIN_PROFILE_USERNAME = "replace_with_disabled";
 process.env.AKARA_TYPING_INDICATOR = "false";
+process.env.AKARA_SECURITY_ENABLED = "false";
 
 const path = require("node:path");
 const crypto = require("node:crypto");

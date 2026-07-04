@@ -11,6 +11,7 @@ const {
 } = require("./lib/whatsapp");
 const { handleReceiptRedirect } = require("./lib/receipts");
 const { handleListingCardRoute } = require("./lib/listing-card");
+const { handleSecurityRoute } = require("./lib/security");
 const { findOrCreateUser, getUserById, isVerified } = require("./db/users");
 const { getSession } = require("./db/sessions");
 const { buildReply } = require("./router");
@@ -309,6 +310,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && await handleListingCardRoute(req, res, url)) {
+      return;
+    }
+
+    if (url.pathname.startsWith("/secure/") && await handleSecurityRoute(req, res, url)) {
       return;
     }
 
