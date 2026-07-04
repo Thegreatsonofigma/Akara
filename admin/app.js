@@ -169,6 +169,7 @@ function renderOverview(data) {
   $("#metric-deals").textContent = data.totals.deals;
   $("#metric-completed").textContent = data.totals.completedDeals;
   $("#metric-verifications").textContent = data.totals.pendingVerifications;
+  renderNavBadge("#nav-verifications-badge", data.totals.pendingVerifications);
   $("#metric-disputes").textContent = data.totals.openDisputes;
   renderLineChart("#activity-chart", data.charts?.activity || [], "deals");
   renderDonutChart("#offer-status-chart", data.charts?.offerStatus || {});
@@ -189,6 +190,14 @@ function renderOverview(data) {
     title: listing.status,
     meta: `${money(listing.have_amount, listing.have_currency)} -> ${money(listing.want_amount, listing.want_currency)} · ${date(listing.created_at)}`,
   }));
+}
+
+function renderNavBadge(selector, count) {
+  const badge = $(selector);
+  if (!badge) return;
+  const value = Number(count || 0);
+  badge.textContent = value > 99 ? "99+" : String(value);
+  badge.hidden = value <= 0;
 }
 
 function renderLineChart(selector, rows, key) {
