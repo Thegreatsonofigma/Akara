@@ -11,13 +11,17 @@ const {
 } = require("./lib/whatsapp");
 const { handleReceiptRedirect } = require("./lib/receipts");
 const { handleListingCardRoute } = require("./lib/listing-card");
-const { findOrCreateUser } = require("./db/users");
+const { findOrCreateUser, getUserById, isVerified } = require("./db/users");
 const { getSession } = require("./db/sessions");
 const { buildReply } = require("./router");
 const { handleAdminApi, adminFilePath } = require("./admin");
 const { supabaseRequest, filterValue } = require("./lib/supabase");
+const { mainMenu } = require("./messages/copy");
 
 const activeInboundMessageIds = new Set();
+const DEFAULT_IDLE_MENU_AFTER_MS = 5 * 60 * 1000;
+const DEFAULT_IDLE_MENU_SCAN_MS = 60 * 1000;
+let idleMenuTimer = null;
 
 function isMainMenuReply(reply = "") {
   return String(reply || "").trim().startsWith("*Akara menu*");
@@ -73,6 +77,94 @@ async function sendAkaraReply(to, reply) {
     }
   }
   return sendWhatsAppText(to, reply);
+}
+
+function idleMenuEnabled() {
+  return process.env.AKARA_IDLE_MENU_ENABLED !== "false";
+}
+
+function numericEnv(name, fallback) {
+  const value = Number(process.env[name] || fallback);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+async function markIdleMenuSent(session, now) {
+  const context = session.context_json || {};
+  const selector = session.id
+    ? `id=eq.${filterValue(session.id)}`
+    : `whatsapp_phone=eq.${filterValue(session.whatsapp_phone)}`;
+
+  await supabaseRequest(`message_sessions?${selector}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      context_json: {
+        ...context,
+        idle_menu_sent_at: now.toISOString(),
+      },
+    }),
+  });
+}
+
+async function sendIdleMenus(options = {}) {
+  if (!idleMenuEnabled()) return { sent: 0, skipped: 0 };
+
+  const now = options.now || new Date();
+  const idleMs = options.idleMs || numericEnv("AKARA_IDLE_MENU_AFTER_MS", DEFAULT_IDLE_MENU_AFTER_MS);
+  const limit = options.limit || 50;
+  const cutoff = new Date(now.getTime() - idleMs).toISOString();
+  const sessions = await supabaseRequest(
+    [
+      "message_sessions?select=id,user_id,whatsapp_phone,current_flow,current_step,context_json,last_message_at",
+      `last_message_at=lte.${filterValue(cutoff)}`,
+      "order=last_message_at.asc",
+      `limit=${limit}`,
+    ].join("&")
+  );
+
+  let sent = 0;
+  let skipped = 0;
+  for (const session of sessions) {
+    const lastMessageTime = session.last_message_at
+      ? new Date(session.last_message_at).getTime()
+      : 0;
+    const idleSentTime = session.context_json?.idle_menu_sent_at
+      ? new Date(session.context_json.idle_menu_sent_at).getTime()
+      : 0;
+
+    if (!session.whatsapp_phone || !lastMessageTime || idleSentTime >= lastMessageTime) {
+      skipped += 1;
+      continue;
+    }
+
+    const user = session.user_id ? await getUserById(session.user_id) : null;
+    if (!user || !isVerified(user)) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      await sendWhatsAppList(session.whatsapp_phone, mainMenuListPayload());
+    } catch (error) {
+      console.error(`[idle-menu] list failed for ${session.whatsapp_phone}: ${error.message}`);
+      await sendWhatsAppText(session.whatsapp_phone, mainMenu());
+    }
+
+    await markIdleMenuSent(session, now);
+    sent += 1;
+  }
+
+  return { sent, skipped };
+}
+
+function startIdleMenuScheduler() {
+  if (idleMenuTimer || !idleMenuEnabled()) return;
+  const scanMs = numericEnv("AKARA_IDLE_MENU_SCAN_MS", DEFAULT_IDLE_MENU_SCAN_MS);
+  idleMenuTimer = setInterval(() => {
+    sendIdleMenus().catch((error) => {
+      console.error(`[idle-menu] scan failed: ${error.message}`);
+    });
+  }, scanMs);
+  idleMenuTimer.unref?.();
 }
 
 async function isInboundMessageProcessed(messageId) {
@@ -262,9 +354,11 @@ function startServer() {
     console.log(`Akara webhook server listening on http://${config.host}:${config.port}`);
     console.log(`Akara send mode: ${config.sendMode}`);
   });
+  startIdleMenuScheduler();
 }
 
 module.exports = {
   server,
   startServer,
+  sendIdleMenus,
 };

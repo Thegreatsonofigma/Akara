@@ -11,6 +11,7 @@ const {
   inferIntent,
   isGreeting,
   isThanksMessage,
+  isSessionClosureMessage,
   isWellbeingQuestion,
   isMenuCommand,
   isHistoryCommand,
@@ -248,16 +249,30 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   }
 
   if (interpretedAction === "view_profile" || isProfileCommand(text)) {
+    await clearSession(user, user.whatsapp_phone);
     return viewProfileReply(user);
   }
 
   if (interpretedAction === "view_payouts" || isPayoutsCommand(text)) {
+    await clearSession(user, user.whatsapp_phone);
     return viewPayoutsReply(user);
   }
 
   if (interpretedAction === "my_listings" || isMyListingsCommand(text)) {
     await clearSession(user, user.whatsapp_phone);
     return getMyListingsReply(user);
+  }
+
+  if (!session?.current_flow && (interpretedAction === "thanks" || isSessionClosureMessage(text))) {
+    await clearSession(user, user.whatsapp_phone);
+    return [
+      title("Done"),
+      caption("That session is closed."),
+      "",
+      "Choose what you want to do next.",
+      "",
+      mainMenu(),
+    ].join("\n");
   }
 
   // Thanks is unambiguous, so it gets a warm reply even mid-flow without
