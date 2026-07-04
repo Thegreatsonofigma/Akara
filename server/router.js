@@ -269,8 +269,6 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
       title("Done"),
       caption("That session is closed."),
       "",
-      "Choose what you want to do next.",
-      "",
       mainMenu(),
     ].join("\n");
   }
@@ -648,8 +646,6 @@ async function routeMessage(text, user, session, incoming = {}) {
       ? [
           title("Stopped"),
           caption("That flow is closed."),
-          "",
-          "Choose what you want to do next.",
           "",
           mainMenu(),
         ].join("\n")

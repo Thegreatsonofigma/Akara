@@ -291,7 +291,6 @@ async function handleFindOffer(text, user, session) {
       title("No problem"),
       "",
       "I have closed that search.",
-      "Choose what you want to do next.",
       "",
       mainMenu(),
     ].join("\n");
@@ -412,7 +411,6 @@ async function handleSearchResults(text, user, session) {
       title("No problem"),
       "",
       "I have closed that selection.",
-      "Choose what you want to do next.",
       "",
       mainMenu(),
     ].join("\n");
