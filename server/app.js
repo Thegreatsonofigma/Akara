@@ -16,6 +16,7 @@ const { getSession } = require("./db/sessions");
 const { buildReply } = require("./router");
 const { handleAdminApi, adminFilePath } = require("./admin");
 const { supabaseRequest, filterValue } = require("./lib/supabase");
+const { mainMenuListPayload } = require("./messages/copy");
 
 const activeInboundMessageIds = new Set();
 
@@ -23,24 +24,6 @@ function isMainMenuReply(reply = "") {
   return String(reply || "").trim().startsWith("*Akara menu*");
 }
 
-function mainMenuListPayload() {
-  return {
-    body: "Choose what you want to do next on Akara.",
-    button: "Click to Select",
-    sections: [
-      {
-        title: "Akara actions",
-        rows: [
-          { id: "make_offer", title: "make offer", description: "Create a rate listing people can take." },
-          { id: "find_offers", title: "find offers", description: "Browse available currency offers." },
-          { id: "my_listings", title: "my listings", description: "Manage your live listings." },
-          { id: "history", title: "history", description: "See your past and active trades." },
-          { id: "profile", title: "profile", description: "Payouts, verification, and account details." },
-        ],
-      },
-    ],
-  };
-}
 
 async function sendAkaraReply(to, reply) {
   if (!reply) return null;

@@ -118,6 +118,25 @@ function wellbeingReply(user) {
   ].join("\n");
 }
 
+function mainMenuListPayload(body = "Choose what you want to do next on Akara.") {
+  return {
+    body,
+    button: "Click to Select",
+    sections: [
+      {
+        title: "Akara actions",
+        rows: [
+          { id: "make_offer", title: "make offer", description: "Create a rate listing people can take." },
+          { id: "find_offers", title: "find offers", description: "Browse available currency offers." },
+          { id: "my_listings", title: "my listings", description: "Manage your live listings." },
+          { id: "history", title: "history", description: "See your past and active trades." },
+          { id: "profile", title: "profile", description: "Payouts, verification, and account details." },
+        ],
+      },
+    ],
+  };
+}
+
 function referralPitch() {
   return "🎁 Invite a friend or refer a friend to swap with you and get 10 more free trades.";
 }
@@ -172,4 +191,5 @@ module.exports = {
   feeIncludedNote,
   listingShareCopy,
   explainMissingListing,
+  mainMenuListPayload
 };

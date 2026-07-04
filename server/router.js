@@ -1,4 +1,5 @@
 const { title, caption, action, applyInterpretedAnswer } = require("./lib/format");
+const { sendWhatsAppList } = require("./lib/whatsapp");
 const { normalizeCurrency, currencyHelpLine, parsePaymentCurrency, parseCurrencyAmountPairs } = require("./nlp/currency");
 const {
   parseListingDetails,
@@ -37,7 +38,7 @@ const { isVerified, isOnHold } = require("./db/users");
 const { getSession, upsertSession, clearSession } = require("./db/sessions");
 const { extractListingCode, extractDealCode } = require("./db/listings");
 const { getDealByCodeForUser, getLatestOpenDealForUser } = require("./db/deals");
-const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply, explainMissingListing } = require("./messages/copy");
+const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply, explainMissingListing, mainMenuListPayload } = require("./messages/copy");
 const { scopedAssistantReply } = require("./messages/assistant");
 const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
@@ -90,6 +91,21 @@ function findOfferPrompt() {
     "or",
     "Show me RWF offers",
   ].join("\n");
+}
+
+function greetingReply() {
+  return [
+    title("Akara menu"),
+    caption("Choose an action or type the number."),
+    "",
+    ...menuOptionLines(),
+    "",
+    "_You can also type naturally:_",
+    "`I have 50k naira and want 55k rwf`",
+    "`I have 2k naira and want rwf, show me available deals`",
+    "",
+    "_At any time:_ `menu`, `history`, `profile`, or `start over`",
+  ].join("\n")
 }
 
 function listingCodesFromText(text) {
@@ -483,7 +499,8 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   if (bareGreeting) {
     await clearSession(user, user.whatsapp_phone);
-    return welcomePrompt(user);
+    // welcomePrompt(user)
+    return await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(greetingReply()));
   }
 
   if (command === "verify" || command === "verify me" || interpretedAction === "verify") {
