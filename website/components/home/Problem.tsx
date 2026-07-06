@@ -5,9 +5,9 @@ import {
   HourglassLow,
   ClockCounterClockwise,
   Scales,
+  ArrowDown,
 } from "@phosphor-icons/react/dist/ssr";
 import { Container } from "@/components/ui/Container";
-import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Reveal } from "@/components/motion/Reveal";
 
 const PROBLEMS = [
@@ -43,41 +43,53 @@ const PROBLEMS = [
   },
 ];
 
+/** The light act — a paper-white editorial break in the black page. */
 export function Problem() {
   return (
-    <section className="relative overflow-hidden border-t border-hairline py-20 sm:py-28">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_40%_35%_at_90%_20%,rgba(255,45,85,0.06),transparent_70%)]"
-      />
+    <section className="relative overflow-hidden bg-[#F2F2ED] py-20 text-black sm:py-28">
+      <div aria-hidden="true" className="absolute inset-0 bg-grain" />
       <Container className="relative">
-        <SectionHeader
-          eyebrow="The problem"
-          accent="pink"
-          title="Group chats weren't built for money."
-          copy="Right now, finding currency means strangers, screenshots, and hope."
-        />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Reveal className="mb-14 flex flex-col items-center gap-5 text-center sm:mb-16">
+          <p className="inline-flex w-fit items-center gap-2 rounded-full border border-black/15 bg-black/[0.03] px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-black/55">
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-pink" />
+            The problem
+          </p>
+          <h2 className="max-w-2xl text-balance text-4xl font-black leading-[1.05] tracking-tight sm:text-5xl md:text-6xl">
+            Group chats weren&apos;t built for money.
+          </h2>
+          <p className="max-w-md text-pretty text-base leading-relaxed text-black/55 sm:text-lg">
+            Right now, finding currency means strangers, screenshots, and hope.
+          </p>
+        </Reveal>
+
+        <div className="mx-auto grid max-w-4xl sm:grid-cols-2 sm:gap-x-16">
           {PROBLEMS.map((problem, i) => (
-            <Reveal key={problem.title} delay={i * 0.06} className="h-full">
-              <div className="flex h-full items-center gap-4 rounded-2xl border border-hairline bg-surface-2 p-5 transition-colors duration-300 hover:border-pink/30">
-                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-pink/20 bg-pink/[0.06]">
+            <Reveal key={problem.title} delay={i * 0.05}>
+              <div className="flex items-center gap-4 border-b border-black/10 py-5">
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-pink/25 bg-pink/[0.07]">
                   <problem.icon
                     size={21}
                     className="text-pink"
                     aria-hidden="true"
                   />
                 </span>
-                <div>
-                  <p className="text-[15px] font-semibold text-white">
-                    {problem.title}
+                <div className="flex flex-1 items-baseline justify-between gap-3">
+                  <p className="text-[15px] font-bold">{problem.title}</p>
+                  <p className="text-right text-[13px] text-black/50">
+                    {problem.copy}
                   </p>
-                  <p className="mt-0.5 text-[13px] text-faint">{problem.copy}</p>
                 </div>
               </div>
             </Reveal>
           ))}
         </div>
+
+        <Reveal delay={0.2}>
+          <p className="mt-14 flex items-center justify-center gap-2 text-sm font-semibold">
+            Here&apos;s how Akara fixes it
+            <ArrowDown size={15} aria-hidden="true" className="text-pink" />
+          </p>
+        </Reveal>
       </Container>
     </section>
   );

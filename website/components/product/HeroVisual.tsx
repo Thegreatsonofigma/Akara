@@ -17,23 +17,25 @@ export function HeroVisual() {
         <WhatsAppChatMockup framed />
       </PhoneFrame>
 
+      {/* floor glow grounding the phone */}
+      <div
+        aria-hidden="true"
+        className="absolute -bottom-12 left-1/2 -z-10 h-20 w-[420px] max-w-[90vw] -translate-x-1/2 rounded-[50%] bg-brand/15 blur-3xl"
+      />
+
       {/* floating product widgets — desktop composition */}
       <ListingCard
-        className="float-b absolute -left-56 top-14 z-10 hidden w-[290px] -rotate-3 xl:block"
+        className="float-b absolute -bottom-8 -left-44 z-10 hidden w-[290px] -rotate-3 xl:block"
         have="NGN"
         haveAmount="350,000"
         need="RWF"
         needAmount="412,500"
         reference="AKR-LIST-006"
       />
-      <ReceiptCard className="float-a absolute -right-48 bottom-16 z-10 hidden w-[280px] rotate-2 xl:block" />
+      <ReceiptCard className="float-a absolute -right-48 bottom-24 z-10 hidden w-[280px] rotate-2 xl:block" />
 
       <div className="float-b absolute -right-28 top-10 hidden xl:block">
         <CorridorChip from="NGN" to="RWF" />
-      </div>
-      <div className="float-a absolute -left-36 bottom-10 hidden xl:flex items-center gap-2 rounded-full border border-white/15 bg-black/80 px-4 py-2 text-xs text-white backdrop-blur">
-        <span aria-hidden="true" className="size-1.5 rounded-full bg-brand" />
-        Akara never holds the money
       </div>
 
       {/* compact composition for smaller screens */}

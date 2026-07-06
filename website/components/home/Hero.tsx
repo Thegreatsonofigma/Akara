@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { GradientBackground } from "@/components/ui/GradientBackground";
 import { HeroVisual } from "@/components/product/HeroVisual";
+import { CyclingCorridor } from "@/components/product/CyclingCorridor";
 import { Reveal } from "@/components/motion/Reveal";
 import { SITE } from "@/lib/site";
 
@@ -34,8 +35,8 @@ export function Hero() {
           </Reveal>
 
           <Reveal y={28} delay={0.08}>
-            <h1 className="max-w-2xl text-balance text-5xl font-black leading-[1.02] tracking-tight sm:text-6xl xl:text-7xl">
-              Swap currencies with{" "}
+            <h1 className="max-w-2xl text-balance text-5xl font-black leading-[1.06] tracking-tight sm:text-6xl xl:text-7xl">
+              Swap <CyclingCorridor /> with{" "}
               <span className="text-brand">people you can trust.</span>
             </h1>
           </Reveal>
