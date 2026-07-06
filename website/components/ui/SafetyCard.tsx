@@ -46,7 +46,7 @@ export function SafetyCard({
             light ? TILE_TONES_LIGHT[tone] : TILE_TONES[tone]
           }`}
         >
-          <IconComponent size={20} aria-hidden="true" />
+          <IconComponent size={20} weight="duotone" aria-hidden="true" />
         </span>
         <p
           className={`text-sm font-semibold ${light ? "text-black" : "text-white"}`}

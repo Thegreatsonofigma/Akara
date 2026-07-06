@@ -1,6 +1,6 @@
 import { WhatsappLogo, ArrowDown } from "@phosphor-icons/react/dist/ssr";
 import { HeroVisual } from "@/components/product/HeroVisual";
-import { CyclingCorridor } from "@/components/product/CyclingCorridor";
+import { HeroHeadline } from "@/components/home/HeroHeadline";
 import { Reveal } from "@/components/motion/Reveal";
 import { SITE } from "@/lib/site";
 
@@ -32,14 +32,7 @@ export function Hero() {
             </p>
           </Reveal>
 
-          <Reveal y={28} delay={0.08}>
-            <h1 className="max-w-2xl text-balance text-5xl font-black leading-[1.06] tracking-tight sm:text-6xl xl:text-7xl">
-              Swap <CyclingCorridor light /> with{" "}
-              <span className="rounded-[0.2em] bg-brand box-decoration-clone px-[0.12em]">
-                people you can trust.
-              </span>
-            </h1>
-          </Reveal>
+          <HeroHeadline />
 
           <Reveal y={24} delay={0.16}>
             <p className="mt-7 max-w-md text-pretty text-base leading-relaxed text-black/60 sm:text-lg">
