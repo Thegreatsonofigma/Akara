@@ -1,6 +1,6 @@
 import { ArrowsLeftRight } from "@phosphor-icons/react/dist/ssr";
-import { CurrencyChip, CorridorChip } from "@/components/product/CurrencyChip";
-import { CURRENCIES } from "@/lib/site";
+import { CorridorChip } from "@/components/product/CurrencyChip";
+import { CorridorMap } from "@/components/product/CorridorMap";
 import { Reveal } from "@/components/motion/Reveal";
 
 const MARQUEE_CORRIDORS = [
@@ -48,16 +48,7 @@ export function CorridorBoard() {
       </Reveal>
 
       <Reveal delay={0.08}>
-        <ul
-          className="flex flex-wrap items-center justify-center gap-3 sm:gap-4"
-          aria-label="Launch currencies"
-        >
-          {CURRENCIES.map((c) => (
-            <li key={c.code}>
-              <CurrencyChip code={c.code} country={c.country} size="lg" />
-            </li>
-          ))}
-        </ul>
+        <CorridorMap />
       </Reveal>
 
       <div className="grid gap-4 sm:grid-cols-2">

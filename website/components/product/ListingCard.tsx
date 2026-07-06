@@ -18,7 +18,7 @@ export function ListingCard({
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-2xl border border-hairline bg-black shadow-[0_24px_60px_rgba(0,0,0,0.55)]",
+        "overflow-hidden rounded-2xl border border-hairline bg-black shadow-[0_24px_60px_rgba(0,0,0,0.55)]",
         className,
       )}
     >

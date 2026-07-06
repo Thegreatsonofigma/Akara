@@ -45,8 +45,12 @@ const PROBLEMS = [
 
 export function Problem() {
   return (
-    <section className="border-t border-hairline py-20 sm:py-28">
-      <Container>
+    <section className="relative overflow-hidden border-t border-hairline py-20 sm:py-28">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_40%_35%_at_90%_20%,rgba(255,45,85,0.06),transparent_70%)]"
+      />
+      <Container className="relative">
         <SectionHeader
           eyebrow="The problem"
           accent="pink"

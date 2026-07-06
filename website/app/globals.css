@@ -157,6 +157,27 @@ body {
   }
 }
 
+/* Corridor map node pulse */
+@keyframes node-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.5);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .node-pulse {
+    animation: node-pulse 3.2s ease-in-out infinite;
+    transform-origin: center;
+    transform-box: fill-box;
+  }
+}
+
 /* Dotted coordination lines in the no-custody diagram */
 .dashed-line {
   stroke-dasharray: 4 6;

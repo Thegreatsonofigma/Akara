@@ -7,9 +7,13 @@ export function Verification() {
   return (
     <section
       id="verification"
-      className="scroll-mt-20 border-t border-hairline py-20 sm:py-28"
+      className="relative scroll-mt-20 overflow-hidden border-t border-hairline py-20 sm:py-28"
     >
-      <Container>
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_40%_40%_at_90%_60%,rgba(66,43,243,0.09),transparent_70%)]"
+      />
+      <Container className="relative">
         <div className="grid items-center gap-12 lg:grid-cols-2">
           <SectionHeader
             align="left"

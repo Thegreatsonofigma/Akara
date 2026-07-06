@@ -28,17 +28,31 @@ function UserBubble({
   );
 }
 
-export function WhatsAppChatMockup({ className }: { className?: string }) {
+export function WhatsAppChatMockup({
+  className,
+  framed = false,
+}: {
+  className?: string;
+  framed?: boolean;
+}) {
   return (
     <div
       className={cn(
-        "flex w-full flex-col overflow-hidden rounded-3xl border border-hairline bg-surface-2 shadow-[0_32px_80px_rgba(0,0,0,0.6)]",
+        "flex w-full flex-col overflow-hidden bg-surface-2",
+        framed
+          ? "rounded-none border-0"
+          : "rounded-3xl border border-hairline shadow-[0_32px_80px_rgba(0,0,0,0.6)]",
         className,
       )}
       role="img"
       aria-label="Preview of an Akara conversation on WhatsApp: a user asks to swap Nigerian naira for Rwandan francs and Akara replies with verified offers"
     >
-      <div className="flex items-center gap-3 border-b border-hairline bg-black/60 px-4 py-3">
+      <div
+        className={cn(
+          "flex items-center gap-3 border-b border-hairline bg-black/60 px-4 py-3",
+          framed && "pt-10",
+        )}
+      >
         <span className="flex size-9 items-center justify-center rounded-full bg-black ring-1 ring-brand/40">
           <Image src="/akara-logo-mark.png" alt="" width={20} height={20} />
         </span>
