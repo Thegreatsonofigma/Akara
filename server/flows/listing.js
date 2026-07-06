@@ -99,7 +99,7 @@ function listingLiveMessage(heading, listingCode, listing, shareUrl) {
     "",
     `*You receive:* ${title(formatMoney(listing.want_amount, listing.want_currency))}`,
     "",
-    `*Terms:* ${listingTypeLabel(listing.listing_type || "fixed")}`,
+    `*Terms:* ${action(listingTypeLabel(listing.listing_type || "negotiable"))}`,
     "",
     `*Service fee:* ${feeIncludedText()}`,
     "",
@@ -185,7 +185,7 @@ function formatListingReview(context) {
     "",
     title("2. Rate"),
     labeled("Rate", `1 ${context.have_currency} = ${rate.toFixed(4)} ${context.want_currency}`),
-    labeled("Terms", listingTypeLabel(context.listing_type)),
+    labeled("Terms", action(listingTypeLabel(context.listing_type || "negotiable"))),
     "",
     title("3. Fee"),
     labeled("Service fee", feeIncludedText()),
@@ -208,7 +208,7 @@ async function findActiveDuplicateListing(user, context) {
     `want_currency=eq.${filterValue(context.want_currency)}`,
     `have_amount=eq.${filterValue(moneyNumber(context.have_amount))}`,
     `want_amount=eq.${filterValue(moneyNumber(context.want_amount))}`,
-    `listing_type=eq.${filterValue(context.listing_type || "fixed")}`,
+    `listing_type=eq.${filterValue(context.listing_type || "negotiable")}`,
     "order=created_at.desc",
     "limit=3",
   ].join("&"));
@@ -263,7 +263,7 @@ function listingEditMenu(context, intro = title("What do you want to edit?")) {
     "",
     `1. ${action("send amount")} ${formatMoney(context.have_amount, context.have_currency)}`,
     `2. ${action("receive amount")} ${formatMoney(context.want_amount, context.want_currency)}`,
-    `3. ${action("terms")} ${listingTypeLabel(context.listing_type || "fixed")}`,
+    `3. ${action("terms")} ${listingTypeLabel(context.listing_type || "negotiable")}`,
     `4. ${action("currencies")}`,
     "",
     `${action("publish")} to continue with publication`,
@@ -290,7 +290,7 @@ async function prepareListingPreview(user, details, intro = "") {
     want_currency: details.want_currency,
     have_amount: details.have_amount,
     want_amount: details.want_amount,
-    listing_type: details.listing_type || "fixed",
+    listing_type: details.listing_type || "negotiable",
     listing_code: details.listing_code || await generateReferenceCode("listing"),
     ...(details.editing_listing_id ? { editing_listing_id: details.editing_listing_id } : {}),
     ...(details.previous_listing_status ? { previous_listing_status: details.previous_listing_status } : {}),
@@ -355,7 +355,7 @@ async function publishListing(user, context) {
           want_currency: context.want_currency,
           have_amount: context.have_amount,
           want_amount: context.want_amount,
-          listing_type: context.listing_type || "fixed",
+          listing_type: context.listing_type || "negotiable",
           status: "active",
         }),
       }
@@ -385,7 +385,7 @@ async function publishListing(user, context) {
       want_currency: context.want_currency,
       have_amount: context.have_amount,
       want_amount: context.want_amount,
-      listing_type: context.listing_type || "fixed",
+      listing_type: context.listing_type || "negotiable",
       status: "active",
     }),
   });
@@ -609,7 +609,7 @@ async function sendNegotiationReminder({ user, offer, listing, targetUser }) {
 function flexibleListingPrompt(listing) {
   const code = displayReference(listing.listing_code, "listing");
   return [
-    title("Flexible listing"),
+    title("Negotiable listing"),
     caption("You can accept the posted terms or propose what you want to send."),
     "",
     fieldBlock("Reference", code),
@@ -899,7 +899,7 @@ async function handleNegotiation(text, user, session) {
     const listing = await getActiveListingById(offer.listing_id);
     if (!listing) {
       await clearSession(user, user.whatsapp_phone);
-      return "That flexible listing is no longer live.";
+      return "That negotiable listing is no longer live.";
     }
 
     const targetUserId = listing.owner_user_id === user.id ? offer.offering_user_id : listing.owner_user_id;
@@ -930,15 +930,15 @@ async function handleNegotiation(text, user, session) {
     const listing = await getActiveListingById(context.listing_id);
     if (!listing) {
       await clearSession(user, user.whatsapp_phone);
-      return "That flexible listing is no longer live. Type find offers to browse again.";
+      return "That negotiable listing is no longer live. Type find offers to browse again.";
     }
 
     if (/\b(accept|take|open|deal|start|go ahead|posted|same terms|terms)\b/.test(command)) {
       await clearSession(user, user.whatsapp_phone);
       return reserveListing(user, listing, {
         force: true,
-        takerIntro: "You accepted the posted flexible terms.",
-        makerIntro: "The trader accepted your posted flexible terms.",
+        takerIntro: "You accepted the posted negotiable terms.",
+        makerIntro: "The trader accepted your posted negotiable terms.",
       });
     }
 
@@ -987,7 +987,7 @@ async function handleNegotiation(text, user, session) {
     const listing = await getActiveListingById(offer.listing_id);
     if (!listing || listing.owner_user_id !== user.id) {
       await clearSession(user, user.whatsapp_phone);
-      return "That flexible listing is no longer available.";
+      return "That negotiable listing is no longer available.";
     }
 
     const taker = await getUserById(offer.offering_user_id);
@@ -1008,7 +1008,7 @@ async function handleNegotiation(text, user, session) {
         have_amount: offer.receive_amount,
         returnRole: "maker",
         takerIntro: "Your proposal was accepted, so I opened the trade room.",
-        makerIntro: "You accepted a flexible proposal, so I opened the trade room.",
+        makerIntro: "You accepted a negotiable proposal, so I opened the trade room.",
       });
     }
 
@@ -1086,7 +1086,7 @@ async function handleNegotiation(text, user, session) {
     const listing = await getActiveListingById(offer.listing_id);
     if (!listing) {
       await clearSession(user, user.whatsapp_phone);
-      return "That flexible listing is no longer live.";
+      return "That negotiable listing is no longer live.";
     }
 
     if (session.current_step === "taker_waiting" && offer.status === "pending") {
@@ -1254,8 +1254,9 @@ async function handleCreateListing(text, user, session) {
     context.want_amount = amount;
     const currency = normalizeCurrency(text);
     if (currency && currency !== context.have_currency) context.want_currency = currency;
-    await upsertSession(user, user.whatsapp_phone, "create_listing", "listing_type", context);
-    return "Should this rate be fixed or flexible?";
+    context.listing_type = context.listing_type || "negotiable";
+    await upsertSession(user, user.whatsapp_phone, "create_listing", "confirm", context);
+    return formatListingReview(context);
   }
 
   if (step === "listing_type") {
@@ -1265,7 +1266,7 @@ async function handleCreateListing(text, user, session) {
       : listingType.includes("firm") || listingType.includes("fixed")
         ? "fixed"
         : null;
-    if (!normalizedType) return "Reply fixed or flexible.";
+    if (!normalizedType) return `Reply ${action("fixed")} or ${action("negotiable")}.`;
 
     context.listing_type = normalizedType;
     await upsertSession(user, user.whatsapp_phone, "create_listing", "confirm", context);
@@ -1336,9 +1337,9 @@ async function handleCreateListing(text, user, session) {
       return [
         title("Edit terms"),
         "",
-        `Current: ${listingTypeLabel(context.listing_type || "fixed")}`,
+        `Current: ${listingTypeLabel(context.listing_type || "negotiable")}`,
         "",
-        `Choose ${action("fixed")} or ${action("flexible")}.`,
+        `Choose ${action("fixed")} or ${action("negotiable")}.`,
       ].join("\n");
     }
 

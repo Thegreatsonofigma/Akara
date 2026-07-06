@@ -140,7 +140,7 @@ async function run() {
   check("revision keeps rwf side", /\d[\d,]*\s*RWF/.test(reply), reply);
 
   reply = await send(ALICE, "make it flexible");
-  check("terms revision applies", reply.includes("Flexible rate"), reply);
+  check("terms revision applies", reply.includes("Negotiable rate"), reply);
 
   reply = await send(ALICE, "oya publish it");
   check("publish goes live", reply.includes("live ✅"), reply);

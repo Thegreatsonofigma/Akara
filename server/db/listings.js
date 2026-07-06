@@ -1,4 +1,4 @@
-const { config, getPublicUrl } = require("../config");
+const { config } = require("../config");
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { moneyNumber, positiveMoney } = require("../lib/format");
 
@@ -95,13 +95,7 @@ function listingVersionQuery(listing) {
 }
 
 function listingShareUrl(listingCode) {
-  const publicUrl = getPublicUrl();
   const code = typeof listingCode === "object" ? listingCode.listing_code : listingCode;
-  const version = listingVersionQuery(listingCode);
-  if (publicUrl) {
-    const query = version ? `?v=${encodeURIComponent(version)}` : "";
-    return `${publicUrl}/l/${encodeURIComponent(displayReference(code, "listing"))}${query}`;
-  }
   return listingWaOpenUrl(code);
 }
 
@@ -112,7 +106,7 @@ function listingWaOpenUrl(listingCode) {
 }
 
 function listingTypeLabel(value) {
-  return value === "negotiable" ? "Flexible rate" : "Fixed rate";
+  return value === "fixed" ? "Fixed rate" : "Negotiable rate";
 }
 
 function listingStatusLabel(status) {
@@ -159,7 +153,7 @@ async function createResidualListing(sourceListing, usedHaveAmount, usedWantAmou
       want_currency: sourceListing.want_currency,
       have_amount: remainingHaveAmount,
       want_amount: remainingWantAmount,
-      listing_type: sourceListing.listing_type || "fixed",
+      listing_type: sourceListing.listing_type || "negotiable",
       status: "active",
     }),
   });

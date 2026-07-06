@@ -106,14 +106,20 @@ async function sendIdleMenus(options = {}) {
   const idleMs = options.idleMs || numericEnv("AKARA_IDLE_MENU_AFTER_MS", DEFAULT_IDLE_MENU_AFTER_MS);
   const limit = options.limit || 50;
   const cutoff = new Date(now.getTime() - idleMs).toISOString();
-  const sessions = await supabaseRequest(
-    [
-      "message_sessions?select=id,user_id,whatsapp_phone,current_flow,current_step,context_json,last_message_at",
-      `last_message_at=lte.${filterValue(cutoff)}`,
-      "order=last_message_at.asc",
-      `limit=${limit}`,
-    ].join("&")
-  );
+  let sessions = [];
+  try {
+    sessions = await supabaseRequest(
+      [
+        "message_sessions?select=id,user_id,whatsapp_phone,current_flow,current_step,context_json,last_message_at",
+        `last_message_at=lte.${filterValue(cutoff)}`,
+        "order=last_message_at.asc",
+        `limit=${limit}`,
+      ].join("&")
+    );
+  } catch (error) {
+    console.error(`[idle-menu] scan skipped: ${error.message}`);
+    return { sent: 0, skipped: 0, failed: true };
+  }
 
   let sent = 0;
   let skipped = 0;
@@ -140,7 +146,13 @@ async function sendIdleMenus(options = {}) {
       await sendWhatsAppList(session.whatsapp_phone, mainMenuListPayload("Choose what you want to do next on Akara."));
     } catch (error) {
       console.error(`[idle-menu] list failed for ${session.whatsapp_phone}: ${error.message}`);
-      await sendWhatsAppText(session.whatsapp_phone, mainMenu());
+      try {
+        await sendWhatsAppText(session.whatsapp_phone, mainMenu());
+      } catch (fallbackError) {
+        console.error(`[idle-menu] text fallback failed for ${session.whatsapp_phone}: ${fallbackError.message}`);
+        skipped += 1;
+        continue;
+      }
     }
 
     await markIdleMenuSent(session, now);
@@ -155,7 +167,7 @@ function startIdleMenuScheduler() {
   const scanMs = numericEnv("AKARA_IDLE_MENU_SCAN_MS", DEFAULT_IDLE_MENU_SCAN_MS);
   idleMenuTimer = setInterval(() => {
     sendIdleMenus().catch((error) => {
-      console.error(`[idle-menu] scan failed: ${error.message}`);
+      console.error(`[idle-menu] unexpected scan error: ${error.message}`);
     });
   }, scanMs);
   idleMenuTimer.unref?.();

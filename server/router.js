@@ -195,6 +195,18 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const details = interpreted?.details || {};
   const answer = typeof interpreted?.answer === "string" ? interpreted.answer.trim() : "";
 
+  if (isVerified(user) && !session?.current_flow && /^[1-5]$/.test(command)) {
+    await clearSession(user, user.whatsapp_phone);
+    if (command === "1") {
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {});
+      return makeOfferPrompt();
+    }
+    if (command === "2") return showBrowseOffers(user);
+    if (command === "3") return getMyListingsReply(user);
+    if (command === "4") return getMyDealsReply(user);
+    if (command === "5") return viewProfileReply(user);
+  }
+
   // The model's written answer is only the reply for conversational
   // classifications. Functional actions (flows, listings, trades, settings,
   // confirmations) always route through their handlers below, so an answer
@@ -390,7 +402,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   }
 
   // Draft revisions at the review step: "make it 60k", "use kes instead",
-  // "make it flexible" update the draft and re-show the review, instead of
+  // "make it negotiable" update the draft and re-show the review, instead of
   // re-asking "ready to publish?".
   if (session?.current_flow === "create_listing" && session.current_step === "confirm"
       && !isListingPublishIntent(text) && !isDeclineIntent(text) && !isCancelIntent(text)) {
@@ -411,7 +423,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
         want_currency: flowContext.want_currency || null,
         have_amount: flowContext.have_amount || null,
         want_amount: flowContext.want_amount || null,
-        listing_type: flowContext.listing_type || "fixed",
+        listing_type: flowContext.listing_type || "negotiable",
         ...(flowContext.listing_code ? { listing_code: flowContext.listing_code } : {}),
         ...(flowContext.editing_listing_id ? { editing_listing_id: flowContext.editing_listing_id } : {}),
         ...(flowContext.previous_listing_status ? { previous_listing_status: flowContext.previous_listing_status } : {}),
@@ -723,6 +735,16 @@ async function routeMessage(text, user, session, incoming = {}) {
   const skipAnswer = ANSWER_ACTIONS.has(interpreted.action)
     || interpreted.action === "flow_reply"
     || interpreted.action === "add_payout"
+    || interpreted.action === "create_listing"
+    || interpreted.action === "find_offer"
+    || interpreted.action === "browse_offers"
+    || interpreted.action === "reserve_listing"
+    || interpreted.action === "trade_action"
+    || interpreted.action === "settings_action"
+    || interpreted.action === "view_profile"
+    || interpreted.action === "my_listings"
+    || interpreted.action === "my_deals"
+    || interpreted.action === "menu"
     || interpreted.action === "greeting"
     || interpreted.action === "wellbeing"
     || !isVerified(user)

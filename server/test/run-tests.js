@@ -346,6 +346,14 @@ async function run() {
   reply = await send(ALICE, "my transactions");
   check("history synonym works", reply.includes("No transaction history yet"), reply);
 
+  reply = await send(ALICE, "1");
+  check("typed menu 1 opens make offer", reply.includes("Tell me what currency you have"), reply);
+  await send(ALICE, "cancel");
+
+  reply = await send(ALICE, "2");
+  check("typed menu 2 browses offers", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
+  await send(ALICE, "cancel");
+
   reply = await send(ALICE, "5", { quotedText: "*Akara menu*\n1. make offer" });
   check("quoted menu 5 → scoped profile", reply.includes("*Your profile*"), reply);
 
@@ -500,12 +508,12 @@ async function run() {
   check("have-only search understands can-send phrasing", reply.includes("AKR-LIST-088"), reply);
 
   reply = await send(ALICE, "I need KES 9999999");
-  check("need-only no match asks what user has", reply.includes("What currency do you have to offer"), reply);
+  check("need-only no match asks what user has", reply.includes("Tell me what currency you have"), reply);
   check("need-only no match keeps requested currency", reply.includes("9,999,999 KES"), reply);
   check("need-only no match does not ask needed currency again", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
 
   reply = await send(ALICE, "I can give 9999999 XAF");
-  check("have-only no match asks what user needs", reply.includes("What currency do you need in return"), reply);
+  check("have-only no match asks what user needs", reply.includes("Tell me what currency you want in return"), reply);
   check("have-only no match keeps offered currency", reply.includes("9,999,999 XAF"), reply);
   haveOnlyListing.status = "closed";
 
@@ -559,8 +567,8 @@ async function run() {
   reply = await send(ALICE, "close dispute");
   check("opener can withdraw dispute", reply.includes("Dispute withdrawn"), reply);
 
-  // ---------- flexible listing negotiation
-  scenario("flexible listing negotiation");
+  // ---------- negotiable listing negotiation
+  scenario("negotiable listing negotiation");
   const charlieRow = seedVerifiedUser(CHARLIE, "Charlie Owner");
   seedPayout(charlieRow, "NGN");
   seedPayout(charlieRow, "RWF");
@@ -574,8 +582,8 @@ async function run() {
   });
 
   reply = await send(ALICE, "open AKR-LIST-091");
-  check("flexible listing starts negotiation", reply.includes("*Flexible listing*"), reply);
-  check("flexible listing does not instantly reserve", (await sessionFlow(ALICE)) === "negotiation", reply);
+  check("negotiable listing starts negotiation", reply.includes("*Negotiable listing*"), reply);
+  check("negotiable listing does not instantly reserve", (await sessionFlow(ALICE)) === "negotiation", reply);
 
   reply = await send(ALICE, "offer 105000 rwf");
   check("proposal is sent", reply.includes("*Proposal sent*") && reply.includes("105,000 RWF"), reply);
@@ -651,7 +659,7 @@ async function run() {
   check("draft revision keeps other side", reply.includes("55,000 RWF"), reply);
 
   reply = await send(ALICE, "make it flexible");
-  check("terms revision applies", reply.includes("Flexible rate"), reply);
+  check("terms revision applies", reply.includes("Negotiable rate"), reply);
   check("terms revision keeps amounts", reply.includes("60,000 NGN"), reply);
   await send(ALICE, "cancel");
 
