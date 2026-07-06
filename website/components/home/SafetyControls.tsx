@@ -27,10 +27,11 @@ export function SafetyControls() {
   return (
     <section
       id="safety"
-      className="relative scroll-mt-20 overflow-hidden border-t border-hairline py-20 sm:py-28"
+      className="relative scroll-mt-24 overflow-hidden border-t border-black/10 bg-[#F7F6F1] py-20 text-black sm:py-28"
     >
       <Container className="relative">
         <SectionHeader
+          light
           eyebrow="Safety"
           title="Eight ways Akara watches your back."
         />
@@ -41,6 +42,7 @@ export function SafetyControls() {
               icon={control.icon}
               title={control.title}
               tone={control.tone}
+              light
               delay={i * 0.05}
             />
           ))}

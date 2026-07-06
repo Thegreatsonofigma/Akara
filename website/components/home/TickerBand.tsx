@@ -35,14 +35,17 @@ function Row() {
 /** Full-bleed, slightly tilted marquee band — the page's pulse line. */
 export function TickerBand() {
   return (
-    <section aria-label="Akara at a glance" className="overflow-hidden py-8">
+    <section
+      aria-label="Akara at a glance"
+      className="overflow-hidden bg-[#F2F2ED] py-8"
+    >
       <p className="sr-only">
         No custody. Verified people. Receipts on record. Users pay each other
         directly across NGN, RWF, GHS, KES, and XAF.
       </p>
       <div
         aria-hidden="true"
-        className="relative -mx-[2%] w-[104%] -rotate-[1.2deg] border-y border-hairline bg-surface py-4"
+        className="relative -mx-[2%] w-[104%] -rotate-[1.2deg] bg-black py-4 shadow-[0_16px_48px_rgba(0,0,0,0.18)]"
       >
         <div className="marquee-track flex w-max">
           <Row />

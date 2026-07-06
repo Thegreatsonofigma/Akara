@@ -13,24 +13,34 @@ function AccordionItem({
   item,
   open,
   onToggle,
+  light,
 }: {
   item: FAQItem;
   open: boolean;
   onToggle: () => void;
+  light: boolean;
 }) {
   const id = useId();
   const reduced = useReducedMotion();
 
   return (
     <div
-      className={`overflow-hidden rounded-2xl border bg-surface-2 transition-colors ${
-        open ? "border-brand/30" : "border-hairline"
-      }`}
+      className={
+        light
+          ? `overflow-hidden rounded-2xl border bg-white shadow-[0_1px_3px_rgba(0,0,0,0.05)] transition-colors ${
+              open ? "border-black/25" : "border-black/[0.08]"
+            }`
+          : `overflow-hidden rounded-2xl border bg-surface-2 transition-colors ${
+              open ? "border-brand/30" : "border-hairline"
+            }`
+      }
     >
       <h3>
         <button
           type="button"
-          className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left text-[15px] font-semibold text-white transition-colors hover:text-brand sm:px-6 sm:py-5"
+          className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left text-[15px] font-semibold transition-colors sm:px-6 sm:py-5 ${
+            light ? "text-black" : "text-white hover:text-brand"
+          }`}
           aria-expanded={open}
           aria-controls={`${id}-panel`}
           id={`${id}-button`}
@@ -40,7 +50,15 @@ function AccordionItem({
           <motion.span
             animate={{ rotate: open ? 180 : 0 }}
             transition={{ duration: reduced ? 0 : 0.25 }}
-            className={open ? "text-brand" : "text-white/50"}
+            className={
+              light
+                ? open
+                  ? "text-black"
+                  : "text-black/40"
+                : open
+                  ? "text-brand"
+                  : "text-white/50"
+            }
           >
             <CaretDown size={18} aria-hidden="true" />
           </motion.span>
@@ -57,7 +75,11 @@ function AccordionItem({
             exit={reduced ? { opacity: 0 } : { height: 0, opacity: 0 }}
             transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
           >
-            <p className="px-5 pb-5 text-sm leading-relaxed text-muted sm:px-6 sm:pb-6">
+            <p
+              className={`px-5 pb-5 text-sm leading-relaxed sm:px-6 sm:pb-6 ${
+                light ? "text-black/60" : "text-muted"
+              }`}
+            >
               {item.answer}
             </p>
           </motion.div>
@@ -67,7 +89,13 @@ function AccordionItem({
   );
 }
 
-export function FAQAccordion({ items }: { items: FAQItem[] }) {
+export function FAQAccordion({
+  items,
+  light = false,
+}: {
+  items: FAQItem[];
+  light?: boolean;
+}) {
   const [openIndex, setOpenIndex] = useState<number | null>(0);
 
   return (
@@ -78,6 +106,7 @@ export function FAQAccordion({ items }: { items: FAQItem[] }) {
           item={item}
           open={openIndex === i}
           onToggle={() => setOpenIndex(openIndex === i ? null : i)}
+          light={light}
         />
       ))}
     </div>

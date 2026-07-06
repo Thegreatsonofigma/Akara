@@ -26,7 +26,14 @@ const TONE_STYLES = {
   blue: "border-electric/50 bg-electric/15 text-[#a9b4ff]",
 } as const;
 
-export function DisputeTimeline() {
+const TONE_STYLES_LIGHT = {
+  green: "border-black/10 bg-brand text-black",
+  acid: "border-black/10 bg-acid text-black",
+  pink: "border-pink/30 bg-pink text-white",
+  blue: "border-electric/40 bg-electric text-white",
+} as const;
+
+export function DisputeTimeline({ light = false }: { light?: boolean }) {
   const reduced = useReducedMotion();
 
   return (
@@ -42,19 +49,27 @@ export function DisputeTimeline() {
         >
           <div className="flex flex-col items-center">
             <span
-              className={`flex size-11 shrink-0 items-center justify-center rounded-full border ${TONE_STYLES[stage.tone]}`}
+              className={`flex size-11 shrink-0 items-center justify-center rounded-full border ${
+                light ? TONE_STYLES_LIGHT[stage.tone] : TONE_STYLES[stage.tone]
+              }`}
             >
               <stage.icon size={20} aria-hidden="true" />
             </span>
             {i < STAGES.length - 1 && (
               <span
                 aria-hidden="true"
-                className="my-1 h-8 w-px border-l border-dashed border-white/20"
+                className={`my-1 h-8 w-px border-l border-dashed ${
+                  light ? "border-black/25" : "border-white/20"
+                }`}
               />
             )}
           </div>
           <div className="pt-2.5">
-            <p className="text-sm font-medium text-white sm:text-base">
+            <p
+              className={`text-sm font-medium sm:text-base ${
+                light ? "text-black" : "text-white"
+              }`}
+            >
               {stage.label}
             </p>
           </div>

@@ -6,7 +6,7 @@ import { SITE } from "@/lib/site";
 
 export function FinalCTA() {
   return (
-    <section className="border-t border-hairline py-20 sm:py-28">
+    <section className="border-t border-black/10 bg-[#F7F6F1] py-20 sm:py-28">
       <Container>
         <Reveal>
           <div className="relative overflow-hidden rounded-[2.5rem] bg-brand px-6 py-16 text-center sm:px-16 sm:py-24">

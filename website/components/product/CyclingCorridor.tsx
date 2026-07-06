@@ -15,7 +15,7 @@ const PAIRS = [
  * Inline headline chip that rolls through live corridor pairs.
  * Sized in em units so it scales with the surrounding heading.
  */
-export function CyclingCorridor() {
+export function CyclingCorridor({ light = false }: { light?: boolean }) {
   const [index, setIndex] = useState(0);
   const reduced = useReducedMotion();
 
@@ -31,7 +31,13 @@ export function CyclingCorridor() {
   const [from, to] = PAIRS[index];
 
   return (
-    <span className="relative mx-[0.08em] inline-flex translate-y-[-0.05em] items-center overflow-hidden rounded-[0.6em] border border-brand/35 bg-brand/[0.08] px-[0.3em] py-[0.05em] align-middle">
+    <span
+      className={`relative mx-[0.08em] inline-flex translate-y-[-0.05em] items-center overflow-hidden rounded-[0.6em] border px-[0.3em] py-[0.05em] align-middle ${
+        light
+          ? "border-black/80 bg-black"
+          : "border-brand/35 bg-brand/[0.08]"
+      }`}
+    >
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.span
           key={`${from}-${to}`}

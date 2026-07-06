@@ -5,13 +5,14 @@ import { Reveal } from "@/components/motion/Reveal";
 
 export function NameMatch() {
   return (
-    <section className="border-t border-hairline bg-surface py-20 sm:py-28">
+    <section className="border-t border-black/10 bg-[#F7F6F1] py-20 text-black sm:py-28">
       <Container>
         <div className="grid items-center gap-12 lg:grid-cols-2">
           <Reveal y={28} delay={0.1} className="order-2 lg:order-1">
             <PayoutNameMatchPanel />
           </Reveal>
           <SectionHeader
+            light
             align="left"
             className="order-1 mb-0 lg:order-2"
             eyebrow="Name match"

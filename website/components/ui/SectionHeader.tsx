@@ -16,6 +16,7 @@ export function SectionHeader({
   copy,
   accent = "brand",
   align = "center",
+  light = false,
   className,
 }: {
   eyebrow?: string;
@@ -23,6 +24,7 @@ export function SectionHeader({
   copy?: string;
   accent?: SectionAccent;
   align?: "center" | "left";
+  light?: boolean;
   className?: string;
 }) {
   return (
@@ -34,7 +36,14 @@ export function SectionHeader({
       )}
     >
       {eyebrow && (
-        <p className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">
+        <p
+          className={cn(
+            "inline-flex w-fit items-center gap-2 rounded-full border px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em]",
+            light
+              ? "border-black/15 bg-black/[0.03] text-black/55"
+              : "border-white/10 bg-white/[0.03] text-white/70",
+          )}
+        >
           <span
             aria-hidden="true"
             className={cn("size-1.5 rounded-full", ACCENT_DOTS[accent])}
@@ -42,11 +51,21 @@ export function SectionHeader({
           {eyebrow}
         </p>
       )}
-      <h2 className="max-w-2xl text-balance text-3xl font-bold leading-[1.08] tracking-tight sm:text-4xl md:text-5xl">
+      <h2
+        className={cn(
+          "max-w-2xl text-balance text-3xl font-bold leading-[1.08] tracking-tight sm:text-4xl md:text-5xl",
+          light ? "font-black text-black" : "text-white",
+        )}
+      >
         {title}
       </h2>
       {copy && (
-        <p className="max-w-xl text-pretty text-base leading-relaxed text-muted sm:text-lg">
+        <p
+          className={cn(
+            "max-w-xl text-pretty text-base leading-relaxed sm:text-lg",
+            light ? "text-black/55" : "text-muted",
+          )}
+        >
           {copy}
         </p>
       )}

@@ -77,7 +77,7 @@ export function CorridorBoard() {
                 <p className="mt-1 text-xs text-faint">They need</p>
               </div>
             </div>
-            <p className="mt-2 text-center text-[10px] uppercase tracking-[0.18em] text-faint">
+            <p className="mt-2 text-center text-[10px] uppercase tracking-[0.18em] text-black/40">
               Example listing — not a live rate
             </p>
           </Reveal>

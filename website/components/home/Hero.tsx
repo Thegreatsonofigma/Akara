@@ -1,30 +1,29 @@
 import { WhatsappLogo, ArrowDown } from "@phosphor-icons/react/dist/ssr";
-import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
-import { GradientBackground } from "@/components/ui/GradientBackground";
 import { HeroVisual } from "@/components/product/HeroVisual";
 import { CyclingCorridor } from "@/components/product/CyclingCorridor";
 import { Reveal } from "@/components/motion/Reveal";
 import { SITE } from "@/lib/site";
 
 const HERO_BADGES = [
-  { label: "No custody", tone: "custody" },
-  { label: "Verified people", tone: "green" },
-  { label: "NGN · RWF · GHS · KES · XAF", tone: "neutral" },
-] as const;
+  "No custody",
+  "Verified people",
+  "NGN · RWF · GHS · KES · XAF",
+];
 
 export function Hero() {
   return (
-    <section className="relative overflow-hidden">
-      <GradientBackground />
+    <section className="relative -mt-[76px] overflow-hidden bg-[#F2F2ED] pt-[76px] text-black sm:-mt-20 sm:pt-20">
+      <div aria-hidden="true" className="absolute inset-0 bg-grid-light" />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_45%_35%_at_85%_15%,rgba(66,43,243,0.10),transparent_65%)]"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_50%_40%_at_78%_35%,rgba(157,255,30,0.22),transparent_65%)]"
       />
-      <div className="relative mx-auto grid w-full max-w-7xl items-center gap-14 px-5 pb-20 pt-12 sm:px-8 sm:pt-16 lg:grid-cols-[1fr_1.1fr] lg:gap-8 lg:pb-28">
+      <div aria-hidden="true" className="absolute inset-0 bg-grain" />
+
+      <div className="relative mx-auto grid w-full max-w-7xl items-center gap-14 px-5 pb-20 pt-12 sm:px-8 sm:pt-16 lg:grid-cols-[1fr_1.1fr] lg:gap-8 lg:pb-24">
         <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
           <Reveal y={20}>
-            <p className="mb-7 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-4 py-1.5 text-xs text-white/75">
+            <p className="mb-7 inline-flex items-center gap-2 rounded-full border border-black/15 bg-white/60 px-4 py-1.5 text-xs font-medium text-black/60">
               <span
                 aria-hidden="true"
                 className="size-1.5 rounded-full bg-brand"
@@ -35,13 +34,15 @@ export function Hero() {
 
           <Reveal y={28} delay={0.08}>
             <h1 className="max-w-2xl text-balance text-5xl font-black leading-[1.06] tracking-tight sm:text-6xl xl:text-7xl">
-              Swap <CyclingCorridor /> with{" "}
-              <span className="text-brand">people you can trust.</span>
+              Swap <CyclingCorridor light /> with{" "}
+              <span className="rounded-[0.2em] bg-brand box-decoration-clone px-[0.12em]">
+                people you can trust.
+              </span>
             </h1>
           </Reveal>
 
           <Reveal y={24} delay={0.16}>
-            <p className="mt-7 max-w-md text-pretty text-base leading-relaxed text-muted sm:text-lg">
+            <p className="mt-7 max-w-md text-pretty text-base leading-relaxed text-black/60 sm:text-lg">
               Akara matches you with verified swap partners on WhatsApp. You
               pay each other directly, every step is recorded — and Akara
               never holds the money.
@@ -50,22 +51,42 @@ export function Hero() {
 
           <Reveal y={20} delay={0.24}>
             <div className="mt-9 flex flex-col items-center gap-4 sm:flex-row">
-              <Button href={SITE.whatsappHref} external size="lg">
-                <WhatsappLogo size={20} weight="fill" aria-hidden="true" />
+              <a
+                href={SITE.whatsappHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-full bg-black px-7 py-3.5 text-base font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(0,0,0,0.25)]"
+              >
+                <WhatsappLogo
+                  size={20}
+                  weight="fill"
+                  className="text-brand"
+                  aria-hidden="true"
+                />
                 Start on WhatsApp
-              </Button>
-              <Button href="#how-it-works" variant="secondary" size="lg">
+              </a>
+              <a
+                href="#how-it-works"
+                className="inline-flex items-center gap-2 rounded-full border border-black/20 bg-white/50 px-7 py-3.5 text-base font-semibold text-black transition-colors hover:border-black/40"
+              >
                 See how it works
                 <ArrowDown size={16} aria-hidden="true" />
-              </Button>
+              </a>
             </div>
           </Reveal>
 
           <Reveal y={16} delay={0.32}>
             <ul className="mt-9 flex flex-wrap items-center justify-center gap-2.5 lg:justify-start">
               {HERO_BADGES.map((badge) => (
-                <li key={badge.label}>
-                  <Badge tone={badge.tone}>{badge.label}</Badge>
+                <li
+                  key={badge}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-black/12 bg-white/60 px-3 py-1 text-xs font-medium text-black/65"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="size-1.5 rounded-full bg-brand"
+                  />
+                  {badge}
                 </li>
               ))}
             </ul>

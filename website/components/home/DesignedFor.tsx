@@ -11,10 +11,10 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Reveal } from "@/components/motion/Reveal";
 
 const TILE_TONES = {
-  brand: "border-brand/20 bg-brand/[0.08] text-brand",
-  electric: "border-electric/40 bg-electric/[0.14] text-[#8f9dff]",
-  acid: "border-acid/25 bg-acid/[0.08] text-acid",
-  pink: "border-pink/25 bg-pink/[0.08] text-pink",
+  brand: "bg-brand text-black",
+  electric: "bg-electric text-white",
+  acid: "bg-acid text-black",
+  pink: "bg-pink text-white",
 } as const;
 
 const AUDIENCES = [
@@ -58,26 +58,27 @@ const AUDIENCES = [
 
 export function DesignedFor() {
   return (
-    <section className="border-t border-hairline bg-surface py-20 sm:py-28">
+    <section className="border-t border-black/10 bg-[#F2F2ED] py-20 text-black sm:py-28">
       <Container>
         <SectionHeader
+          light
           eyebrow="Designed for"
           title="Built for how money really moves."
         />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {AUDIENCES.map((audience, i) => (
             <Reveal key={audience.title} delay={i * 0.06} className="h-full">
-              <div className="flex h-full items-center gap-4 rounded-2xl border border-hairline bg-surface-2 p-5 transition-colors duration-300 hover:border-white/20">
+              <div className="flex h-full items-center gap-4 rounded-2xl border border-black/[0.08] bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)]">
                 <span
-                  className={`flex size-11 shrink-0 items-center justify-center rounded-xl border ${TILE_TONES[audience.tone]}`}
+                  className={`flex size-11 shrink-0 items-center justify-center rounded-xl ${TILE_TONES[audience.tone]}`}
                 >
                   <audience.icon size={21} aria-hidden="true" />
                 </span>
                 <div>
-                  <p className="text-[15px] font-semibold text-white">
+                  <p className="text-[15px] font-semibold text-black">
                     {audience.title}
                   </p>
-                  <p className="mt-0.5 text-[13px] text-faint">
+                  <p className="mt-0.5 text-[13px] text-black/50">
                     {audience.copy}
                   </p>
                 </div>

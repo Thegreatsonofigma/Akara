@@ -27,17 +27,18 @@ const COMPLIANCE_LINKS = [
 
 export function Compliance() {
   return (
-    <section className="border-t border-hairline py-20 sm:py-28">
+    <section className="border-t border-black/10 bg-[#F7F6F1] py-20 text-black sm:py-28">
       <Container>
         <SectionHeader
+          light
           eyebrow="Straight talk"
           title="What Akara is. What Akara isn't."
         />
         <div className="mx-auto max-w-4xl">
           <div className="grid gap-4 sm:grid-cols-2">
             <Reveal>
-              <div className="h-full rounded-3xl border border-hairline-strong/60 bg-surface-2 p-7">
-                <p className="mb-5 text-sm font-bold uppercase tracking-[0.16em] text-brand">
+              <div className="h-full rounded-3xl border border-black/[0.08] bg-white p-7 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+                <p className="mb-5 inline-flex rounded-full bg-brand px-3.5 py-1.5 text-xs font-bold uppercase tracking-[0.14em] text-black">
                   Akara is
                 </p>
                 <ul className="flex flex-col gap-4">
@@ -46,10 +47,10 @@ export function Compliance() {
                       <CheckCircle
                         size={19}
                         weight="fill"
-                        className="mt-0.5 shrink-0 text-brand"
+                        className="mt-0.5 shrink-0 text-[#4f8a00]"
                         aria-hidden="true"
                       />
-                      <span className="text-sm leading-relaxed text-white/85">
+                      <span className="text-sm leading-relaxed text-black/75">
                         {item}
                       </span>
                     </li>
@@ -58,8 +59,8 @@ export function Compliance() {
               </div>
             </Reveal>
             <Reveal delay={0.1}>
-              <div className="h-full rounded-3xl border border-pink/25 bg-surface-2 p-7">
-                <p className="mb-5 text-sm font-bold uppercase tracking-[0.16em] text-pink">
+              <div className="h-full rounded-3xl border border-black/[0.08] bg-white p-7 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+                <p className="mb-5 inline-flex rounded-full bg-pink px-3.5 py-1.5 text-xs font-bold uppercase tracking-[0.14em] text-white">
                   Akara is not
                 </p>
                 <ul className="flex flex-col gap-4">
@@ -71,7 +72,7 @@ export function Compliance() {
                         className="mt-0.5 shrink-0 text-pink"
                         aria-hidden="true"
                       />
-                      <span className="text-sm leading-relaxed text-white/85">
+                      <span className="text-sm leading-relaxed text-black/75">
                         {item}
                       </span>
                     </li>
@@ -82,10 +83,10 @@ export function Compliance() {
           </div>
 
           <Reveal delay={0.15}>
-            <p className="mt-8 text-center text-sm font-semibold text-brand">
+            <p className="mt-8 text-center text-sm font-bold text-black">
               {NO_CUSTODY_LINE}
             </p>
-            <p className="mt-4 text-pretty text-center text-xs leading-relaxed text-faint">
+            <p className="mt-4 text-pretty text-center text-xs leading-relaxed text-black/45">
               {MANDATORY_WORDING}
             </p>
             <ul className="mt-8 flex flex-wrap justify-center gap-2.5">
@@ -93,7 +94,7 @@ export function Compliance() {
                 <li key={link.href}>
                   <Link
                     href={link.href}
-                    className="group inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.03] px-4 py-2 text-[13px] text-white/80 transition-colors hover:border-brand/50 hover:text-brand"
+                    className="group inline-flex items-center gap-1.5 rounded-full border border-black/15 bg-white px-4 py-2 text-[13px] font-medium text-black/70 transition-colors hover:border-black/40 hover:text-black"
                   >
                     {link.label}
                     <ArrowRight
