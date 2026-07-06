@@ -243,6 +243,72 @@ async function requestBulkPayoutDelete(user) {
   ].join("\n");
 }
 
+function listingActionReply(listing, label) {
+  const reference = displayReference(listing.listing_code, "listing");
+  const messages = {
+    paused: "It is hidden from search until you reopen it.",
+    reopened: "It can appear in search again.",
+    closed: "It is off search now, so people cannot find it or open new trades from it.",
+  };
+
+  return [
+    title(`Listing ${label}`),
+    "",
+    labeled("Reference", reference),
+    "",
+    messages[label] || "The listing has been updated.",
+  ].join("\n");
+}
+
+async function requestSingleListingClose(user, context, listing) {
+  const reference = displayReference(listing.listing_code, "listing");
+  await upsertSession(user, user.whatsapp_phone, "settings", "confirm_listing_action", {
+    ...context,
+    listing_action: "close",
+    pending_listing_id: listing.id,
+    pending_listing_code: listing.listing_code,
+  });
+
+  return [
+    title(`Close ${reference}?`),
+    "",
+    "This removes the listing from search and stops new offers for it.",
+    "",
+    `${action("confirm")} to close it`,
+    `${action("keep")} to leave it live`,
+  ].join("\n");
+}
+
+async function completeListingAction(user, context = {}) {
+  if (context.listing_action !== "close" || !context.pending_listing_id) {
+    await clearSession(user, user.whatsapp_phone);
+    return "That confirmation has expired. Tell Akara what you want to do next.";
+  }
+
+  const rows = await supabaseRequest(
+    [
+      `listings?id=eq.${filterValue(context.pending_listing_id)}`,
+      `owner_user_id=eq.${filterValue(user.id)}`,
+      "status=in.(active,paused)",
+    ].join("&"),
+    {
+      method: "PATCH",
+      body: JSON.stringify({ status: "cancelled" }),
+    }
+  );
+
+  await clearSession(user, user.whatsapp_phone);
+  if (!rows[0]) {
+    return [
+      title("Listing not closed"),
+      "",
+      "I could not close that listing. It may already be closed or in an active trade.",
+    ].join("\n");
+  }
+
+  return listingActionReply(rows[0], "closed");
+}
+
 async function completeBulkAction(user, context = {}) {
   if (context.bulk_action === "cancel_listings") {
     const rows = await supabaseRequest(
@@ -307,6 +373,24 @@ async function handleSettings(text, user, session) {
       context.bulk_action === "delete_payouts"
         ? "Reply confirm to delete all payout details, or keep to leave them saved."
         : "Reply confirm to cancel all live listings, or keep to leave them active.",
+    ].join("\n");
+  }
+
+  if (session.current_step === "confirm_listing_action") {
+    if (isConfirmationYes(text)) return completeListingAction(user, context);
+    if (isConfirmationNo(text)) {
+      await clearSession(user, user.whatsapp_phone);
+      return [
+        title("Kept unchanged"),
+        "",
+        "No changes were made to that listing.",
+      ].join("\n");
+    }
+
+    return [
+      title("Please confirm"),
+      "",
+      "Reply confirm to close this listing, or keep to leave it live.",
     ].join("\n");
   }
 
@@ -441,15 +525,49 @@ async function handleSettings(text, user, session) {
   const listingAction = listingActions.find((entry) => entry.number);
   if (listingAction) {
     const listingId = context.listing_map?.[String(listingAction.number)];
-    if (!listingId) return profileSettingsReply(user, "Choose a valid listing number.");
+    if (!listingId) {
+      return [
+        title("Choose a valid listing"),
+        "",
+        `${action("my listings")} to see your current listings`,
+      ].join("\n");
+    }
 
     const existingRows = await supabaseRequest(
       `listings?id=eq.${filterValue(listingId)}&owner_user_id=eq.${filterValue(user.id)}&limit=1`
     );
     const existing = existingRows[0];
-    if (!existing) return profileSettingsReply(user, "That listing was not found.");
+    if (!existing) {
+      return [
+        title("Listing not found"),
+        "",
+        "I could not find that listing on your account.",
+      ].join("\n");
+    }
     if (["reserved", "completed"].includes(existing.status)) {
-      return profileSettingsReply(user, "That listing already has trade activity, so I kept it unchanged.");
+      return [
+        title("Cannot close this listing"),
+        "",
+        labeled("Reference", displayReference(existing.listing_code, "listing")),
+        "",
+        "It already has trade activity. Raise a dispute if something is wrong with the trade.",
+        "",
+        action("raise dispute"),
+      ].join("\n");
+    }
+
+    if (listingAction.status === "cancelled") {
+      if (!["active", "paused"].includes(existing.status)) {
+        return [
+          title("Already closed"),
+          "",
+          labeled("Reference", displayReference(existing.listing_code, "listing")),
+          "",
+          "It is already off search.",
+        ].join("\n");
+      }
+
+      return requestSingleListingClose(user, context, existing);
     }
 
     const rows = await supabaseRequest(`listings?id=eq.${filterValue(listingId)}&owner_user_id=eq.${filterValue(user.id)}`, {
@@ -457,8 +575,15 @@ async function handleSettings(text, user, session) {
       body: JSON.stringify({ status: listingAction.status }),
     });
 
-    if (!rows[0]) return profileSettingsReply(user, "That listing was not found.");
-    return profileSettingsReply(user, `Listing ${listingAction.label} ✅`);
+    if (!rows[0]) {
+      return [
+        title("Listing not found"),
+        "",
+        "I could not find that listing on your account.",
+      ].join("\n");
+    }
+    await clearSession(user, user.whatsapp_phone);
+    return listingActionReply(rows[0], listingAction.label);
   }
 
   return [

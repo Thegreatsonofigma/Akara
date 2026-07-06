@@ -538,7 +538,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const listingDetails = freshListingDetails;
   const hasCompleteListing = hasFreshCompleteListing;
   const settingsAction = interpretedAction === "settings_action"
-    || /\b(edit|update|change|delete|remove|pause|reopen|resume|activate|close)\b.*\b(payout|payment|bank|momo|details?|offer|listing)\b/.test(command);
+    || /\b(edit|update|change|delete|remove|pause|reopen|resume|activate|close|cancel)\b.*\b(payout|payment|bank|momo|details?|offer|listing)\b/.test(command);
 
   if (hasCompleteListing && (
     interpretedAction === "create_listing"

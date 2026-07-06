@@ -178,8 +178,8 @@ function seedListing(owner, values) {
     have_amount: values.have_amount,
     want_amount: values.want_amount,
     listing_type: values.listing_type || "fixed",
-    status: "active",
-    created_at: new Date().toISOString(),
+    status: values.status || "active",
+    created_at: values.created_at || new Date().toISOString(),
   };
   __table("listings").push(listing);
   return listing;
@@ -687,6 +687,42 @@ async function run() {
   check("update edits existing payout", reply.includes("Edit NGN payout") || reply.includes("*Edit"), reply);
   check("update does not start add flow", !reply.includes("Choose where incoming payments should land"), reply);
   await send(ALICE, "cancel");
+
+  seedListing(aliceRow, {
+    code: "AKR-LIST-778",
+    have_currency: "NGN",
+    have_amount: 5000,
+    want_currency: "RWF",
+    want_amount: 5600,
+    created_at: "2099-01-01T00:00:00.000Z",
+  });
+  reply = await send(ALICE, "cancel listing 1");
+  check("single listing cancel asks to confirm", reply.includes("Close AKR-LIST-778?"), reply);
+  check("single listing cancel prompt is scoped", !reply.includes("Manage payout details") && !reply.includes("*Payouts*"), reply);
+
+  reply = await send(ALICE, "confirm");
+  check("single listing cancel completes", reply.includes("*Listing closed*") && reply.includes("off search"), reply);
+  check("single listing cancel does not dump profile", !reply.includes("Manage payout details") && !reply.includes("*Payouts*") && !reply.includes("*Profile*"), reply);
+
+  seedListing(aliceRow, {
+    code: "AKR-LIST-779",
+    have_currency: "GHS",
+    have_amount: 200,
+    want_currency: "NGN",
+    want_amount: 10000,
+    status: "reserved",
+    created_at: "2099-01-02T00:00:00.000Z",
+  });
+  reply = await send(ALICE, "cancel listing 1");
+  check("reserved listing cancel is refused", reply.includes("*Cannot close this listing*") && reply.includes("dispute"), reply);
+  check("reserved listing refusal is scoped", !reply.includes("Manage payout details") && !reply.includes("*Payouts*") && !reply.includes("*Profile*"), reply);
+
+  const listingRows = __table("listings");
+  for (let index = listingRows.length - 1; index >= 0; index -= 1) {
+    if (["AKR-LIST-778", "AKR-LIST-779"].includes(listingRows[index].listing_code)) {
+      listingRows.splice(index, 1);
+    }
+  }
 
   seedListing(aliceRow, { code: "AKR-LIST-777", have_currency: "NGN", have_amount: 10000, want_currency: "GHS", want_amount: 200 });
   reply = await send(ALICE, "cancel all my listings");
