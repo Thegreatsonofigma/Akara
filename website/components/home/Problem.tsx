@@ -13,33 +13,33 @@ import { Reveal } from "@/components/motion/Reveal";
 const PROBLEMS = [
   {
     icon: UsersThree,
-    title: "Unverified group offers",
-    copy: "Strangers in group chats with no identity checks behind the offer.",
+    title: "Unverified strangers",
+    copy: "Anyone can claim anything.",
   },
   {
     icon: CreditCard,
     title: "Wrong payout details",
-    copy: "One mistyped account number and the money is gone.",
+    copy: "One typo, money gone.",
   },
   {
     icon: FileX,
     title: "Fake receipts",
-    copy: "Edited screenshots that look real until it is too late.",
+    copy: "Edited screenshots look real.",
   },
   {
     icon: HourglassLow,
-    title: "Abandoned trades",
-    copy: "Deals that stall halfway with no way to close them out.",
+    title: "Ghosted trades",
+    copy: "Deals die halfway through.",
   },
   {
     icon: ClockCounterClockwise,
-    title: "No clear history",
-    copy: "Scattered screenshots instead of a record you can rely on.",
+    title: "No records",
+    copy: "Your history is a scroll-back.",
   },
   {
     icon: Scales,
-    title: "Hard-to-resolve disputes",
-    copy: "No evidence trail, no reviewer, no structured way forward.",
+    title: "No referee",
+    copy: "Disputes go nowhere.",
   },
 ];
 
@@ -49,26 +49,27 @@ export function Problem() {
       <Container>
         <SectionHeader
           eyebrow="The problem"
-          title="Currency help still runs on scattered chats."
-          copy="Students, expats, freelancers, and travelers often rely on friends, groups, screenshots, and guesswork to find currency. Akara brings the coordination into one safer flow."
+          accent="pink"
+          title="Group chats weren't built for money."
+          copy="Right now, finding currency means strangers, screenshots, and hope."
         />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {PROBLEMS.map((problem, i) => (
             <Reveal key={problem.title} delay={i * 0.06} className="h-full">
-              <div className="flex h-full flex-col gap-3 rounded-2xl border border-hairline bg-surface-2 p-6 transition-colors duration-300 hover:border-pink/30">
-                <span className="flex size-10 items-center justify-center rounded-xl border border-pink/20 bg-pink/[0.06]">
+              <div className="flex h-full items-center gap-4 rounded-2xl border border-hairline bg-surface-2 p-5 transition-colors duration-300 hover:border-pink/30">
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-pink/20 bg-pink/[0.06]">
                   <problem.icon
-                    size={20}
+                    size={21}
                     className="text-pink"
                     aria-hidden="true"
                   />
                 </span>
-                <p className="text-base font-semibold text-white">
-                  {problem.title}
-                </p>
-                <p className="text-sm leading-relaxed text-faint">
-                  {problem.copy}
-                </p>
+                <div>
+                  <p className="text-[15px] font-semibold text-white">
+                    {problem.title}
+                  </p>
+                  <p className="mt-0.5 text-[13px] text-faint">{problem.copy}</p>
+                </div>
               </div>
             </Reveal>
           ))}

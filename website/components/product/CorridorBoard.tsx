@@ -1,7 +1,18 @@
 import { ArrowsLeftRight } from "@phosphor-icons/react/dist/ssr";
-import { CurrencyChip } from "@/components/product/CurrencyChip";
+import { CurrencyChip, CorridorChip } from "@/components/product/CurrencyChip";
 import { CURRENCIES } from "@/lib/site";
 import { Reveal } from "@/components/motion/Reveal";
+
+const MARQUEE_CORRIDORS = [
+  { from: "NGN", to: "RWF" },
+  { from: "GHS", to: "KES" },
+  { from: "XAF", to: "NGN" },
+  { from: "RWF", to: "NGN" },
+  { from: "KES", to: "GHS" },
+  { from: "NGN", to: "XAF" },
+  { from: "RWF", to: "GHS" },
+  { from: "KES", to: "NGN" },
+];
 
 const EXAMPLE_LISTINGS = [
   { have: "NGN", haveAmount: "350,000", need: "RWF", needAmount: "412,500" },
@@ -10,10 +21,33 @@ const EXAMPLE_LISTINGS = [
   { have: "RWF", haveAmount: "1,260,000", need: "NGN", needAmount: "1,850,000" },
 ];
 
+function MarqueeRow() {
+  return (
+    <ul className="flex shrink-0 items-center gap-3 pr-3">
+      {MARQUEE_CORRIDORS.map((c) => (
+        <li key={`${c.from}-${c.to}`}>
+          <CorridorChip from={c.from} to={c.to} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function CorridorBoard() {
   return (
-    <div className="flex flex-col gap-10">
+    <div className="flex flex-col gap-12">
       <Reveal>
+        <div className="marquee-mask overflow-hidden" aria-label="Example currency corridors">
+          <div className="marquee-track flex w-max">
+            <MarqueeRow />
+            <div aria-hidden="true">
+              <MarqueeRow />
+            </div>
+          </div>
+        </div>
+      </Reveal>
+
+      <Reveal delay={0.08}>
         <ul
           className="flex flex-wrap items-center justify-center gap-3 sm:gap-4"
           aria-label="Launch currencies"
@@ -35,7 +69,7 @@ export function CorridorBoard() {
                   {listing.haveAmount}{" "}
                   <span className="text-sm text-faint">{listing.have}</span>
                 </p>
-                <p className="mt-1 text-xs text-faint">I have</p>
+                <p className="mt-1 text-xs text-faint">They have</p>
               </div>
               <span className="flex size-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black transition-colors group-hover:border-brand/40">
                 <ArrowsLeftRight
@@ -49,7 +83,7 @@ export function CorridorBoard() {
                   {listing.needAmount}{" "}
                   <span className="text-sm text-faint">{listing.need}</span>
                 </p>
-                <p className="mt-1 text-xs text-faint">I need</p>
+                <p className="mt-1 text-xs text-faint">They need</p>
               </div>
             </div>
             <p className="mt-2 text-center text-[10px] uppercase tracking-[0.18em] text-faint">

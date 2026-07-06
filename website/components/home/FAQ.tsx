@@ -66,8 +66,8 @@ export function FAQ() {
       <Container>
         <SectionHeader
           eyebrow="FAQ"
-          title="Questions people actually ask."
-          copy="Short answers, no fine-print surprises. The full detail lives in the legal center."
+          title="Questions, answered."
+          copy="Short and honest. The fine print lives in the legal center."
         />
         <FAQAccordion items={FAQ_ITEMS} />
       </Container>

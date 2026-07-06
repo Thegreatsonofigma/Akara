@@ -8,9 +8,9 @@ export function Solution() {
     <section className="relative border-t border-hairline py-20 sm:py-28">
       <Container>
         <SectionHeader
-          eyebrow="The solution"
-          title="Akara adds structure without touching the money."
-          copy="Akara sits above the direct payment as a coordination layer: verification, listings, matching, payout details, receipts, confirmations, and a dispute record — while the money moves directly between users."
+          eyebrow="The fix"
+          title="All the structure. None of the custody."
+          copy="Akara coordinates the swap. The money moves once — straight from them to you."
         />
         <Reveal y={32}>
           <NoCustodyDiagram />

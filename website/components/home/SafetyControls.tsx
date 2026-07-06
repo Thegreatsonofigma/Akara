@@ -14,13 +14,13 @@ import { SafetyCard } from "@/components/ui/SafetyCard";
 
 const CONTROLS = [
   { icon: FileMagnifyingGlass, title: "Fake receipt detection" },
-  { icon: UserSwitch, title: "Payout name mismatch review" },
-  { icon: ArrowsCounterClockwise, title: "Repeated cancellation monitoring" },
+  { icon: UserSwitch, title: "Name mismatch review" },
+  { icon: ArrowsCounterClockwise, title: "Cancellation monitoring" },
   { icon: HourglassMedium, title: "Abandoned trade tracking" },
   { icon: Copy, title: "Duplicate listing checks" },
-  { icon: TrendUp, title: "High-value activity review" },
-  { icon: Detective, title: "Bypass attempt detection" },
-  { icon: Gavel, title: "Admin review and account restriction" },
+  { icon: TrendUp, title: "High-value review" },
+  { icon: Detective, title: "Bypass detection" },
+  { icon: Gavel, title: "Admin review & restriction" },
 ];
 
 export function SafetyControls() {
@@ -31,9 +31,8 @@ export function SafetyControls() {
     >
       <Container className="relative">
         <SectionHeader
-          eyebrow="Safety controls"
-          title="Built to reduce common peer-to-peer risks."
-          copy="Coordination only works if the record is trustworthy. These controls run across listings, trades, receipts, and payout details."
+          eyebrow="Safety"
+          title="Eight ways Akara watches your back."
         />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {CONTROLS.map((control, i) => (

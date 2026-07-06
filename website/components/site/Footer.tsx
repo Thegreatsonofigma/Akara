@@ -36,8 +36,7 @@ export function Footer() {
               </span>
             </Link>
             <p className="max-w-xs text-sm leading-relaxed text-faint">
-              Peer-to-peer currency exchange, coordinated on WhatsApp. Verified
-              users, receipt-backed trades, and a clear record of every step.
+              Currency swaps between verified people, coordinated on WhatsApp.
             </p>
             <div className="mt-2 inline-flex w-fit items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs text-white">
               <span aria-hidden="true" className="size-1.5 rounded-full bg-brand" />

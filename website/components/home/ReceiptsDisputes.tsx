@@ -10,8 +10,9 @@ export function ReceiptsDisputes() {
       <Container>
         <SectionHeader
           eyebrow="Receipts & disputes"
-          title="Receipts, confirmations, and disputes stay in one place."
-          copy="Users upload proof after payment. Akara may reject blurry, cropped, edited, reused, mismatched, or suspicious receipts."
+          accent="acid"
+          title="Proof beats promises."
+          copy="Every payment gets a receipt. Every problem gets a process."
         />
 
         <div className="grid items-start gap-12 lg:grid-cols-[1fr_1fr]">
@@ -26,24 +27,23 @@ export function ReceiptsDisputes() {
                     className="mt-0.5 shrink-0 text-pink"
                     aria-hidden="true"
                   />
-                  Raise a dispute within 24 hours if something goes wrong.
+                  Something wrong? Raise a dispute within 24 hours.
                 </p>
               </div>
             </Reveal>
             <Reveal delay={0.18}>
               <div className="rounded-2xl border border-hairline bg-surface-2 p-5">
                 <p className="text-sm leading-relaxed text-muted">
-                  Every dispute is reviewed against the trade record: KYC data,
-                  receipts, payout details, confirmations, and chat history.
-                  Accounts may be restricted during review, and an admin or
-                  compliance reviewer decides the outcome.
+                  Disputes are reviewed against the full trade record — KYC,
+                  receipts, payout details, and chats. Blurry, cropped,
+                  edited, or reused receipts get rejected.
                 </p>
               </div>
             </Reveal>
             <Reveal delay={0.26}>
               <div className="rounded-2xl border border-hairline bg-surface p-5">
                 <p className="text-sm leading-relaxed text-faint">
-                  Akara does not guarantee refunds or reversals because Akara
+                  Akara does not guarantee refunds or reversals, because Akara
                   does not hold funds.
                 </p>
               </div>

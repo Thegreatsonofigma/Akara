@@ -5,34 +5,34 @@ import { StepCard } from "@/components/ui/StepCard";
 const STEPS = [
   {
     number: "01",
-    title: "Verify your identity",
-    copy: "Share your legal name, ID document, and a quick selfie so every serious trade action happens between verified people.",
+    title: "Verify yourself",
+    copy: "Real name, real ID, quick selfie.",
   },
   {
     number: "02",
-    title: "Create or find a listing",
-    copy: "Post what you have and what you need, or browse verified offers across supported corridors.",
+    title: "List or browse",
+    copy: "Say what you have and what you need.",
   },
   {
     number: "03",
     title: "Open a trade",
-    copy: "Match with a verified user and lock the trade with a reference code. Open trades expire after 15 minutes if not progressed.",
+    copy: "Lock it in with a reference code.",
   },
   {
     number: "04",
-    title: "Confirm payout details",
-    copy: "Akara shares name-matched payout details inside the trade so both sides can check before anything moves.",
+    title: "Check payout details",
+    copy: "Name-matched and shared inside the trade.",
     warning: "Always confirm payout details before sending money.",
   },
   {
     number: "05",
-    title: "Pay directly through bank or mobile money",
-    copy: "Send from your own account to the other user's account. The money never passes through Akara.",
+    title: "Pay each other directly",
+    copy: "Bank or mobile money, account to account.",
   },
   {
     number: "06",
-    title: "Upload receipt and confirm received value",
-    copy: "Attach proof of payment, confirm what you received, and keep the full record in your history.",
+    title: "Confirm with proof",
+    copy: "Upload the receipt. Both sides confirm. Done.",
   },
 ];
 
@@ -45,8 +45,7 @@ export function HowItWorks() {
       <Container>
         <SectionHeader
           eyebrow="How it works"
-          title="How Akara works"
-          copy="Six clear steps from finding an offer to a confirmed, receipt-backed exchange."
+          title="From hello to swapped, in six steps."
         />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {STEPS.map((step, i) => (

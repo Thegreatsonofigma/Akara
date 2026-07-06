@@ -8,6 +8,7 @@ import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { List, X, WhatsappLogo } from "@phosphor-icons/react";
 import { SITE } from "@/lib/site";
 import { cn } from "@/lib/cn";
+import { SpectrumBar } from "@/components/ui/SpectrumBar";
 
 const NAV_LINKS = [
   { label: "How it works", href: "/#how-it-works" },
@@ -23,7 +24,8 @@ export function Navbar() {
   const reduced = useReducedMotion();
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-hairline bg-black/75 backdrop-blur-xl">
+    <header className="fixed inset-x-0 top-0 z-50 bg-black/75 backdrop-blur-xl">
+      <SpectrumBar className="absolute inset-x-0 bottom-0 opacity-50" />
       <nav
         aria-label="Main navigation"
         className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-5 sm:px-8"

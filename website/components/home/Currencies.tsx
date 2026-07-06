@@ -10,9 +10,10 @@ export function Currencies() {
     >
       <Container>
         <SectionHeader
-          eyebrow="Supported currencies"
-          title="Built for African currency corridors."
-          copy="Built for Nigeria, Rwanda, Ghana, Kenya, Cameroon, and expandable to more African markets."
+          eyebrow="Currencies"
+          accent="acid"
+          title="Five currencies. One network."
+          copy="Nigeria, Rwanda, Ghana, Kenya, Cameroon — with more markets to come."
         />
         <CorridorBoard />
       </Container>

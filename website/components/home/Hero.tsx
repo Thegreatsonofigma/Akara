@@ -9,9 +9,8 @@ import { SITE } from "@/lib/site";
 
 const HERO_BADGES = [
   { label: "No custody", tone: "custody" },
-  { label: "Verified users", tone: "green" },
-  { label: "Receipt-backed trades", tone: "green" },
-  { label: "WhatsApp-first", tone: "neutral" },
+  { label: "Verified people", tone: "green" },
+  { label: "Receipts on record", tone: "green" },
   { label: "NGN · RWF · GHS · KES · XAF", tone: "neutral" },
 ] as const;
 
@@ -19,27 +18,30 @@ export function Hero() {
   return (
     <section className="relative overflow-hidden">
       <GradientBackground />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_45%_35%_at_85%_10%,rgba(66,43,243,0.10),transparent_65%)]"
+      />
       <Container className="relative flex flex-col items-center pb-20 pt-16 text-center sm:pt-24">
         <Reveal y={20}>
-          <p className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-4 py-1.5 text-xs text-white/75">
+          <p className="mx-auto mb-7 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-4 py-1.5 text-xs text-white/75">
             <span aria-hidden="true" className="size-1.5 rounded-full bg-brand" />
-            Find trusted currency offers. Complete payment directly. Keep every
-            step recorded.
+            Built for African money corridors
           </p>
         </Reveal>
 
         <Reveal y={28} delay={0.08}>
-          <h1 className="mx-auto max-w-4xl text-balance text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl md:text-7xl">
-            Peer-to-peer currency exchange,{" "}
-            <span className="text-brand">coordinated on WhatsApp.</span>
+          <h1 className="mx-auto max-w-4xl text-balance text-5xl font-black leading-[1.02] tracking-tight sm:text-7xl md:text-[5.25rem]">
+            Swap currencies with{" "}
+            <span className="text-brand">people you can trust.</span>
           </h1>
         </Reveal>
 
         <Reveal y={24} delay={0.16}>
-          <p className="mx-auto mt-6 max-w-2xl text-pretty text-base leading-relaxed text-muted sm:text-lg">
-            Akara helps verified users discover offers, open trades, exchange
-            payout details, upload receipts, confirm payment, and resolve
-            issues — without Akara holding or moving funds.
+          <p className="mx-auto mt-7 max-w-xl text-pretty text-base leading-relaxed text-muted sm:text-lg">
+            Akara matches you with verified swap partners on WhatsApp. You pay
+            each other directly, every step is recorded — and Akara never
+            holds the money.
           </p>
         </Reveal>
 
@@ -50,7 +52,7 @@ export function Hero() {
               Start on WhatsApp
             </Button>
             <Button href="#how-it-works" variant="secondary" size="lg">
-              See how Akara works
+              See how it works
               <ArrowDown size={16} aria-hidden="true" />
             </Button>
           </div>

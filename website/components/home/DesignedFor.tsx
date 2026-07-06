@@ -13,33 +13,33 @@ import { Reveal } from "@/components/motion/Reveal";
 const AUDIENCES = [
   {
     icon: GraduationCap,
-    title: "Nigerian students in Rwanda",
-    copy: "Cover fees and living costs without chasing strangers for rates.",
+    title: "Students abroad",
+    copy: "Fees and rent, sorted from home.",
   },
   {
     icon: Laptop,
-    title: "Freelancers receiving across borders",
-    copy: "Turn cross-border earnings into local value with a verified counterparty.",
+    title: "Freelancers",
+    copy: "Earn in one currency, live in another.",
   },
   {
     icon: AirplaneTilt,
-    title: "Travelers who need local currency",
-    copy: "Land with a coordinated swap instead of airport guesswork.",
+    title: "Travelers",
+    copy: "Land with local money lined up.",
   },
   {
     icon: Globe,
-    title: "Expats and migrant communities",
-    copy: "Swap within a verified community, with every step recorded.",
+    title: "Expats & migrants",
+    copy: "Swap inside a verified community.",
   },
   {
     icon: UsersFour,
-    title: "Community currency groups",
-    copy: "Give existing exchange groups structure, records, and dispute review.",
+    title: "Community groups",
+    copy: "Your exchange circle, with structure.",
   },
   {
     icon: Briefcase,
     title: "Cross-border workers",
-    copy: "Coordinate recurring swaps between the currencies you earn and spend.",
+    copy: "Recurring swaps, always on record.",
   },
 ];
 
@@ -49,26 +49,27 @@ export function DesignedFor() {
       <Container>
         <SectionHeader
           eyebrow="Designed for"
-          title="Made for people who already swap across borders."
-          copy="Akara is built around real corridors and real communities — not hypothetical traders."
+          title="Built for how money really moves."
         />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {AUDIENCES.map((audience, i) => (
             <Reveal key={audience.title} delay={i * 0.06} className="h-full">
-              <div className="flex h-full flex-col gap-3 rounded-2xl border border-hairline bg-surface-2 p-6 transition-colors duration-300 hover:border-brand/35">
-                <span className="flex size-10 items-center justify-center rounded-xl border border-brand/20 bg-brand/[0.07]">
+              <div className="flex h-full items-center gap-4 rounded-2xl border border-hairline bg-surface-2 p-5 transition-colors duration-300 hover:border-brand/35">
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-brand/20 bg-brand/[0.07]">
                   <audience.icon
-                    size={20}
+                    size={21}
                     className="text-brand"
                     aria-hidden="true"
                   />
                 </span>
-                <p className="text-base font-semibold text-white">
-                  {audience.title}
-                </p>
-                <p className="text-sm leading-relaxed text-faint">
-                  {audience.copy}
-                </p>
+                <div>
+                  <p className="text-[15px] font-semibold text-white">
+                    {audience.title}
+                  </p>
+                  <p className="mt-0.5 text-[13px] text-faint">
+                    {audience.copy}
+                  </p>
+                </div>
               </div>
             </Reveal>
           ))}

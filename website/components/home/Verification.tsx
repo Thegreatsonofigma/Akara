@@ -14,9 +14,10 @@ export function Verification() {
           <SectionHeader
             align="left"
             className="mb-0"
-            eyebrow="Verification & trust"
-            title="Verified before serious trade actions."
-            copy="Users may browse basic information, but must be verified before creating listings, opening trades, adding payout accounts, or completing exchanges."
+            eyebrow="Verification"
+            accent="electric"
+            title="Everyone serious is verified."
+            copy="Browse freely. But listing, trading, and payouts only happen between checked identities."
           />
           <Reveal y={28} delay={0.1}>
             <VerificationPanel />

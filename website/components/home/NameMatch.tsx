@@ -14,9 +14,9 @@ export function NameMatch() {
           <SectionHeader
             align="left"
             className="order-1 mb-0 lg:order-2"
-            eyebrow="Payout name match"
-            title="Payout details must match the verified person."
-            copy="Akara checks payout names to reduce impersonation and unsafe trades. Minor spelling differences may go to admin review. Someone else's payout account is not allowed at launch."
+            eyebrow="Name match"
+            title="The account must match the person."
+            copy="Payout names are checked against verified identities, so impersonation gets nowhere."
           />
         </div>
       </Container>
