@@ -454,6 +454,27 @@ async function run() {
   seedPayout(bobRow, "NGN");
   seedPayout(bobRow, "RWF");
   seedListing(bobRow, { code: "AKR-LIST-090", have_currency: "NGN", have_amount: 100000, want_currency: "RWF", want_amount: 110000 });
+  const needOnlyOwner = seedVerifiedUser("250700000009", "Flexible NGN Trader");
+  seedPayout(needOnlyOwner, "NGN");
+  seedPayout(needOnlyOwner, "RWF");
+  seedListing(needOnlyOwner, {
+    code: "AKR-LIST-089",
+    have_currency: "NGN",
+    have_amount: 50000,
+    want_currency: "RWF",
+    want_amount: 57500,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(ALICE, "Hello Akara, Please I need naira 30k");
+  check("need-only search shows eligible NGN offers", reply.includes("AKR-LIST-089") && reply.includes("AKR-LIST-090"), reply);
+  check("need-only search ranks flexible first", reply.indexOf("AKR-LIST-089") !== -1 && reply.indexOf("AKR-LIST-089") < reply.indexOf("AKR-LIST-090"), reply);
+  check("need-only search does not repeat needed currency", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
+
+  reply = await send(ALICE, "I need KES 9999999");
+  check("need-only no match asks what user has", reply.includes("What currency do you have to offer"), reply);
+  check("need-only no match keeps requested currency", reply.includes("9,999,999 KES"), reply);
+  check("need-only no match does not ask needed currency again", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
 
   reply = await send(ALICE, "show me ngn offers");
   check("browse shows bob listing", reply.includes("AKR-LIST-090"), reply);

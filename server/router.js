@@ -610,7 +610,8 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     }
 
     const searchDetails = mergePresentDetails(parseSearchDetails(text), interpretedExchangeDetails);
-    if (searchDetails.have_currency && searchDetails.want_currency) {
+    if ((searchDetails.have_currency && searchDetails.want_currency)
+        || (searchDetails.want_currency && (searchDetails.want_amount || searchDetails.amount))) {
       return continueSearchOrShowMatches(user, searchDetails);
     }
 
