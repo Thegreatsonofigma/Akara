@@ -284,7 +284,7 @@ function nav(currentPath) {
   return `
     <header class="site-nav" data-nav>
       <a class="brand" href="/" aria-label="Akara home">
-        <img src="${cardAsset("akara-logo-mark.png")}" alt="" />
+        <img src="${cardAsset("akara-logo-mark.webp")}" alt="" />
         <span>Akara</span>
       </a>
       <nav class="nav-links" aria-label="Primary">${links}</nav>
@@ -323,7 +323,7 @@ function footer() {
       <div class="footer-grid">
         <div class="footer-about">
           <a class="brand footer-brand" href="/">
-            <img src="${cardAsset("akara-logo-mark.png")}" alt="" />
+            <img src="${cardAsset("akara-logo-mark.webp")}" alt="" />
             <span>Akara</span>
           </a>
           <p>${esc(site.legalName)}, ${esc(site.registrationNumber)}.</p>
@@ -408,7 +408,7 @@ function currencyChips() {
 function listingShot() {
   return `
     <figure class="listing-shot real-card-shot">
-      <img src="${mockupAsset("listing-card-xaf-ngn.jpeg")}" alt="Akara shareable listing card preview" loading="lazy" />
+      <img src="${mockupAsset("listing-card-xaf-ngn.webp")}" alt="Akara shareable listing card preview" loading="lazy" />
     </figure>
   `;
 }
@@ -417,18 +417,18 @@ function productMockup() {
   return `
     <div class="product-stage" aria-label="Akara WhatsApp trade flow preview">
       <figure class="whatsapp-shot hero-chat-shot">
-        <img src="${mockupAsset("listing-live-chat.jpeg")}" alt="Akara listing live inside a WhatsApp chat" />
+        <img src="${mockupAsset("listing-live-chat.webp")}" alt="Akara listing live inside a WhatsApp chat" />
         <figcaption class="shot-brand-mask">
-          <img src="${cardAsset("akara-logo-mark.png")}" alt="" />
+          <img src="${cardAsset("akara-logo-mark.webp")}" alt="" />
           <span>Akara</span>
           <small>WhatsApp</small>
         </figcaption>
       </figure>
       <figure class="floating-card real-listing-preview">
-        <img src="${mockupAsset("listing-card-kes-rwf.jpeg")}" alt="Akara swap card with KES and RWF" loading="lazy" />
+        <img src="${mockupAsset("listing-card-kes-rwf.webp")}" alt="Akara swap card with KES and RWF" loading="lazy" />
       </figure>
       <figure class="floating-card real-menu-preview">
-        <img src="${mockupAsset("menu-sheet.jpeg")}" alt="Akara WhatsApp click to select menu" loading="lazy" />
+        <img src="${mockupAsset("menu-sheet.webp")}" alt="Akara WhatsApp click to select menu" loading="lazy" />
       </figure>
     </div>
   `;
@@ -437,9 +437,9 @@ function productMockup() {
 function chatScreenshotPanel() {
   return `
     <figure class="chat-screenshot-panel">
-      <img src="${mockupAsset("menu-chat.jpeg")}" alt="Akara menu and chat inside WhatsApp" loading="lazy" />
+      <img src="${mockupAsset("menu-chat.webp")}" alt="Akara menu and chat inside WhatsApp" loading="lazy" />
       <figcaption class="shot-brand-mask compact">
-        <img src="${cardAsset("akara-logo-mark.png")}" alt="" />
+        <img src="${cardAsset("akara-logo-mark.webp")}" alt="" />
         <span>Akara</span>
         <small>WhatsApp</small>
       </figcaption>
@@ -739,7 +739,7 @@ function productPage() {
         <div class="standalone-listing">
           ${listingShot()}
           <figure class="listing-side-card">
-            <img src="${mockupAsset("listing-card-kes-rwf.jpeg")}" alt="Second Akara listing card preview" loading="lazy" />
+            <img src="${mockupAsset("listing-card-kes-rwf.webp")}" alt="Second Akara listing card preview" loading="lazy" />
           </figure>
         </div>
       </div>
@@ -1128,6 +1128,7 @@ function contentTypeFor(file) {
   if (file.endsWith(".css")) return "text/css; charset=utf-8";
   if (file.endsWith(".js")) return "text/javascript; charset=utf-8";
   if (file.endsWith(".png")) return "image/png";
+  if (file.endsWith(".webp")) return "image/webp";
   if (file.endsWith(".jpg") || file.endsWith(".jpeg")) return "image/jpeg";
   if (file.endsWith(".svg")) return "image/svg+xml";
   if (file.endsWith(".otf")) return "font/otf";
