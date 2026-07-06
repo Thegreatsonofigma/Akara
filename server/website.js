@@ -19,6 +19,7 @@ const site = {
   fallbackEmail: "tryakara@gmail.com",
   complaintsEmail: "complaints@tryakara.com",
   url: "https://tryakara.com",
+  whatsappUrl: "https://wa.me/15556733907?text=Hi%20Akara",
   law: "Nigeria, with applicable local laws in supported user countries where required",
 };
 
@@ -283,7 +284,7 @@ function nav(currentPath) {
       </a>
       <nav class="nav-links" aria-label="Primary">${links}</nav>
       <div class="nav-actions">
-        <a class="button button-small button-primary" href="https://wa.me/" aria-label="Start a swap on WhatsApp">${icon("whatsapp")}Start a swap</a>
+        <a class="button button-small button-primary" href="${site.whatsappUrl}" aria-label="Start a swap on WhatsApp">${icon("whatsapp")}Start a swap</a>
         <button class="menu-toggle" data-menu-toggle aria-label="Open menu" aria-expanded="false">Menu</button>
       </div>
     </header>
@@ -340,7 +341,7 @@ function footer() {
           <h3>Contact</h3>
           <a href="mailto:${site.supportEmail}">${site.supportEmail}</a>
           <a href="mailto:${site.complaintsEmail}">${site.complaintsEmail}</a>
-          <a href="https://wa.me/">WhatsApp support</a>
+          <a href="${site.whatsappUrl}">WhatsApp support</a>
         </div>
       </div>
     </footer>
@@ -468,18 +469,43 @@ function commandStrip() {
 
 function personaCards() {
   const people = [
-    ["student", "International students", "Rent, food, fees, and weekend money without hunting through old group chats."],
-    ["traveller", "Frequent travellers", "Find a cleaner route before the next border, flight, or work trip."],
-    ["freelancer", "Remote earners", "Move between invoices, family support, and local spending with a better record."],
-    ["community", "Community groups", "Share one listing card. Keep the trade itself inside Akara."],
+    {
+      tone: "student",
+      title: "International students",
+      text: "Fees, food, rent, and weekend money handled from the chat they already use.",
+      image: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=900&q=82",
+      searchId: "d8f17a67-0597-458b-b708-383dd8a22a09",
+    },
+    {
+      tone: "freelancer",
+      title: "Freelancers",
+      text: "Turn invoice money into local spend without chasing rates across groups.",
+      image: "https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=900&q=82",
+      searchId: "301b45d5-fbe0-4e57-a679-6931494107d5",
+    },
+    {
+      tone: "expat",
+      title: "Expats",
+      text: "Find verified peers, open a trade, and keep the record clean.",
+      image: "https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&w=900&q=82",
+      searchId: "ba67aef1-88c1-4c55-92db-83b3c3499255",
+    },
+    {
+      tone: "traveller",
+      title: "Frequent travellers",
+      text: "Arrive with a clearer path from one currency to the next.",
+      image: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=900&q=82",
+      searchId: "19cdd96f-eac5-4f73-b766-d54dcc47d20e",
+    },
   ];
-  return people.map(([tone, titleText, text]) => `
-    <article class="persona-card ${tone}">
-      <div class="persona-photo" aria-hidden="true">
-        <span></span><i></i><b></b>
+  return people.map(({ tone, title, text, image, searchId }) => `
+    <article class="persona-card ${tone}" data-shutterstock-search="${esc(searchId)}">
+      <div class="persona-photo">
+        <img src="${esc(image)}" alt="${esc(title)} using Akara" loading="lazy" />
+        <span>${esc(title)}</span>
       </div>
       <div>
-        <h3>${titleText}</h3>
+        <h3>${title}</h3>
         <p>${text}</p>
       </div>
     </article>
@@ -493,10 +519,10 @@ function homePage() {
       <div class="container hero-grid">
         <div class="hero-copy reveal">
           <p class="eyebrow">Akara, ${site.registrationNumber}</p>
-          <h1><span>The currency desk</span><span>inside WhatsApp.</span></h1>
+          <h1><span>Currency exchange,</span><span>right inside WhatsApp.</span></h1>
           <p class="hero-lede">List, find, open, and track peer-to-peer currency swaps by texting Akara.</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="https://wa.me/">${icon("whatsapp")}Try Akara on WhatsApp</a>
+            <a class="button button-primary" href="${site.whatsappUrl}">${icon("whatsapp")}Try Akara on WhatsApp</a>
             <a class="button button-secondary" href="#how">See the flow</a>
           </div>
           ${commandStrip()}
@@ -658,8 +684,8 @@ function homePage() {
       <div class="container">
         <div class="section-header">
           <p class="eyebrow">Built for</p>
-          <h2>For people who live between currencies.</h2>
-          <p>Students, travellers, expats, freelancers, families, and communities who need exchange to feel less improvised.</p>
+          <h2>For people between currencies.</h2>
+          <p>Students, freelancers, expats, travellers, families, and communities who need a cleaner way to swap.</p>
         </div>
         <div class="persona-grid">${personaCards()}</div>
       </div>
@@ -673,7 +699,7 @@ function homePage() {
         <h2>Bring the swap back into one clean thread.</h2>
         <p>Chat, list, pay directly, upload receipts, and close with a record.</p>
         <div class="hero-actions">
-          <a class="button button-primary" href="https://wa.me/">${icon("whatsapp")}Try Akara on WhatsApp</a>
+          <a class="button button-primary" href="${site.whatsappUrl}">${icon("whatsapp")}Try Akara on WhatsApp</a>
           <a class="button button-secondary" href="/legal/no-custody-risk-disclosure">Read no-custody disclosure</a>
         </div>
       </div>
@@ -691,7 +717,7 @@ function productPage() {
           <h1>The exchange desk that feels like a chat.</h1>
           <p>Akara turns a message into offers, listings, trades, receipts, reminders, disputes, and history.</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="https://wa.me/">${icon("whatsapp")}Try Akara on WhatsApp</a>
+            <a class="button button-primary" href="${site.whatsappUrl}">${icon("whatsapp")}Try Akara on WhatsApp</a>
             <a class="button button-secondary" href="/how-it-works">See how it works</a>
           </div>
         </div>
@@ -785,7 +811,7 @@ function currenciesPage() {
           <h1>Africa’s everyday corridors, in one chat.</h1>
           <p>Akara starts with the currencies people already search for in student, travel, family, and community chats.</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="https://wa.me/">${icon("whatsapp")}Browse offers</a>
+            <a class="button button-primary" href="${site.whatsappUrl}">${icon("whatsapp")}Browse offers</a>
             <a class="button button-secondary" href="/legal/no-custody-risk-disclosure">Read safety notes</a>
           </div>
         </div>
@@ -924,7 +950,7 @@ function trustPage() {
 
 function supportPage() {
   const supportCards = [
-    ["WhatsApp", "Open a support ticket from chat.", "Open WhatsApp", "https://wa.me/", ""],
+    ["WhatsApp", "Open a support ticket from chat.", "Open WhatsApp", site.whatsappUrl, ""],
     ["Email support", "For account, listing, and verification help.", "Copy email", "#", site.supportEmail],
     ["Complaints", "For escalations with evidence and references.", "Send message", `mailto:${site.complaintsEmail}`, ""],
   ];
