@@ -33,7 +33,7 @@ export function ListingCard({
 
       <div className="flex items-center justify-center gap-4 px-5 py-5">
         <div className="flex flex-col items-center gap-2">
-          <span className="font-numbers text-3xl tracking-wide text-white sm:text-4xl">
+          <span className="font-numbers text-[26px] tracking-wide text-white">
             {haveAmount}
           </span>
           <span className="rounded bg-alert px-2 py-0.5 text-[10px] font-bold tracking-wider text-white">
@@ -47,7 +47,7 @@ export function ListingCard({
           ×
         </span>
         <div className="flex flex-col items-center gap-2">
-          <span className="font-numbers text-3xl tracking-wide text-white sm:text-4xl">
+          <span className="font-numbers text-[26px] tracking-wide text-white">
             {needAmount}
           </span>
           <span className="rounded bg-brand px-2 py-0.5 text-[10px] font-bold tracking-wider text-black">

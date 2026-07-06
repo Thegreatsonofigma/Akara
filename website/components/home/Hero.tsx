@@ -1,5 +1,4 @@
 import { WhatsappLogo, ArrowDown } from "@phosphor-icons/react/dist/ssr";
-import { Container } from "@/components/ui/Container";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { GradientBackground } from "@/components/ui/GradientBackground";
@@ -22,7 +21,7 @@ export function Hero() {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_45%_35%_at_85%_15%,rgba(66,43,243,0.10),transparent_65%)]"
       />
-      <Container className="relative grid items-center gap-16 pb-20 pt-14 sm:pt-20 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:pb-28">
+      <div className="relative mx-auto grid w-full max-w-7xl items-center gap-14 px-5 pb-20 pt-12 sm:px-8 sm:pt-16 lg:grid-cols-[1fr_1.1fr] lg:gap-8 lg:pb-28">
         <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
           <Reveal y={20}>
             <p className="mb-7 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-4 py-1.5 text-xs text-white/75">
@@ -76,7 +75,7 @@ export function Hero() {
         <Reveal y={36} delay={0.2} className="lg:justify-self-center">
           <HeroVisual />
         </Reveal>
-      </Container>
+      </div>
     </section>
   );
 }

@@ -104,8 +104,7 @@ export function WhatsAppChatMockup({
         </BotBubble>
 
         <BotBubble>
-          Open the trade to lock payout details, upload your receipt, and track
-          every step. Akara never holds the money.
+          Open the trade to lock payout details. Akara never holds the money.
         </BotBubble>
       </div>
 
