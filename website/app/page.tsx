@@ -19,8 +19,8 @@ export default function HomePage() {
       <Hero />
       <TickerBand />
       <Problem />
-      <Solution />
       <HowItWorks />
+      <Solution />
       <Currencies />
       <Verification />
       <NameMatch />

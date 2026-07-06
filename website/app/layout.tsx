@@ -66,7 +66,7 @@ export default function RootLayout({
           Skip to content
         </a>
         <Navbar />
-        <main id="main-content" className="pt-16">
+        <main id="main-content" className="pt-[76px] sm:pt-20">
           {children}
         </main>
         <Footer />

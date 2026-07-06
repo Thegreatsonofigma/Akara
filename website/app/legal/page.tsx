@@ -76,9 +76,8 @@ export default function LegalIndexPage() {
           })}
         </div>
 
-        <p className="mt-14 text-center text-xs text-faint">
-          These pages are drafts and should be reviewed by a qualified legal
-          professional before launch.
+        <p className="mt-14 text-center font-numbers text-xs tracking-widest text-faint">
+          ALL POLICIES EFFECTIVE JULY 5, 2026
         </p>
       </Container>
     </div>

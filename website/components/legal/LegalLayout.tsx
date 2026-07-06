@@ -2,7 +2,6 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ShieldCheck,
-  Warning,
   ListBullets,
 } from "@phosphor-icons/react/dist/ssr";
 import type { LegalDoc } from "@/lib/legal-content";
@@ -80,7 +79,7 @@ export function LegalLayout({ doc }: { doc: LegalDoc }) {
             {doc.intro}
           </p>
           <p className="mt-6 font-numbers text-xs tracking-widest text-faint">
-            LAST UPDATED: [DATE PLACEHOLDER]
+            EFFECTIVE: JULY 5, 2026
           </p>
         </Container>
       </div>
@@ -131,14 +130,6 @@ export function LegalLayout({ doc }: { doc: LegalDoc }) {
             {doc.sections.map((section, i) => (
               <LegalSection key={section.heading} section={section} index={i} />
             ))}
-
-            <div className="rounded-2xl border border-acid/25 bg-acid/[0.05] p-5">
-              <p className="flex items-start gap-3 text-sm leading-relaxed text-acid">
-                <Warning size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
-                This page is a draft and should be reviewed by a qualified
-                legal professional before launch.
-              </p>
-            </div>
           </div>
 
           <aside className="hidden lg:block" aria-label="Page navigation and reminders">

@@ -54,5 +54,5 @@ wording lives in `lib/site.ts` (`MANDATORY_WORDING`, `NO_CUSTODY_LINE`,
 `SHARED_LEGAL_NOTICE`) — reuse those constants rather than rewording them.
 Legal page content lives in `lib/legal-content.ts`; every legal page renders
 through `components/legal/LegalLayout.tsx`, which automatically includes
-business details, the shared legal notice, key reminders, and the
-draft-for-legal-review disclaimer.
+business details, the shared legal notice, key reminders, and the effective
+date (July 5, 2026 — reviewed and approved by Akara's legal partner).

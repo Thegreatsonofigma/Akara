@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { SITE, BUSINESS, MANDATORY_WORDING } from "@/lib/site";
+import { SpectrumBar } from "@/components/ui/SpectrumBar";
 
 const PRODUCT_LINKS = [
   { label: "How it works", href: "/#how-it-works" },
@@ -25,7 +26,8 @@ const LEGAL_LINKS = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-hairline bg-surface">
+    <footer className="bg-surface">
+      <SpectrumBar className="opacity-60" />
       <div className="mx-auto w-full max-w-6xl px-5 py-16 sm:px-8">
         <div className="grid gap-12 md:grid-cols-[1.4fr_1fr_1fr_1.2fr]">
           <div className="flex flex-col gap-4">
