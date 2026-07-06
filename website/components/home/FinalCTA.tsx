@@ -1,44 +1,57 @@
-import { WhatsappLogo, FileText } from "@phosphor-icons/react/dist/ssr";
+import Link from "next/link";
+import { WhatsappLogo, ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { Container } from "@/components/ui/Container";
-import { Button } from "@/components/ui/Button";
-import { GradientBackground } from "@/components/ui/GradientBackground";
-import { SpectrumBar } from "@/components/ui/SpectrumBar";
 import { Reveal } from "@/components/motion/Reveal";
 import { SITE } from "@/lib/site";
 
 export function FinalCTA() {
   return (
-    <section className="relative overflow-hidden">
-      <SpectrumBar />
-      <GradientBackground position="bottom" grid={false} />
-      <Container className="relative py-24 sm:py-32">
+    <section className="border-t border-hairline py-20 sm:py-28">
+      <Container>
         <Reveal>
-          <div className="flex flex-col items-center gap-8 text-center">
-            <h2 className="max-w-3xl text-balance text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl">
-              Ready to swap{" "}
-              <span className="text-brand">the right way?</span>
-            </h2>
-            <p className="max-w-md text-pretty text-base text-muted">
-              A verified partner, a clear trail, and money that only ever
-              moves between the two of you.
-            </p>
-            <div className="flex flex-col items-center gap-4 sm:flex-row">
-              <Button href={SITE.whatsappHref} external size="lg">
-                <WhatsappLogo size={20} weight="fill" aria-hidden="true" />
-                Start on WhatsApp
-              </Button>
-              <Button
-                href="/legal/no-custody-risk-disclosure"
-                variant="secondary"
-                size="lg"
-              >
-                <FileText size={18} aria-hidden="true" />
-                Read the No-Custody Disclosure
-              </Button>
+          <div className="relative overflow-hidden rounded-[2.5rem] bg-brand px-6 py-16 text-center sm:px-16 sm:py-24">
+            {/* depth wash + grain on the green field */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_70%_80%_at_50%_-10%,rgba(255,255,255,0.28),transparent_60%),radial-gradient(ellipse_60%_60%_at_85%_110%,rgba(0,0,0,0.22),transparent_65%)]"
+            />
+            <div aria-hidden="true" className="absolute inset-0 bg-grain" />
+
+            <div className="relative flex flex-col items-center gap-7">
+              <h2 className="max-w-2xl text-balance text-4xl font-black leading-[1.03] tracking-tight text-black sm:text-6xl">
+                Ready to swap the right way?
+              </h2>
+              <p className="max-w-md text-pretty text-base leading-relaxed text-black/70">
+                A verified partner, a clear trail, and money that only ever
+                moves between the two of you.
+              </p>
+              <div className="flex flex-col items-center gap-4 sm:flex-row">
+                <a
+                  href={SITE.whatsappHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full bg-black px-7 py-3.5 text-base font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
+                >
+                  <WhatsappLogo
+                    size={20}
+                    weight="fill"
+                    className="text-brand"
+                    aria-hidden="true"
+                  />
+                  Start on WhatsApp
+                </a>
+                <Link
+                  href="/legal/no-custody-risk-disclosure"
+                  className="inline-flex items-center gap-2 rounded-full border border-black/30 px-7 py-3.5 text-base font-semibold text-black transition-colors hover:bg-black/[0.06]"
+                >
+                  Read the No-Custody Disclosure
+                  <ArrowRight size={16} aria-hidden="true" />
+                </Link>
+              </div>
+              <p className="text-sm font-medium text-black/60">
+                Akara coordinates trades. Users pay each other directly.
+              </p>
             </div>
-            <p className="text-sm text-faint">
-              Akara coordinates trades. Users pay each other directly.
-            </p>
           </div>
         </Reveal>
       </Container>

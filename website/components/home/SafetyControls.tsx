@@ -13,15 +13,15 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { SafetyCard } from "@/components/ui/SafetyCard";
 
 const CONTROLS = [
-  { icon: FileMagnifyingGlass, title: "Fake receipt detection" },
-  { icon: UserSwitch, title: "Name mismatch review" },
-  { icon: ArrowsCounterClockwise, title: "Cancellation monitoring" },
-  { icon: HourglassMedium, title: "Abandoned trade tracking" },
-  { icon: Copy, title: "Duplicate listing checks" },
-  { icon: TrendUp, title: "High-value review" },
-  { icon: Detective, title: "Bypass detection" },
-  { icon: Gavel, title: "Admin review & restriction" },
-];
+  { icon: FileMagnifyingGlass, title: "Fake receipt detection", tone: "pink" },
+  { icon: UserSwitch, title: "Name mismatch review", tone: "electric" },
+  { icon: ArrowsCounterClockwise, title: "Cancellation monitoring", tone: "acid" },
+  { icon: HourglassMedium, title: "Abandoned trade tracking", tone: "brand" },
+  { icon: Copy, title: "Duplicate listing checks", tone: "electric" },
+  { icon: TrendUp, title: "High-value review", tone: "acid" },
+  { icon: Detective, title: "Bypass detection", tone: "pink" },
+  { icon: Gavel, title: "Admin review & restriction", tone: "brand" },
+] as const;
 
 export function SafetyControls() {
   return (
@@ -40,6 +40,7 @@ export function SafetyControls() {
               key={control.title}
               icon={control.icon}
               title={control.title}
+              tone={control.tone}
               delay={i * 0.05}
             />
           ))}

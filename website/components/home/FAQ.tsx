@@ -1,5 +1,8 @@
+import Link from "next/link";
+import { ChatCircleDots, ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { Container } from "@/components/ui/Container";
 import { SectionHeader } from "@/components/ui/SectionHeader";
+import { Reveal } from "@/components/motion/Reveal";
 import { FAQAccordion, type FAQItem } from "@/components/product/FAQAccordion";
 
 const FAQ_ITEMS: FAQItem[] = [
@@ -62,14 +65,48 @@ const FAQ_ITEMS: FAQItem[] = [
 
 export function FAQ() {
   return (
-    <section className="border-t border-hairline py-20 sm:py-28">
+    <section className="border-t border-hairline bg-surface py-20 sm:py-28">
       <Container>
-        <SectionHeader
-          eyebrow="FAQ"
-          title="Questions, answered."
-          copy="Short and honest. The fine print lives in the legal center."
-        />
-        <FAQAccordion items={FAQ_ITEMS} />
+        <div className="grid gap-12 lg:grid-cols-[0.85fr_1.3fr]">
+          <div className="lg:sticky lg:top-28 lg:self-start">
+            <SectionHeader
+              align="left"
+              className="mb-8"
+              eyebrow="FAQ"
+              title="Questions, answered."
+              copy="Short and honest. The fine print lives in the legal center."
+            />
+            <Reveal delay={0.1}>
+              <Link
+                href="/support"
+                className="group flex items-center gap-4 rounded-2xl border border-hairline bg-surface-2 p-5 transition-colors hover:border-brand/40"
+              >
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-brand/20 bg-brand/[0.07]">
+                  <ChatCircleDots
+                    size={22}
+                    className="text-brand"
+                    aria-hidden="true"
+                  />
+                </span>
+                <span className="flex-1">
+                  <span className="block text-[15px] font-semibold text-white">
+                    Still curious?
+                  </span>
+                  <span className="block text-[13px] text-faint">
+                    Talk to a human on support.
+                  </span>
+                </span>
+                <ArrowRight
+                  size={16}
+                  className="text-muted transition-transform duration-300 group-hover:translate-x-1 group-hover:text-brand"
+                  aria-hidden="true"
+                />
+              </Link>
+            </Reveal>
+          </div>
+
+          <FAQAccordion items={FAQ_ITEMS} />
+        </div>
       </Container>
     </section>
   );

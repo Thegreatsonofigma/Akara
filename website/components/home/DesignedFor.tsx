@@ -58,7 +58,7 @@ const AUDIENCES = [
 
 export function DesignedFor() {
   return (
-    <section className="border-t border-hairline py-20 sm:py-28">
+    <section className="border-t border-hairline bg-surface py-20 sm:py-28">
       <Container>
         <SectionHeader
           eyebrow="Designed for"

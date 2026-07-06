@@ -111,7 +111,15 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="mt-14 flex flex-col gap-4 border-t border-hairline pt-8">
+        <p
+          aria-hidden="true"
+          className="mt-16 select-none text-center font-black leading-[0.8] tracking-tight text-white/[0.04]"
+          style={{ fontSize: "clamp(4rem, 17vw, 15rem)" }}
+        >
+          AKARA
+        </p>
+
+        <div className="mt-4 flex flex-col gap-4 border-t border-hairline pt-8">
           <p className="text-xs leading-relaxed text-faint">
             {MANDATORY_WORDING}
           </p>
