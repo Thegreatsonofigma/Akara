@@ -60,7 +60,8 @@ function inferIntent(text) {
   if (/\b(profile|settings|account|payout|payouts|payment details|bank details|momo details|wallet|manage)\b/.test(value)) return "settings";
   if (/\b(my offers|my listings|offers i posted|listings i posted|what i posted)\b/.test(value)) return "my_listings";
   if (/\b(my deals|my trades|reserved deals|transactions|transaction history|deal history|history|statement|records)\b/.test(value)) return "my_deals";
-  if (/\b(find|search|need|wan|want to see|show me|see|looking for|dey find|find who|who go help|change am|convert am|swap am|available|offers|deals|trades|matches|rates|who has|who get|who needs?|who wants?|anyone needs?|anyone wants?|anybody needs?|anybody wants?|reserve|take|find|show|check rate)\b/.test(value)) return "find_offer";
+  if (/\b(find|search|need|wan|want to see|show me|see|looking for|looking to get|looking to collect|dey find|find who|who go help|who fit give|who can give|give me|send me|help me get|can i get|make i get|make i collect|collect|change am|convert am|swap am|available|offers|deals|trades|matches|rates|who has|who get|who needs?|who wants?|anyone needs?|anyone wants?|anybody needs?|anybody wants?|reserve|take|find|show|check rate)\b/.test(value)) return "find_offer";
+  if (currencyMentions(text).length && /\b(i can give|can give|i fit give|fit give|i go give|go give|i want to give|want to give|willing to give|ready to give|i can send|can send|i fit send|fit send|i go send|go send|i can pay|can pay|i fit pay|fit pay|i go pay|go pay)\b/.test(value)) return "find_offer";
   if (/\b(post|create|list|listing|offer|make offer|i have|i get|i dey with|get|i want to exchange|i wan exchange|i want to sell|i can give|i fit give)\b/.test(value)) return "create_listing";
   return null;
 }

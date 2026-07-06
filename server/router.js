@@ -585,6 +585,11 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
       .some((field) => listingDetails[field]);
     if (hasAnyExchangeDetail) {
       const missing = missingListingFields(listingDetails);
+      if ((listingDetails.want_currency && listingDetails.want_amount && !listingDetails.have_currency)
+          || (listingDetails.have_currency && listingDetails.have_amount && !listingDetails.want_currency)) {
+        return continueSearchOrShowMatches(user, listingDetails);
+      }
+
       if (!missing.length) {
         return showOfferMatches(user, listingDetails);
       }
@@ -611,7 +616,8 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
     const searchDetails = mergePresentDetails(parseSearchDetails(text), interpretedExchangeDetails);
     if ((searchDetails.have_currency && searchDetails.want_currency)
-        || (searchDetails.want_currency && (searchDetails.want_amount || searchDetails.amount))) {
+        || (searchDetails.want_currency && (searchDetails.want_amount || searchDetails.amount))
+        || (searchDetails.have_currency && (searchDetails.have_amount || searchDetails.amount))) {
       return continueSearchOrShowMatches(user, searchDetails);
     }
 

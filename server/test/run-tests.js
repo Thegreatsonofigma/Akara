@@ -465,16 +465,49 @@ async function run() {
     want_amount: 57500,
     listing_type: "negotiable",
   });
+  const haveOnlyListing = seedListing(needOnlyOwner, {
+    code: "AKR-LIST-088",
+    have_currency: "RWF",
+    have_amount: 36000,
+    want_currency: "NGN",
+    want_amount: 30000,
+    listing_type: "negotiable",
+  });
 
   reply = await send(ALICE, "Hello Akara, Please I need naira 30k");
   check("need-only search shows eligible NGN offers", reply.includes("AKR-LIST-089") && reply.includes("AKR-LIST-090"), reply);
   check("need-only search ranks flexible first", reply.indexOf("AKR-LIST-089") !== -1 && reply.indexOf("AKR-LIST-089") < reply.indexOf("AKR-LIST-090"), reply);
   check("need-only search does not repeat needed currency", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
 
+  reply = await send(ALICE, "who fit give me 30k naira");
+  check("pidgin need-only search shows offers", reply.includes("AKR-LIST-089"), reply);
+  check("pidgin need-only does not ask need again", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
+
+  reply = await send(ALICE, "can I get 30k in naira?");
+  check("natural need-only search supports in-currency phrasing", reply.includes("AKR-LIST-089"), reply);
+
+  reply = await send(ALICE, "send me 30k naira");
+  check("need-only search understands send-me phrasing", reply.includes("AKR-LIST-089"), reply);
+
+  reply = await send(ALICE, "I need naira, 30k");
+  check("need-only search understands separated amount phrasing", reply.includes("AKR-LIST-089"), reply);
+
+  reply = await send(ALICE, "I fit give 30k naira");
+  check("pidgin have-only search shows offers wanting NGN", reply.includes("AKR-LIST-088"), reply);
+  check("pidgin have-only does not ask have again", !reply.includes("What currency do you have?"), reply);
+
+  reply = await send(ALICE, "I can send 30k NGN");
+  check("have-only search understands can-send phrasing", reply.includes("AKR-LIST-088"), reply);
+
   reply = await send(ALICE, "I need KES 9999999");
   check("need-only no match asks what user has", reply.includes("What currency do you have to offer"), reply);
   check("need-only no match keeps requested currency", reply.includes("9,999,999 KES"), reply);
   check("need-only no match does not ask needed currency again", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
+
+  reply = await send(ALICE, "I can give 9999999 XAF");
+  check("have-only no match asks what user needs", reply.includes("What currency do you need in return"), reply);
+  check("have-only no match keeps offered currency", reply.includes("9,999,999 XAF"), reply);
+  haveOnlyListing.status = "closed";
 
   reply = await send(ALICE, "show me ngn offers");
   check("browse shows bob listing", reply.includes("AKR-LIST-090"), reply);
