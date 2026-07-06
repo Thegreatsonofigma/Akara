@@ -103,13 +103,13 @@ h3 {
 }
 
 h1 {
-  font-size: clamp(2.85rem, 4.45vw, 5.05rem);
-  max-width: 13.2ch;
+  font-size: clamp(2.45rem, 3.7vw, 4.45rem);
+  max-width: 14.5ch;
 }
 
 h2 {
-  font-size: clamp(1.72rem, 2.55vw, 3rem);
-  max-width: 15.5ch;
+  font-size: clamp(1.55rem, 2.25vw, 2.7rem);
+  max-width: 17ch;
 }
 
 h3 {
@@ -375,6 +375,123 @@ textarea {
   perspective: 1200px;
 }
 
+.whatsapp-shot,
+.real-listing-preview,
+.real-menu-preview,
+.chat-screenshot-panel,
+.real-card-shot,
+.listing-side-card {
+  overflow: hidden;
+  background: #050505;
+}
+
+.whatsapp-shot,
+.chat-screenshot-panel {
+  position: absolute;
+  margin: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 34px 100px rgba(0, 0, 0, 0.72);
+}
+
+.whatsapp-shot img,
+.real-listing-preview img,
+.real-menu-preview img,
+.chat-screenshot-panel img,
+.real-card-shot img,
+.listing-side-card img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hero-chat-shot {
+  inset: 0 7% auto auto;
+  width: min(385px, 88vw);
+  height: 590px;
+  border-radius: 28px;
+  transform: rotateY(-10deg) rotateX(4deg);
+  animation: phone-drift 9s ease-in-out infinite;
+}
+
+.hero-chat-shot > img {
+  object-position: center top;
+}
+
+.shot-brand-mask {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  height: 112px;
+  padding: 1rem 1.25rem 0.8rem;
+  background: linear-gradient(180deg, #0b0b0b 0%, #0b0b0b 72%, rgba(11, 11, 11, 0.72) 100%);
+  color: #fff;
+}
+
+.shot-brand-mask img {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+}
+
+.shot-brand-mask span {
+  font-weight: 850;
+}
+
+.shot-brand-mask small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 0.78rem;
+}
+
+.real-listing-preview {
+  left: 0;
+  bottom: 13%;
+  width: min(430px, 72vw);
+  transform: rotateZ(-1.5deg);
+}
+
+.real-listing-preview img {
+  aspect-ratio: 2 / 1;
+}
+
+.real-menu-preview {
+  right: 0;
+  bottom: 0;
+  width: min(255px, 45vw);
+  height: 430px;
+  border-radius: 20px;
+}
+
+.real-menu-preview img {
+  object-position: center bottom;
+}
+
+.real-card-shot {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.real-card-shot::before {
+  content: none;
+}
+
+.real-card-shot > * {
+  position: static;
+}
+
+.real-card-shot img {
+  aspect-ratio: 2 / 1;
+}
+
 .phone-shell {
   position: absolute;
   inset: 0 5% auto auto;
@@ -632,6 +749,27 @@ textarea {
   font-weight: 800;
 }
 
+.chat-screenshot-panel {
+  position: relative;
+  min-height: 310px;
+  border-radius: 26px;
+}
+
+.chat-screenshot-panel img {
+  object-position: center top;
+}
+
+.chat-screenshot-panel .shot-brand-mask {
+  height: 74px;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(180deg, #0b0b0b 0%, #0b0b0b 70%, rgba(11, 11, 11, 0.62) 100%);
+}
+
+.chat-screenshot-panel .shot-brand-mask img {
+  width: 32px;
+  height: 32px;
+}
+
 .listing-preview {
   left: 0;
   bottom: 8%;
@@ -747,6 +885,21 @@ textarea {
 .listing-shot-pills span:first-child b {
   background: var(--red);
   color: #fff;
+}
+
+.standalone-listing {
+  display: grid;
+  gap: 1rem;
+}
+
+.listing-side-card {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.listing-side-card img {
+  aspect-ratio: 2 / 1;
 }
 
 .listing-preview p,
@@ -1118,6 +1271,74 @@ textarea {
   transform: scale(1.01);
 }
 
+.persona-stock-slot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: end;
+  gap: 0.5rem;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at 18% 16%, rgba(157, 255, 30, 0.26), transparent 32%),
+    radial-gradient(circle at 82% 0%, rgba(53, 127, 255, 0.22), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+    #111;
+}
+
+.persona-stock-slot::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: linear-gradient(180deg, transparent, #000 24%, #000);
+  content: "";
+}
+
+.persona-stock-slot > * {
+  position: relative;
+  z-index: 1;
+}
+
+.persona-stock-slot small {
+  width: fit-content;
+  border: 1px solid rgba(157, 255, 30, 0.34);
+  border-radius: 999px;
+  padding: 0.32rem 0.52rem;
+  color: var(--green);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.persona-stock-slot strong {
+  max-width: 11rem;
+  color: #fff;
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.persona-stock-slot span {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  display: block;
+  min-height: 0;
+  max-width: 13rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.35;
+  backdrop-filter: none;
+}
+
 .persona-photo::before {
   position: absolute;
   inset: 0;
@@ -1145,6 +1366,33 @@ textarea {
   font-weight: 800;
   letter-spacing: 0.03em;
   backdrop-filter: blur(12px);
+}
+
+.persona-photo .persona-stock-slot {
+  z-index: 0;
+}
+
+.persona-photo .persona-stock-slot > * {
+  z-index: 2;
+}
+
+.persona-photo .persona-stock-slot span {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  display: block;
+  min-height: 0;
+  max-width: 13rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.35;
+  backdrop-filter: none;
 }
 
 .persona-card h3 {
@@ -1909,6 +2157,23 @@ details p {
     min-height: 620px;
   }
 
+  .hero-chat-shot {
+    inset-inline: 50% auto;
+    animation: none;
+    transform: translateX(-50%);
+  }
+
+  .real-listing-preview {
+    left: 50%;
+    bottom: 2%;
+    transform: translateX(-50%);
+  }
+
+  .real-menu-preview {
+    right: 3%;
+    bottom: 6%;
+  }
+
   .phone-shell {
     inset-inline: 50% auto;
     animation: none;
@@ -1994,6 +2259,24 @@ details p {
 
   .product-stage {
     min-height: 560px;
+  }
+
+  .hero-chat-shot {
+    width: min(330px, 94vw);
+    height: 500px;
+  }
+
+  .shot-brand-mask {
+    height: 96px;
+  }
+
+  .real-listing-preview {
+    width: min(330px, 92vw);
+    bottom: 3%;
+  }
+
+  .real-menu-preview {
+    display: none;
   }
 
   .phone-shell {

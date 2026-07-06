@@ -259,6 +259,11 @@ function assetPath(file) {
   return `/site-assets/${file}`;
 }
 
+function mockupAsset(file) {
+  if (file.includes("..")) return "";
+  return assetPath(`images/mockups/${file}`);
+}
+
 function cardAsset(file) {
   if (file.includes("..")) return "";
   return `/card-assets/${file}`;
@@ -402,55 +407,43 @@ function currencyChips() {
 
 function listingShot() {
   return `
-    <div class="listing-shot" aria-hidden="true">
-      <div class="listing-shot-top">Swap <b>with me on Akara</b></div>
-      <div class="listing-shot-main">
-        <strong>50,000</strong>
-        <span>x</span>
-        <strong>55,000</strong>
-      </div>
-      <div class="listing-shot-pills">
-        <span>I have <b>NGN</b></span>
-        <span>I need <b>RWF</b></span>
-      </div>
-      <div class="listing-shot-foot">Open AKR-LIST-028</div>
-    </div>
+    <figure class="listing-shot real-card-shot">
+      <img src="${mockupAsset("listing-card-xaf-ngn.jpeg")}" alt="Akara shareable listing card preview" loading="lazy" />
+    </figure>
   `;
 }
 
 function productMockup() {
   return `
     <div class="product-stage" aria-label="Akara WhatsApp trade flow preview">
-      <div class="phone-shell">
-        <div class="phone-top"><span></span><b>Akara</b><small>WhatsApp</small></div>
-        <div class="chat-bubble incoming">Hi Divine. Tell Akara what you want to swap.</div>
-        <div class="chat-bubble outgoing">I have 50k NGN and need RWF</div>
-        <div class="chat-card">
-          <strong>AKR-LIST-028</strong>
-          <div class="swap-row"><span>You send</span><b>50,000 NGN</b></div>
-          <div class="swap-row"><span>You receive</span><b>55,000 RWF</b></div>
-          <div class="status-line"><i></i> Fixed rate. Payout name matched.</div>
-        </div>
-        <div class="chat-bubble outgoing">Paid. Receipt uploaded.</div>
-        <div class="chat-action"><span></span>Click to Select</div>
-        <div class="chat-card receipt-card">
-          <strong>Receipt received</strong>
-          <p>Waiting for the other party to confirm.</p>
-        </div>
-      </div>
-      <div class="floating-card listing-preview">
-        ${listingShot()}
-        <div>
-          <p>Shareable listing cards</p>
-          <strong>Open trades from any chat</strong>
-        </div>
-      </div>
-      <div class="floating-card tracker-preview">
-        <span class="live-dot"></span>
-        <p>15 min payment window</p>
-        <strong>Every step recorded</strong>
-      </div>
+      <figure class="whatsapp-shot hero-chat-shot">
+        <img src="${mockupAsset("listing-live-chat.jpeg")}" alt="Akara listing live inside a WhatsApp chat" />
+        <figcaption class="shot-brand-mask">
+          <img src="${cardAsset("akara-logo-mark.png")}" alt="" />
+          <span>Akara</span>
+          <small>WhatsApp</small>
+        </figcaption>
+      </figure>
+      <figure class="floating-card real-listing-preview">
+        <img src="${mockupAsset("listing-card-kes-rwf.jpeg")}" alt="Akara swap card with KES and RWF" loading="lazy" />
+      </figure>
+      <figure class="floating-card real-menu-preview">
+        <img src="${mockupAsset("menu-sheet.jpeg")}" alt="Akara WhatsApp click to select menu" loading="lazy" />
+      </figure>
     </div>
+  `;
+}
+
+function chatScreenshotPanel() {
+  return `
+    <figure class="chat-screenshot-panel">
+      <img src="${mockupAsset("menu-chat.jpeg")}" alt="Akara menu and chat inside WhatsApp" loading="lazy" />
+      <figcaption class="shot-brand-mask compact">
+        <img src="${cardAsset("akara-logo-mark.png")}" alt="" />
+        <span>Akara</span>
+        <small>WhatsApp</small>
+      </figcaption>
+    </figure>
   `;
 }
 
@@ -473,35 +466,39 @@ function personaCards() {
       tone: "student",
       title: "International students",
       text: "Fees, food, rent, and weekend money handled from the chat they already use.",
-      image: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=900&q=82",
       searchId: "d8f17a67-0597-458b-b708-383dd8a22a09",
+      query: "African international students campus",
     },
     {
       tone: "freelancer",
       title: "Freelancers",
       text: "Turn invoice money into local spend without chasing rates across groups.",
-      image: "https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=900&q=82",
-      searchId: "301b45d5-fbe0-4e57-a679-6931494107d5",
+      searchId: "7ba6cfa8-8910-45e7-94c6-75f84db97473",
+      query: "African freelancer laptop workspace",
     },
     {
       tone: "expat",
       title: "Expats",
       text: "Find verified peers, open a trade, and keep the record clean.",
-      image: "https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&w=900&q=82",
       searchId: "ba67aef1-88c1-4c55-92db-83b3c3499255",
+      query: "African expat professional smartphone",
     },
     {
       tone: "traveller",
       title: "Frequent travellers",
       text: "Arrive with a clearer path from one currency to the next.",
-      image: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=900&q=82",
       searchId: "19cdd96f-eac5-4f73-b766-d54dcc47d20e",
+      query: "African traveler airport smartphone",
     },
   ];
-  return people.map(({ tone, title, text, image, searchId }) => `
+  return people.map(({ tone, title, text, searchId, query }) => `
     <article class="persona-card ${tone}" data-shutterstock-search="${esc(searchId)}">
       <div class="persona-photo">
-        <img src="${esc(image)}" alt="${esc(title)} using Akara" loading="lazy" />
+        <div class="persona-stock-slot" role="img" aria-label="${esc(title)} Shutterstock image slot">
+          <small>Shutterstock</small>
+          <strong>${esc(title)}</strong>
+          <span>${esc(query)}</span>
+        </div>
         <span>${esc(title)}</span>
       </div>
       <div>
@@ -550,15 +547,7 @@ function homePage() {
         </div>
         <div class="bento-grid">
           <article class="bento-card bento-large">
-            <div class="mini-phone">
-              <div class="mini-bubble incoming">Show me RWF offers</div>
-              <div class="mini-offer">
-                <b>AKR-LIST-016</b>
-                <span>Send 50,000 NGN</span>
-                <strong>Receive 55,000 RWF</strong>
-              </div>
-              <div class="mini-action">Open trade</div>
-            </div>
+            ${chatScreenshotPanel()}
             <div>
               <span class="bento-icon">${icon("chat")}</span>
               <h3>Type what you mean.</h3>
@@ -747,7 +736,12 @@ function productPage() {
           <h2>A rate can travel before the money does.</h2>
           <p>Post a listing, share the card, and let interested people open the trade from their own WhatsApp chat.</p>
         </div>
-        <div class="standalone-listing">${listingShot()}</div>
+        <div class="standalone-listing">
+          ${listingShot()}
+          <figure class="listing-side-card">
+            <img src="${mockupAsset("listing-card-kes-rwf.jpeg")}" alt="Second Akara listing card preview" loading="lazy" />
+          </figure>
+        </div>
       </div>
     </section>
   `;
@@ -1134,6 +1128,7 @@ function contentTypeFor(file) {
   if (file.endsWith(".css")) return "text/css; charset=utf-8";
   if (file.endsWith(".js")) return "text/javascript; charset=utf-8";
   if (file.endsWith(".png")) return "image/png";
+  if (file.endsWith(".jpg") || file.endsWith(".jpeg")) return "image/jpeg";
   if (file.endsWith(".svg")) return "image/svg+xml";
   if (file.endsWith(".otf")) return "font/otf";
   return "application/octet-stream";
