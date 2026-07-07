@@ -198,7 +198,44 @@ body {
   }
 }
 
-/* Corridor map node pulse */
+/* Money pulse traveling the direct-payment rail */
+@keyframes rail-pulse {
+  0% {
+    left: 0%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    left: calc(100% - 10px);
+    opacity: 0;
+  }
+}
+
+/* Expanding ring around the Akara node */
+@keyframes ring-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rail-pulse {
+    animation: rail-pulse 2.8s ease-in-out infinite;
+  }
+  .ring-pulse {
+    animation: ring-pulse 2.4s ease-out infinite;
+  }
+}
 @keyframes node-pulse {
   0%,
   100% {

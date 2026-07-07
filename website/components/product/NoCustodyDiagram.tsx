@@ -1,7 +1,10 @@
+import Image from "next/image";
 import {
   Bank,
   DeviceMobile,
   ArrowRight,
+  ArrowDown,
+  Eye,
   ShieldCheck,
   ListMagnifyingGlass,
   UsersThree,
@@ -21,23 +24,36 @@ const COORDINATION_STEPS = [
   { label: "Dispute record", icon: Scales },
 ];
 
-function UserAccount({
+function UserNode({
   name,
   detail,
+  badge,
+  badgeTone,
   icon: Icon,
 }: {
   name: string;
   detail: string;
+  badge: string;
+  badgeTone: "white" | "brand";
   icon: typeof Bank;
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-hairline bg-surface-2 px-5 py-4">
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black">
-        <Icon size={20} className="text-white/80" aria-hidden="true" />
+    <div className="flex w-full items-center gap-4 rounded-2xl border border-white/10 bg-surface-2 p-5 sm:w-auto">
+      <span className="flex size-12 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black">
+        <Icon size={22} weight="duotone" className="text-white/80" aria-hidden="true" />
       </span>
       <div>
-        <p className="text-sm font-semibold text-white">{name}</p>
+        <p className="text-sm font-bold text-white">{name}</p>
         <p className="text-xs text-faint">{detail}</p>
+        <p
+          className={`mt-2 inline-flex rounded-full px-2.5 py-0.5 font-numbers text-[11px] tracking-wider ${
+            badgeTone === "brand"
+              ? "bg-brand text-black"
+              : "border border-white/15 bg-white/[0.04] text-white/80"
+          }`}
+        >
+          {badge}
+        </p>
       </div>
     </div>
   );
@@ -45,75 +61,105 @@ function UserAccount({
 
 export function NoCustodyDiagram() {
   return (
-    <div className="mx-auto max-w-4xl">
-      {/* Coordination layer — dotted, because no money passes through it */}
-      <div className="relative rounded-3xl border border-hairline-strong/60 bg-surface p-6 sm:p-8">
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm font-semibold text-brand">
-            Akara — coordination layer
-          </p>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 text-xs text-white">
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-brand" />
-            No custody
-          </span>
-        </div>
-        <ul className="flex flex-wrap gap-2.5">
-          {COORDINATION_STEPS.map((step) => (
-            <li
-              key={step.label}
-              className="flex items-center gap-2 rounded-full border border-dashed border-white/20 bg-black/40 px-3.5 py-1.5 text-xs text-white/80"
-            >
-              <step.icon size={14} className="text-brand" aria-hidden="true" />
-              {step.label}
-            </li>
-          ))}
-        </ul>
+    <div className="mx-auto flex max-w-4xl flex-col items-center">
+      {/* Akara node — hovering above the money, never in it */}
+      <div className="relative">
+        <span
+          aria-hidden="true"
+          className="ring-pulse absolute inset-0 rounded-full border-2 border-brand/50"
+        />
+        <span className="relative flex size-16 items-center justify-center rounded-full border border-brand/40 bg-black shadow-[0_0_56px_rgba(157,255,30,0.3)]">
+          <Image src="/akara-logo-mark.webp" alt="" width={30} height={31} />
+        </span>
       </div>
+      <p className="mt-4 text-sm font-bold text-brand">
+        Akara — coordination layer
+      </p>
 
-      {/* Dotted connectors from the coordination layer down to both users */}
+      <ul className="mt-5 flex max-w-2xl flex-wrap justify-center gap-2.5">
+        {COORDINATION_STEPS.map((step) => (
+          <li
+            key={step.label}
+            className="flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.03] px-3.5 py-1.5 text-xs text-white/75"
+          >
+            <step.icon
+              size={14}
+              weight="duotone"
+              className="text-brand"
+              aria-hidden="true"
+            />
+            {step.label}
+          </li>
+        ))}
+      </ul>
+
+      {/* dashed beam down to the checkpoint */}
       <div
         aria-hidden="true"
-        className="mx-auto grid h-10 max-w-2xl grid-cols-2 px-10"
-      >
-        <span className="h-full w-px justify-self-center border-l border-dashed border-white/25" />
-        <span className="h-full w-px justify-self-center border-l border-dashed border-white/25" />
+        className="mt-5 h-9 w-px border-l border-dashed border-brand/40"
+      />
+      <div className="flex items-center gap-2.5 rounded-full border border-brand/25 bg-black/70 px-4 py-2">
+        <Eye size={16} weight="duotone" className="text-brand" aria-hidden="true" />
+        <p className="text-xs text-white/70">
+          Watches every step.{" "}
+          <span className="font-semibold text-white">
+            Never touches the money.
+          </span>
+        </p>
       </div>
+      <div
+        aria-hidden="true"
+        className="mb-7 mt-5 h-9 w-px border-l border-dashed border-brand/40"
+      />
 
-      {/* Direct payment lane — the only solid line, user to user */}
-      <div className="grid items-center gap-3 sm:grid-cols-[1fr_auto_1fr] sm:gap-0">
-        <UserAccount
+      {/* the direct payment rail */}
+      <div className="grid w-full items-center gap-4 sm:grid-cols-[auto_1fr_auto] sm:gap-6">
+        <UserNode
           name="User A"
-          detail="Own bank / mobile money account"
+          detail="Own bank / mobile money"
+          badge="Sends 350,000 NGN"
+          badgeTone="white"
           icon={Bank}
         />
-        <div className="flex items-center justify-center px-2 py-1 sm:px-4">
-          <div className="flex items-center gap-2 rounded-full border border-brand/40 bg-brand/10 px-4 py-2">
-            <span
-              aria-hidden="true"
-              className="hidden h-px w-6 bg-brand sm:block"
-            />
-            <span className="whitespace-nowrap text-xs font-semibold text-brand">
-              Direct payment
-            </span>
-            <ArrowRight size={14} className="text-brand" aria-hidden="true" />
-            <span
-              aria-hidden="true"
-              className="hidden h-px w-6 bg-brand sm:block"
-            />
-          </div>
+
+        {/* desktop rail with traveling pulse */}
+        <div className="relative hidden h-10 sm:block" aria-hidden="true">
+          <p className="absolute -top-1 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.22em] text-brand">
+            Direct payment
+          </p>
+          <div className="absolute left-0 right-5 top-1/2 h-px translate-y-2 bg-gradient-to-r from-brand/25 via-brand/70 to-brand/25" />
+          <span className="rail-pulse absolute top-1/2 size-2.5 translate-y-[3px] rounded-full bg-brand shadow-[0_0_18px_rgba(157,255,30,0.95)]" />
+          <ArrowRight
+            size={16}
+            className="absolute right-0 top-1/2 translate-y-[0px] text-brand"
+          />
         </div>
-        <UserAccount
+
+        {/* mobile connector */}
+        <div
+          className="flex flex-col items-center gap-1.5 sm:hidden"
+          aria-hidden="true"
+        >
+          <span className="h-6 w-px border-l border-dashed border-brand/50" />
+          <span className="flex items-center gap-2 rounded-full border border-brand/30 bg-brand/10 px-3.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-brand">
+            Direct payment
+            <ArrowDown size={12} />
+          </span>
+          <span className="h-6 w-px border-l border-dashed border-brand/50" />
+        </div>
+
+        <UserNode
           name="User B"
-          detail="Own bank / mobile money account"
+          detail="Own bank / mobile money"
+          badge="Gets 350,000 NGN"
+          badgeTone="brand"
           icon={DeviceMobile}
         />
       </div>
 
-      <p className="mt-6 text-center text-sm text-faint">
+      <p className="mt-8 text-center text-sm text-faint">
         Money moves once, directly between users.{" "}
-        <span className="text-white/80">
-          It never enters an Akara account.
-        </span>
+        <span className="text-white/85">It never enters an Akara account.</span>
       </p>
     </div>
   );
