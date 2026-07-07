@@ -38,7 +38,7 @@ export function CyclingCorridor({ light = false }: { light?: boolean }) {
           : "border-brand/35 bg-brand/[0.08]"
       }`}
     >
-      <AnimatePresence mode="popLayout" initial={false}>
+      <AnimatePresence mode="wait" initial={false}>
         <motion.span
           key={`${from}-${to}`}
           className="inline-flex items-center gap-[0.22em] whitespace-nowrap font-numbers text-[0.62em] leading-none tracking-wide text-brand"
