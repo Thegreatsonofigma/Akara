@@ -8,7 +8,7 @@ import { MANDATORY_WORDING, NO_CUSTODY_LINE } from "@/lib/site";
 const AKARA_IS = [
   "Software that coordinates person-to-person swaps",
   "Identity checks, name-matched payouts, receipts",
-  "A registered Nigerian business — BN 9656395",
+  "A registered Nigerian business (BN 9656395)",
 ];
 
 const AKARA_ISNT = [

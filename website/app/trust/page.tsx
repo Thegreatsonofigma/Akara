@@ -41,7 +41,7 @@ const PRINCIPLES = [
   {
     icon: SealCheck,
     title: "Verified before trade actions",
-    copy: "Listings, trades, payout accounts, and completions all require identity verification — browsing basic information does not.",
+    copy: "Listings, trades, payout accounts, and completions all require identity verification. Browsing basic information does not.",
   },
   {
     icon: Receipt,
@@ -73,7 +73,7 @@ export default function TrustPage() {
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-pretty text-base leading-relaxed text-muted sm:text-lg">
               Akara exists to make peer-to-peer currency exchange coordination
-              safer — with verification, name-matched payouts, receipts, and
+              safer, with verification, name-matched payouts, receipts, and
               dispute review, while your money moves only between you and the
               other user.
             </p>
@@ -155,7 +155,7 @@ export default function TrustPage() {
           <SectionHeader
             eyebrow="Disputes"
             title="When something goes wrong, there is a process."
-            copy="Raise a dispute within 24 hours. Akara reviews the trade record — KYC, receipts, payout details, and chats — and an admin or compliance reviewer decides the outcome. Akara does not guarantee refunds or reversals because Akara does not hold funds."
+            copy="Raise a dispute within 24 hours. Akara reviews the trade record (KYC, receipts, payout details, and chats), and an admin or compliance reviewer decides the outcome. Akara does not guarantee refunds or reversals because Akara does not hold funds."
           />
           <DisputeTimeline />
         </Container>

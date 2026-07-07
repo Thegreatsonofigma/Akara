@@ -86,7 +86,7 @@ export function WhyCarousel() {
                 <span className="text-brand">people move.</span>
               </h2>
               <p className="mt-5 max-w-md text-pretty text-base leading-relaxed text-white/55 sm:text-lg">
-                Lagos to Kigali. Accra to Nairobi. Douala to everywhere —
+                Lagos to Kigali. Accra to Nairobi. Douala to everywhere.
                 Akara gives that trust a structure.
               </p>
             </div>

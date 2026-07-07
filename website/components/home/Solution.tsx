@@ -10,7 +10,7 @@ export function Solution() {
         <SectionHeader
           eyebrow="The fix"
           title="All the structure. None of the custody."
-          copy="Akara coordinates the swap. The money moves once — straight from them to you."
+          copy="Akara coordinates the swap. The money moves once, straight from them to you."
         />
         <Reveal y={32}>
           <div className="relative overflow-hidden rounded-[2rem] border border-hairline-strong/50 bg-black p-6 sm:p-12">

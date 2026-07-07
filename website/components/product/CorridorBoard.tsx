@@ -18,19 +18,19 @@ const MARQUEE_CORRIDORS = [
 const EXAMPLE_CARDS = [
   {
     src: "/cards/listing-001.webp",
-    alt: "Akara swap card: I have 350,000 NGN, I need 412,500 RWF — open AKR-LIST-001 on Akara to swap",
+    alt: "Akara swap card: I have 350,000 NGN, I need 412,500 RWF. Open AKR-LIST-001 on Akara to swap",
   },
   {
     src: "/cards/listing-002.webp",
-    alt: "Akara swap card: I have 4,800 GHS, I need 48,900 KES — open AKR-LIST-002 on Akara to swap",
+    alt: "Akara swap card: I have 4,800 GHS, I need 48,900 KES. Open AKR-LIST-002 on Akara to swap",
   },
   {
     src: "/cards/listing-003.webp",
-    alt: "Akara swap card: I have 350,798 XAF, I need 800,000 NGN — open AKR-LIST-003 on Akara to swap",
+    alt: "Akara swap card: I have 350,798 XAF, I need 800,000 NGN. Open AKR-LIST-003 on Akara to swap",
   },
   {
     src: "/cards/listing-004.webp",
-    alt: "Akara swap card: I have 1,260,000 RWF, I need 1,850,000 NGN — open AKR-LIST-004 on Akara to swap",
+    alt: "Akara swap card: I have 1,260,000 RWF, I need 1,850,000 NGN. Open AKR-LIST-004 on Akara to swap",
   },
 ];
 
@@ -79,7 +79,7 @@ export function CorridorBoard() {
               />
             </div>
             <p className="mt-2 text-center text-[10px] uppercase tracking-[0.18em] text-faint">
-              Example listing — not a live rate
+              Example listing. Not a live rate
             </p>
           </Reveal>
         ))}

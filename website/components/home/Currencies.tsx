@@ -13,7 +13,7 @@ export function Currencies() {
           eyebrow="Currencies"
           accent="acid"
           title="Five currencies. One network."
-          copy="Nigeria, Rwanda, Ghana, Kenya, Cameroon — with more markets to come."
+          copy="Nigeria, Rwanda, Ghana, Kenya, Cameroon, with more markets to come."
         />
         <CorridorBoard />
       </Container>

@@ -100,7 +100,7 @@ function ListingLiveMockup() {
       </div>
 
       <p className="mt-3 border-t border-white/[0.06] pt-3 text-[11px] leading-relaxed text-faint">
-        Share this with anyone interested — they can review it and open the
+        Share this with anyone interested. They can review it and open the
         trade from their own chat.
       </p>
       <p className="mt-2 text-right text-[10px] text-white/40">5:46 PM</p>
@@ -143,7 +143,7 @@ export function HowItWorks() {
             number="02"
             tone="electric"
             title="List or browse"
-            copy="Say what you have and what you need — your listing goes live with a shareable swap card."
+            copy="Say what you have and what you need. Your listing goes live with a shareable swap card."
             className="lg:row-span-2"
             delay={0.06}
           >
@@ -225,7 +225,7 @@ export function HowItWorks() {
             number="06"
             tone="electric"
             title="Confirm with proof"
-            copy="Upload the receipt. Both sides confirm — and the exchange closes with a completion card."
+            copy="Upload the receipt. Both sides confirm, and the exchange closes with a completion card."
             className="lg:col-span-2"
             delay={0.18}
           >

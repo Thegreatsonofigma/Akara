@@ -73,7 +73,7 @@ export function NoCustodyDiagram() {
         </span>
       </div>
       <p className="mt-4 text-sm font-bold text-brand">
-        Akara — coordination layer
+        Akara: coordination layer
       </p>
 
       <ul className="mt-5 flex max-w-2xl flex-wrap justify-center gap-2.5">

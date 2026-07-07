@@ -68,7 +68,7 @@ export default function SupportPage() {
               </span>
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-pretty text-base leading-relaxed text-muted sm:text-lg">
-              Questions, trade issues, complaints, or safety concerns — reach
+              Questions, trade issues, complaints, or safety concerns: reach
               Akara through WhatsApp or email and we will pick it up from
               there.
             </p>

@@ -181,7 +181,7 @@ export const LEGAL_DOCS: LegalDoc[] = [
       {
         heading: "Akara Does Not Hold Funds",
         paragraphs: [
-          "Akara does not hold, receive, escrow, custody, remit, convert, or move user funds. Every payment on an Akara-coordinated trade travels directly from one user's bank or mobile money account to the other user's account. Akara is a coordination layer around that direct payment — not a participant in it.",
+          "Akara does not hold, receive, escrow, custody, remit, convert, or move user funds. Every payment on an Akara-coordinated trade travels directly from one user's bank or mobile money account to the other user's account. Akara is a coordination layer around that direct payment, not a participant in it.",
         ],
       },
       {
@@ -400,9 +400,9 @@ export const LEGAL_DOCS: LegalDoc[] = [
       {
         heading: "Example Tier Structure",
         items: [
-          "Tier 1 — Low-value trades only.",
-          "Tier 2 — Medium limits after stronger verification.",
-          "Tier 3 — Higher limits after admin-approved KYC.",
+          "Tier 1: Low-value trades only.",
+          "Tier 2: Medium limits after stronger verification.",
+          "Tier 3: Higher limits after admin-approved KYC.",
         ],
       },
       {
@@ -593,7 +593,7 @@ export const LEGAL_DOCS: LegalDoc[] = [
     title: "Data Retention Policy",
     shortTitle: "Data Retention",
     description:
-      "How long Akara may keep user data — including KYC records, receipts, and chat records — and why.",
+      "How long Akara may keep user data, including KYC records, receipts, and chat records, and why.",
     intro:
       "This policy explains how long Akara may keep user data and why.",
     category: "Privacy & Data",
@@ -751,7 +751,7 @@ export const LEGAL_DOCS: LegalDoc[] = [
     title: "Acceptable Use Policy",
     shortTitle: "Acceptable Use",
     description:
-      "How users must behave on Akara — acceptable use, conduct rules, unsafe use, and enforcement.",
+      "How users must behave on Akara: acceptable use, conduct rules, unsafe use, and enforcement.",
     intro: "This policy explains how users must behave on Akara.",
     category: "Core Terms",
     sections: [
@@ -867,7 +867,7 @@ export const LEGAL_DOCS: LegalDoc[] = [
     title: "Support and Complaints Policy",
     shortTitle: "Support & Complaints",
     description:
-      "How to contact Akara for help, complaints, disputes, and safety concerns — channels, hours, and response times.",
+      "How to contact Akara for help, complaints, disputes, and safety concerns: channels, hours, and response times.",
     intro:
       "This policy explains how users can contact Akara for help, complaints, disputes, and safety concerns.",
     category: "Support",

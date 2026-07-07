@@ -77,7 +77,7 @@ export function DesignedFor() {
         <SectionHeader
           eyebrow="Designed for"
           title="Built for how money really moves."
-          copy="Six lives Akara was made to fit. Hover a card — this is who it's for."
+          copy="Six lives Akara was made to fit. Hover a card to meet them."
         />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {AUDIENCES.map((audience, i) => {

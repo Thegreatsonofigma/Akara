@@ -34,7 +34,7 @@ export function Hero() {
           <Reveal y={24} delay={0.16}>
             <p className="mt-7 max-w-md text-pretty text-base leading-relaxed text-muted sm:text-lg">
               Akara matches you with verified swap partners on WhatsApp. You
-              pay each other directly, every step is recorded — and Akara
+              pay each other directly, every step is recorded, and Akara
               never holds the money.
             </p>
           </Reveal>

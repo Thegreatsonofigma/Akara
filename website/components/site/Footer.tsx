@@ -42,7 +42,7 @@ export function Footer() {
             </p>
             <div className="mt-2 inline-flex w-fit items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs text-white">
               <span aria-hidden="true" className="size-1.5 rounded-full bg-brand" />
-              No custody — users pay each other directly
+              No custody. Users pay each other directly
             </div>
           </div>
 

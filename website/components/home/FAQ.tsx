@@ -44,7 +44,7 @@ const FAQ_ITEMS: FAQItem[] = [
   {
     question: "What currencies does Akara support?",
     answer:
-      "Akara launches with NGN, RWF, GHS, KES, and XAF — covering Nigeria, Rwanda, Ghana, Kenya, and Cameroon — with room to expand to more African markets.",
+      "Akara launches with NGN, RWF, GHS, KES, and XAF, covering Nigeria, Rwanda, Ghana, Kenya, and Cameroon, with room to expand to more African markets.",
   },
   {
     question: "Is Akara free?",
