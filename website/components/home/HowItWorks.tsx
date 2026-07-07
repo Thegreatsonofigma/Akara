@@ -43,86 +43,116 @@ function MiniChip({
   );
 }
 
-/** Dark wireframe globe with a green glow and looped rotation. */
+/**
+ * Clay-style globe rising from the card's bottom edge — dark sphere,
+ * raised green continents (Africa front and center), drifting meridian
+ * sheen, and floating currency glyphs.
+ */
 function GlowGlobe() {
-  const meridians = Array.from({ length: 8 }, (_, i) => -32 + i * 44);
+  const meridians = Array.from({ length: 10 }, (_, i) => -50 + i * 44);
   return (
     <div
-      className="relative mt-3 flex flex-1 items-center justify-center py-3"
+      className="relative -mx-6 -mb-6 mt-4 h-48 overflow-hidden rounded-b-[15px]"
       aria-hidden="true"
     >
-      <div className="absolute size-40 rounded-full bg-brand/10 blur-2xl" />
+      {/* glow bed */}
+      <div className="absolute bottom-[-90px] left-1/2 h-56 w-72 -translate-x-1/2 rounded-full bg-brand/15 blur-3xl" />
+
+      {/* floating currency glyphs */}
+      <span className="float-a absolute left-5 top-3 rotate-[-14deg] font-numbers text-3xl text-brand/70 drop-shadow-[0_0_14px_rgba(157,255,30,0.5)]">
+        ₦
+      </span>
+      <span className="float-b absolute right-5 top-1 rotate-[12deg] font-numbers text-2xl text-[#8f9dff]/80 drop-shadow-[0_0_14px_rgba(66,43,243,0.6)]">
+        ₵
+      </span>
+
       <svg
-        viewBox="0 0 200 200"
-        className="relative h-44 w-44 drop-shadow-[0_0_24px_rgba(157,255,30,0.2)]"
+        viewBox="0 0 340 340"
+        className="absolute left-1/2 top-4 h-[300px] w-[300px] -translate-x-1/2"
       >
         <defs>
-          <radialGradient id="akr-globe-bg" cx="38%" cy="30%" r="80%">
-            <stop offset="0%" stopColor="#16220b" />
-            <stop offset="55%" stopColor="#0a0f06" />
+          <radialGradient id="akr-sphere" cx="42%" cy="26%" r="85%">
+            <stop offset="0%" stopColor="#1a2410" />
+            <stop offset="45%" stopColor="#0c1108" />
             <stop offset="100%" stopColor="#050505" />
           </radialGradient>
-          <clipPath id="akr-globe-clip">
-            <circle cx="100" cy="100" r="78" />
+          <linearGradient id="akr-land" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#9DFF1E" stopOpacity="0.95" />
+            <stop offset="60%" stopColor="#6cc20e" stopOpacity="0.85" />
+            <stop offset="100%" stopColor="#3f7a04" stopOpacity="0.8" />
+          </linearGradient>
+          <linearGradient id="akr-rim" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(157,255,30,0.55)" />
+            <stop offset="60%" stopColor="rgba(157,255,30,0.12)" />
+            <stop offset="100%" stopColor="rgba(157,255,30,0)" />
+          </linearGradient>
+          <clipPath id="akr-sphere-clip">
+            <circle cx="170" cy="190" r="168" />
           </clipPath>
         </defs>
 
-        <circle
-          cx="100"
-          cy="100"
-          r="78"
-          fill="url(#akr-globe-bg)"
-          stroke="rgba(157,255,30,0.35)"
-          strokeWidth="1.5"
-        />
+        {/* sphere */}
+        <circle cx="170" cy="190" r="168" fill="url(#akr-sphere)" />
 
-        <g clipPath="url(#akr-globe-clip)">
-          <g className="globe-spin">
+        <g clipPath="url(#akr-sphere-clip)">
+          {/* Europe — a coastline band above the Mediterranean gap */}
+          <path
+            d="M 148 94 C 154 80 168 72 182 76 C 190 66 206 62 220 66 C 234 70 250 66 258 76 C 264 84 258 92 248 96 C 254 102 250 110 238 112 C 222 114 204 118 190 114 C 174 110 156 108 148 94 Z"
+            fill="url(#akr-land)"
+            opacity="0.9"
+          />
+          {/* Africa — west bulge, Gulf of Guinea notch, the horn */}
+          <path
+            d="M 122 140 C 138 126 170 120 198 126 C 222 131 242 128 252 140 C 260 150 256 162 266 170 C 276 178 270 190 258 192 C 248 194 244 204 240 216 C 236 228 230 238 224 248 L 160 248 C 156 234 148 226 140 218 C 130 208 126 202 134 200 C 144 198 148 192 142 184 C 120 182 104 172 102 158 C 100 148 110 144 122 140 Z"
+            fill="url(#akr-land)"
+          />
+          {/* Arabia across the Red Sea */}
+          <path
+            d="M 268 148 C 280 140 296 144 306 156 C 316 168 320 184 310 194 C 300 204 286 198 278 186 C 272 176 262 160 268 148 Z"
+            fill="url(#akr-land)"
+            opacity="0.85"
+          />
+          {/* Americas sliver on the left horizon */}
+          <path
+            d="M 6 130 C 18 120 36 122 44 134 C 52 146 48 164 38 172 C 28 180 12 176 6 164 Z"
+            fill="url(#akr-land)"
+            opacity="0.6"
+          />
+
+          {/* drifting meridian sheen */}
+          <g className="globe-spin" opacity="0.5">
             {meridians.map((x) => (
               <ellipse
                 key={x}
                 cx={x}
-                cy="100"
-                rx="30"
-                ry="78"
+                cy="190"
+                rx="40"
+                ry="168"
                 fill="none"
-                stroke="rgba(157,255,30,0.3)"
+                stroke="rgba(157,255,30,0.12)"
                 strokeWidth="1"
               />
             ))}
           </g>
-          <line
-            x1="22"
-            y1="100"
-            x2="178"
-            y2="100"
-            stroke="rgba(157,255,30,0.25)"
-            strokeWidth="1"
-          />
+
+          {/* top-light sheen */}
           <ellipse
-            cx="100"
-            cy="100"
-            rx="78"
-            ry="34"
-            fill="none"
-            stroke="rgba(157,255,30,0.16)"
-          />
-          <ellipse
-            cx="100"
-            cy="100"
-            rx="78"
-            ry="62"
-            fill="none"
-            stroke="rgba(157,255,30,0.1)"
+            cx="140"
+            cy="70"
+            rx="130"
+            ry="60"
+            fill="rgba(255,255,255,0.05)"
           />
         </g>
 
+        {/* rim light */}
         <circle
-          cx="100"
-          cy="100"
-          r="78"
+          cx="170"
+          cy="190"
+          r="168"
           fill="none"
-          stroke="rgba(255,255,255,0.08)"
+          stroke="url(#akr-rim)"
+          strokeWidth="1.5"
         />
       </svg>
     </div>
