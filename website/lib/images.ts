@@ -20,12 +20,12 @@ export const IMAGES = {
     alt: "Young man smiling while looking at his phone",
   },
   students: {
-    src: unsplash("photo-1523050854058-8df90110c9f1"),
-    alt: "Graduates celebrating and throwing their caps",
+    src: unsplash("photo-1523580494863-6f3031224c94"),
+    alt: "Graduates celebrating at a graduation ceremony",
   },
   freelancer: {
-    src: unsplash("photo-1522199755839-a2bacb67c546"),
-    alt: "Freelancer typing on a laptop",
+    src: unsplash("photo-1573497019940-1c28c88b4f3e"),
+    alt: "Woman smiling while working on a laptop",
   },
   traveler: {
     src: unsplash("photo-1436491865332-7a61a109cc05"),
@@ -33,18 +33,14 @@ export const IMAGES = {
   },
   community: {
     src: unsplash("photo-1529156069898-49953e39b3ac"),
-    alt: "Friends laughing together outdoors",
+    alt: "Friends arm in arm looking out at the water",
   },
   team: {
-    src: unsplash("photo-1521737604893-d14cc237f11d"),
-    alt: "A team joining hands over a workspace",
+    src: unsplash("photo-1522202176988-66273c2fd55f"),
+    alt: "People collaborating around a table with laptops",
   },
   worker: {
-    src: unsplash("photo-1560250097-0b93528c311a"),
-    alt: "Professional in a suit, portrait",
-  },
-  market: {
-    src: unsplash("photo-1522202176988-66273c2fd55f"),
-    alt: "People working together around a table",
+    src: unsplash("photo-1573164713988-8665fc963095"),
+    alt: "Woman with headphones focused at her workstation",
   },
 } satisfies Record<string, StockImage>;
