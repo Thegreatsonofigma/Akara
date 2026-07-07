@@ -42,8 +42,11 @@ const SLIDES: Slide[] = [
 ];
 
 /* Aligns the carousel's first card with the page container edge while
-   letting the track bleed to the viewport edge. */
-const EDGE_PAD = "px-[max(1.25rem,calc((100vw-72rem)/2))]";
+   letting the track bleed to the viewport edge. Inline style (not a
+   Tailwind arbitrary value) because calc needs spaces around operators. */
+const EDGE_PAD_STYLE: React.CSSProperties = {
+  paddingInline: "max(1.25rem, calc((100vw - 72rem) / 2))",
+};
 
 export function WhyCarousel() {
   const trackRef = useRef<HTMLDivElement>(null);
@@ -67,7 +70,7 @@ export function WhyCarousel() {
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_50%_50%_at_15%_30%,rgba(157,255,30,0.07),transparent_65%)]"
       />
 
-      <div className={`relative ${EDGE_PAD}`}>
+      <div className="relative" style={EDGE_PAD_STYLE}>
         <Reveal>
           <div className="mb-12 flex flex-wrap items-end justify-between gap-6">
             <div>
@@ -115,13 +118,17 @@ export function WhyCarousel() {
         role="region"
         aria-label="Who Akara is for"
         tabIndex={0}
-        className={`no-scrollbar relative flex snap-x snap-mandatory gap-5 overflow-x-auto pb-2 ${EDGE_PAD}`}
+        className="no-scrollbar relative flex snap-x snap-mandatory gap-5 overflow-x-auto pb-2"
+        style={{
+          ...EDGE_PAD_STYLE,
+          scrollPaddingInline: "max(1.25rem, calc((100vw - 72rem) / 2))",
+        }}
       >
         {SLIDES.map((slide) => (
           <article
             key={slide.eyebrow}
             data-slide
-            className="group relative aspect-[4/3] w-[82vw] shrink-0 snap-start overflow-hidden rounded-[2rem] ring-1 ring-white/10 sm:aspect-[16/11] sm:w-[560px] lg:w-[640px]"
+            className="group relative aspect-[4/3] w-[82vw] shrink-0 snap-start overflow-hidden rounded-[2rem] bg-surface-2 ring-1 ring-white/10 sm:aspect-[16/11] sm:w-[560px] lg:w-[640px]"
           >
             <Image
               src={slide.image.src}

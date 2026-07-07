@@ -20,8 +20,8 @@ export const IMAGES = {
     alt: "Young man smiling while looking at his phone",
   },
   students: {
-    src: unsplash("photo-1523580494863-6f3031224c94"),
-    alt: "Graduates celebrating at a graduation ceremony",
+    src: unsplash("photo-1523240795612-9a054b0db644"),
+    alt: "Two students working through coursework together",
   },
   freelancer: {
     src: unsplash("photo-1573497019940-1c28c88b4f3e"),
