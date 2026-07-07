@@ -1,26 +1,30 @@
-import {
-  IdentificationCard,
-  UserFocus,
-  SealCheck,
-  ArrowRight,
-  Bank,
-} from "@phosphor-icons/react/dist/ssr";
+import Image from "next/image";
+import { SealCheck, ArrowRight, Bank } from "@phosphor-icons/react/dist/ssr";
 import { Container } from "@/components/ui/Container";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { StepCard } from "@/components/ui/StepCard";
 
-function MiniChip({
-  icon: Icon,
-  label,
+function CardShot({
+  src,
+  alt,
+  priorityHint = false,
 }: {
-  icon: typeof IdentificationCard;
-  label: string;
+  src: string;
+  alt: string;
+  priorityHint?: boolean;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-[11px] font-medium text-white/75">
-      <Icon size={13} className="text-brand" aria-hidden="true" />
-      {label}
-    </span>
+    <div className="mt-1 overflow-hidden rounded-xl ring-1 ring-white/10">
+      <Image
+        src={src}
+        alt={alt}
+        width={2000}
+        height={1000}
+        loading={priorityHint ? "eager" : "lazy"}
+        className="h-auto w-full"
+        sizes="(max-width: 1024px) 100vw, 640px"
+      />
+    </div>
   );
 }
 
@@ -44,20 +48,24 @@ export function HowItWorks() {
             copy="Real name, real ID, quick selfie. Once, not every time."
             className="lg:col-span-2"
           >
-            <div className="mt-1 flex flex-wrap gap-2">
-              <MiniChip icon={IdentificationCard} label="ID document" />
-              <MiniChip icon={UserFocus} label="Selfie check" />
-              <MiniChip icon={SealCheck} label="Name confirmed" />
-            </div>
+            <CardShot
+              src="/cards/verified.png"
+              alt="Akara verification success card: You're now Verified! Now you can see available offers, create your own rate listing, set up a payout account and enjoy borderless conversions."
+            />
           </StepCard>
 
           <StepCard
             number="02"
             tone="electric"
             title="List or browse"
-            copy="Say what you have and what you need."
+            copy="Say what you have and what you need — your listing becomes a shareable swap card."
             delay={0.06}
-          />
+          >
+            <CardShot
+              src="/cards/listing.png"
+              alt="Akara swap listing card: 1,000,000 NGN for 1,150,000 RWF, open AKR-LIST-016 on Akara to swap"
+            />
+          </StepCard>
 
           <StepCard
             number="03"
@@ -97,13 +105,12 @@ export function HowItWorks() {
             tone="brand"
             title="Pay each other directly"
             copy="Bank or mobile money, account to account. No middle stop."
-            className="lg:col-span-2"
             delay={0.18}
           >
             <div className="mt-1 flex items-center gap-3 rounded-xl border border-white/[0.07] bg-black/40 px-4 py-3 text-[12px] font-medium text-white/75">
               <span className="flex items-center gap-1.5">
                 <Bank size={14} className="text-white/50" aria-hidden="true" />
-                Your bank
+                Yours
               </span>
               <span
                 aria-hidden="true"
@@ -116,7 +123,7 @@ export function HowItWorks() {
               />
               <span className="flex items-center gap-1.5">
                 <Bank size={14} className="text-white/50" aria-hidden="true" />
-                Their bank
+                Theirs
               </span>
             </div>
           </StepCard>
@@ -125,9 +132,15 @@ export function HowItWorks() {
             number="06"
             tone="electric"
             title="Confirm with proof"
-            copy="Upload the receipt. Both sides confirm. Done."
+            copy="Upload the receipt. Both sides confirm — and the exchange closes with a completion card."
+            className="lg:col-span-2"
             delay={0.18}
-          />
+          >
+            <CardShot
+              src="/cards/exchange-completed.png"
+              alt="Akara exchange completed card: 1,150,000 RWF received, exchanged 1,000,000 NGN for 1,150,000 RWF, marked successful"
+            />
+          </StepCard>
         </div>
       </Container>
     </section>
