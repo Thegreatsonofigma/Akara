@@ -77,7 +77,7 @@ export function DesignedFor() {
         <SectionHeader
           eyebrow="Designed for"
           title="Built for how money really moves."
-          copy="Six lives Akara was made to fit. Hover a card to meet them."
+          copy="Six lives Akara was made to fit. Meet them."
         />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {AUDIENCES.map((audience, i) => {
@@ -90,12 +90,12 @@ export function DesignedFor() {
                     alt={audience.image.alt}
                     fill
                     sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                    className="object-cover grayscale transition-all duration-700 ease-out group-hover:scale-[1.04] group-hover:grayscale-0"
+                    className="object-cover grayscale transition-all duration-700 ease-out group-hover:scale-[1.04] group-hover:grayscale-0 group-active:scale-[1.04] group-active:grayscale-0"
                   />
-                  {/* duotone wash — fades out on hover to reveal true color */}
+                  {/* duotone wash: fades out on hover or tap to reveal true color */}
                   <div
                     aria-hidden="true"
-                    className={`absolute inset-0 mix-blend-multiply transition-opacity duration-700 group-hover:opacity-0 ${tone.wash}`}
+                    className={`absolute inset-0 mix-blend-multiply transition-opacity duration-700 group-hover:opacity-0 group-active:opacity-0 ${tone.wash}`}
                   />
                   {/* black bed for the layered text */}
                   <div

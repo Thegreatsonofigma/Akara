@@ -25,12 +25,12 @@ export function FinalCTA() {
                 A verified partner, a clear trail, and money that only ever
                 moves between the two of you.
               </p>
-              <div className="flex flex-col items-center gap-4 sm:flex-row">
+              <div className="flex w-full max-w-sm flex-col items-stretch gap-3.5 sm:w-auto sm:max-w-none sm:flex-row sm:items-center sm:gap-4">
                 <a
                   href={SITE.whatsappHref}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 rounded-full bg-black px-7 py-3.5 text-base font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-black px-7 py-3.5 text-base font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
                 >
                   <WhatsappLogo
                     size={20}
@@ -42,7 +42,7 @@ export function FinalCTA() {
                 </a>
                 <Link
                   href="/legal/no-custody-risk-disclosure"
-                  className="inline-flex items-center gap-2 rounded-full border border-black/30 px-7 py-3.5 text-base font-semibold text-black transition-colors hover:bg-black/[0.06]"
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-black/30 px-7 py-3.5 text-base font-semibold text-black transition-colors hover:bg-black/[0.06]"
                 >
                   Read the No-Custody Disclosure
                   <ArrowRight size={16} aria-hidden="true" />
