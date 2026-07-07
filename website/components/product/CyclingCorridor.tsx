@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
+import { ArrowsLeftRight } from "@phosphor-icons/react";
 
 const PAIRS = [
   ["NGN", "RWF"],
@@ -12,10 +13,12 @@ const PAIRS = [
 ] as const;
 
 /**
- * Inline headline chip that rolls through live corridor pairs.
+ * Inline headline chip that rolls through live corridor pairs:
+ * gradient hairline ring, glass-dark interior, and a blur-roll
+ * transition inside a measured window so glyphs never clip.
  * Sized in em units so it scales with the surrounding heading.
  */
-export function CyclingCorridor({ light = false }: { light?: boolean }) {
+export function CyclingCorridor() {
   const [index, setIndex] = useState(0);
   const reduced = useReducedMotion();
 
@@ -31,29 +34,38 @@ export function CyclingCorridor({ light = false }: { light?: boolean }) {
   const [from, to] = PAIRS[index];
 
   return (
-    <span
-      className={`relative mx-[0.08em] inline-flex translate-y-[-0.05em] items-center overflow-hidden rounded-[0.6em] border px-[0.3em] py-[0.05em] align-middle ${
-        light
-          ? "border-black/80 bg-black"
-          : "border-brand/35 bg-brand/[0.08]"
-      }`}
-    >
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.span
-          key={`${from}-${to}`}
-          className="inline-flex items-center gap-[0.22em] whitespace-nowrap font-numbers text-[0.62em] leading-none tracking-wide text-brand"
-          initial={reduced ? { opacity: 0 } : { y: "0.9em", opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={reduced ? { opacity: 0 } : { y: "-0.9em", opacity: 0 }}
-          transition={{ duration: 0.4, ease: [0.21, 0.47, 0.32, 0.98] }}
-        >
-          {from}
-          <span aria-hidden="true" className="text-[0.75em]">
-            ⇄
-          </span>
-          {to}
-        </motion.span>
-      </AnimatePresence>
+    <span className="mx-[0.12em] inline-block translate-y-[-0.1em] rounded-full bg-gradient-to-r from-brand/70 via-acid/40 to-brand/70 p-[2px] align-middle text-[0.5em] shadow-[0_0_28px_rgba(157,255,30,0.18)]">
+      <span className="flex items-center rounded-full bg-[#090909] px-[0.75em] py-[0.3em] shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
+        <span className="relative flex h-[1.2em] items-center overflow-hidden">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              key={`${from}-${to}`}
+              className="flex items-center gap-[0.38em] whitespace-nowrap font-numbers leading-none tracking-wide text-brand"
+              initial={
+                reduced
+                  ? { opacity: 0 }
+                  : { y: "1.1em", opacity: 0, filter: "blur(5px)" }
+              }
+              animate={{ y: 0, opacity: 1, filter: "blur(0px)" }}
+              exit={
+                reduced
+                  ? { opacity: 0 }
+                  : { y: "-1.1em", opacity: 0, filter: "blur(5px)" }
+              }
+              transition={{ duration: 0.45, ease: [0.32, 0.72, 0, 1] }}
+            >
+              {from}
+              <ArrowsLeftRight
+                size="0.7em"
+                weight="bold"
+                className="text-white/60"
+                aria-hidden="true"
+              />
+              {to}
+            </motion.span>
+          </AnimatePresence>
+        </span>
+      </span>
     </span>
   );
 }
