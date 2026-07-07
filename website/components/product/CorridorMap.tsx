@@ -15,11 +15,11 @@ const NODES = [
 ];
 
 const ARCS = [
-  { d: "M 400 80 Q 230 80 110 170", color: "#5da000" },
-  { d: "M 400 80 Q 570 80 690 170", color: "#8f9a00" },
+  { d: "M 400 80 Q 230 80 110 170", color: "#9DFF1E" },
+  { d: "M 400 80 Q 570 80 690 170", color: "#E8F500" },
   { d: "M 400 80 Q 240 230 215 315", color: "#FF2D55" },
-  { d: "M 400 80 Q 560 230 585 315", color: "#422BF3" },
-  { d: "M 215 315 Q 400 375 585 315", color: "#000000" },
+  { d: "M 400 80 Q 560 230 585 315", color: "#7b8cff" },
+  { d: "M 215 315 Q 400 375 585 315", color: "#ffffff" },
 ];
 
 export function CorridorMap() {
@@ -43,7 +43,7 @@ export function CorridorMap() {
               key={arc.d}
               d={arc.d}
               stroke={arc.color}
-              strokeOpacity={arc.color === "#000000" ? 0.2 : 0.55}
+              strokeOpacity={arc.color === "#ffffff" ? 0.15 : 0.5}
               strokeWidth={1.5}
               strokeLinecap="round"
               strokeDasharray="2 8"
@@ -56,10 +56,10 @@ export function CorridorMap() {
                 cx={node.x}
                 cy={node.y}
                 r="10"
-                fill="#5da000"
-                fillOpacity="0.25"
+                fill="#9DFF1E"
+                fillOpacity="0.2"
               />
-              <circle cx={node.x} cy={node.y} r="3.5" fill="#3f6d00" />
+              <circle cx={node.x} cy={node.y} r="3.5" fill="#9DFF1E" />
             </g>
           ))}
         </svg>

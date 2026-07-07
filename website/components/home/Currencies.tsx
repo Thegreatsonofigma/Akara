@@ -6,11 +6,10 @@ export function Currencies() {
   return (
     <section
       id="currencies"
-      className="scroll-mt-24 border-t border-black/10 bg-[#F7F6F1] py-20 text-black sm:py-28"
+      className="scroll-mt-24 border-t border-hairline bg-surface py-20 sm:py-28"
     >
       <Container>
         <SectionHeader
-          light
           eyebrow="Currencies"
           accent="acid"
           title="Five currencies. One network."

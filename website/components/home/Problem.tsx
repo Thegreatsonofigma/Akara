@@ -43,53 +43,68 @@ const PROBLEMS = [
   },
 ];
 
-/** The light act — a paper-white editorial break in the black page. */
 export function Problem() {
   return (
-    <section className="relative overflow-hidden bg-[#F2F2ED] py-20 text-black sm:py-28">
-      <div aria-hidden="true" className="absolute inset-0 bg-grain" />
+    <section className="relative overflow-hidden py-20 sm:py-28">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_45%_40%_at_85%_15%,rgba(255,45,85,0.07),transparent_70%)]"
+      />
       <Container className="relative">
-        <Reveal className="mb-14 flex flex-col items-center gap-5 text-center sm:mb-16">
-          <p className="inline-flex w-fit items-center gap-2 rounded-full border border-black/15 bg-black/[0.03] px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-black/55">
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-pink" />
-            The problem
-          </p>
-          <h2 className="max-w-2xl text-balance text-4xl font-black leading-[1.05] tracking-tight sm:text-5xl md:text-6xl">
-            Group chats weren&apos;t built for money.
-          </h2>
-          <p className="max-w-md text-pretty text-base leading-relaxed text-black/55 sm:text-lg">
-            Right now, finding currency means strangers, screenshots, and hope.
-          </p>
-        </Reveal>
-
-        <div className="mx-auto grid max-w-4xl sm:grid-cols-2 sm:gap-x-16">
-          {PROBLEMS.map((problem, i) => (
-            <Reveal key={problem.title} delay={i * 0.05}>
-              <div className="flex items-center gap-4 border-b border-black/10 py-5">
-                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-pink/25 bg-pink/[0.07]">
-                  <problem.icon
-                    size={21}
-                    className="text-pink"
-                    aria-hidden="true"
-                  />
-                </span>
-                <div className="flex flex-1 items-baseline justify-between gap-3">
-                  <p className="text-[15px] font-bold">{problem.title}</p>
-                  <p className="text-right text-[13px] text-black/50">
-                    {problem.copy}
-                  </p>
-                </div>
-              </div>
+        <div className="grid gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:gap-20">
+          <div className="lg:sticky lg:top-28 lg:self-start">
+            <Reveal>
+              <p className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">
+                <span
+                  aria-hidden="true"
+                  className="size-1.5 rounded-full bg-pink"
+                />
+                The problem
+              </p>
+              <h2 className="text-balance text-4xl font-black leading-[1.05] tracking-tight text-white sm:text-5xl md:text-6xl">
+                Group chats weren&apos;t built{" "}
+                <span className="text-pink">for money.</span>
+              </h2>
+              <p className="mt-6 max-w-sm text-pretty text-base leading-relaxed text-muted sm:text-lg">
+                Right now, finding currency means strangers, screenshots, and
+                hope.
+              </p>
+              <p className="mt-10 hidden items-center gap-2 text-sm font-semibold text-white/80 lg:flex">
+                Here&apos;s how Akara fixes it
+                <ArrowDown size={15} aria-hidden="true" className="text-brand" />
+              </p>
             </Reveal>
-          ))}
-        </div>
+          </div>
 
-        <Reveal delay={0.2}>
-          <p className="mt-14 flex items-center justify-center gap-2 text-sm font-semibold">
-            Here&apos;s how Akara fixes it
-            <ArrowDown size={15} aria-hidden="true" className="text-pink" />
-          </p>
-        </Reveal>
+          <div>
+            {PROBLEMS.map((problem, i) => (
+              <Reveal key={problem.title} delay={i * 0.05}>
+                <div className="group flex items-center gap-5 border-b border-white/[0.08] py-6 transition-colors first:border-t hover:border-pink/30">
+                  <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-pink/25 bg-pink/[0.07] transition-colors group-hover:bg-pink/[0.12]">
+                    <problem.icon
+                      size={22}
+                      weight="duotone"
+                      className="text-pink"
+                      aria-hidden="true"
+                    />
+                  </span>
+                  <div className="flex flex-1 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                    <p className="text-lg font-bold text-white">
+                      {problem.title}
+                    </p>
+                    <p className="text-sm text-faint">{problem.copy}</p>
+                  </div>
+                  <span
+                    aria-hidden="true"
+                    className="hidden font-numbers text-sm tracking-widest text-white/25 sm:block"
+                  >
+                    0{i + 1}
+                  </span>
+                </div>
+              </Reveal>
+            ))}
+          </div>
+        </div>
       </Container>
     </section>
   );

@@ -5,20 +5,19 @@ import { Reveal } from "@/components/motion/Reveal";
 
 export function Solution() {
   return (
-    <section className="relative border-t border-black/10 bg-[#F2F2ED] py-20 text-black sm:py-28">
+    <section className="relative border-t border-hairline py-20 sm:py-28">
       <Container>
         <SectionHeader
-          light
           eyebrow="The fix"
           title="All the structure. None of the custody."
           copy="Akara coordinates the swap. The money moves once — straight from them to you."
         />
         <Reveal y={32}>
-          <div className="relative overflow-hidden rounded-[2rem] bg-black p-6 shadow-[0_32px_80px_rgba(0,0,0,0.25)] sm:p-12">
+          <div className="relative overflow-hidden rounded-[2rem] border border-hairline-strong/50 bg-black p-6 sm:p-12">
             <div aria-hidden="true" className="absolute inset-0 bg-grid" />
             <div
               aria-hidden="true"
-              className="absolute inset-0 bg-[radial-gradient(ellipse_50%_40%_at_50%_0%,rgba(157,255,30,0.06),transparent_70%)]"
+              className="absolute inset-0 bg-[radial-gradient(ellipse_50%_40%_at_50%_0%,rgba(157,255,30,0.08),transparent_70%)]"
             />
             <div className="relative">
               <NoCustodyDiagram />

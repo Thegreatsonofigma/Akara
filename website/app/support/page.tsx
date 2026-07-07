@@ -61,8 +61,11 @@ export default function SupportPage() {
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.22em] text-brand">
               Support
             </p>
-            <h1 className="mx-auto max-w-3xl text-balance text-4xl font-bold leading-tight tracking-tight sm:text-5xl">
-              Real help, on the channel you already use.
+            <h1 className="mx-auto max-w-3xl text-balance text-4xl font-black leading-tight tracking-tight sm:text-6xl">
+              Real help, on the channel{" "}
+              <span className="rounded-[0.2em] bg-brand box-decoration-clone px-[0.12em] text-black">
+                you already use.
+              </span>
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-pretty text-base leading-relaxed text-muted sm:text-lg">
               Questions, trade issues, complaints, or safety concerns — reach

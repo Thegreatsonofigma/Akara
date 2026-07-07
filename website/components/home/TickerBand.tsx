@@ -1,14 +1,14 @@
 const ITEMS = [
-  { text: "NO CUSTODY", accent: false },
-  { text: "NGN ⇄ RWF", accent: true },
-  { text: "VERIFIED PEOPLE", accent: false },
-  { text: "GHS ⇄ KES", accent: true },
-  { text: "RECEIPTS ON RECORD", accent: false },
-  { text: "XAF ⇄ NGN", accent: true },
-  { text: "PAY EACH OTHER DIRECTLY", accent: false },
-  { text: "RWF ⇄ NGN", accent: true },
-  { text: "24H DISPUTE WINDOW", accent: false },
-  { text: "KES ⇄ GHS", accent: true },
+  { text: "NO CUSTODY", strong: true },
+  { text: "NGN ⇄ RWF", strong: false },
+  { text: "VERIFIED PEOPLE", strong: true },
+  { text: "GHS ⇄ KES", strong: false },
+  { text: "RECEIPTS ON RECORD", strong: true },
+  { text: "XAF ⇄ NGN", strong: false },
+  { text: "PAY EACH OTHER DIRECTLY", strong: true },
+  { text: "RWF ⇄ NGN", strong: false },
+  { text: "24H DISPUTE WINDOW", strong: true },
+  { text: "KES ⇄ GHS", strong: false },
 ];
 
 function Row() {
@@ -18,12 +18,12 @@ function Row() {
         <span key={item.text} className="flex items-center">
           <span
             className={`whitespace-nowrap font-numbers text-[13px] uppercase tracking-[0.25em] ${
-              item.accent ? "text-brand" : "text-white/55"
+              item.strong ? "text-black" : "text-black/55"
             }`}
           >
             {item.text}
           </span>
-          <span aria-hidden="true" className="mx-6 text-[9px] text-brand/50">
+          <span aria-hidden="true" className="mx-6 text-[9px] text-black/40">
             ✦
           </span>
         </span>
@@ -32,20 +32,17 @@ function Row() {
   );
 }
 
-/** Full-bleed, slightly tilted marquee band — the page's pulse line. */
+/** Full-bleed tilted brand-green ribbon — the page's pulse line. */
 export function TickerBand() {
   return (
-    <section
-      aria-label="Akara at a glance"
-      className="overflow-hidden bg-[#F2F2ED] py-8"
-    >
+    <section aria-label="Akara at a glance" className="overflow-hidden py-8">
       <p className="sr-only">
         No custody. Verified people. Receipts on record. Users pay each other
         directly across NGN, RWF, GHS, KES, and XAF.
       </p>
       <div
         aria-hidden="true"
-        className="relative -mx-[2%] w-[104%] -rotate-[1.2deg] bg-black py-4 shadow-[0_16px_48px_rgba(0,0,0,0.18)]"
+        className="relative -mx-[2%] w-[104%] -rotate-[1.2deg] bg-brand py-4 shadow-[0_16px_64px_rgba(157,255,30,0.25)]"
       >
         <div className="marquee-track flex w-max">
           <Row />

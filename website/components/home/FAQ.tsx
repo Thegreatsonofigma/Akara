@@ -65,12 +65,11 @@ const FAQ_ITEMS: FAQItem[] = [
 
 export function FAQ() {
   return (
-    <section className="border-t border-black/10 bg-[#F2F2ED] py-20 text-black sm:py-28">
+    <section className="border-t border-hairline py-20 sm:py-28">
       <Container>
         <div className="grid gap-12 lg:grid-cols-[0.85fr_1.3fr]">
           <div className="lg:sticky lg:top-28 lg:self-start">
             <SectionHeader
-              light
               align="left"
               className="mb-8"
               eyebrow="FAQ"
@@ -80,7 +79,7 @@ export function FAQ() {
             <Reveal delay={0.1}>
               <Link
                 href="/support"
-                className="group flex items-center gap-4 rounded-2xl border border-black/[0.08] bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)]"
+                className="group flex items-center gap-4 rounded-2xl border border-hairline bg-surface-2 p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-brand/40"
               >
                 <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand">
                   <ChatCircleDots
@@ -90,23 +89,23 @@ export function FAQ() {
                   />
                 </span>
                 <span className="flex-1">
-                  <span className="block text-[15px] font-semibold text-black">
+                  <span className="block text-[15px] font-semibold text-white">
                     Still curious?
                   </span>
-                  <span className="block text-[13px] text-black/50">
+                  <span className="block text-[13px] text-faint">
                     Talk to a human on support.
                   </span>
                 </span>
                 <ArrowRight
                   size={16}
-                  className="text-black/40 transition-transform duration-300 group-hover:translate-x-1 group-hover:text-black"
+                  className="text-muted transition-transform duration-300 group-hover:translate-x-1 group-hover:text-brand"
                   aria-hidden="true"
                 />
               </Link>
             </Reveal>
           </div>
 
-          <FAQAccordion items={FAQ_ITEMS} light />
+          <FAQAccordion items={FAQ_ITEMS} />
         </div>
       </Container>
     </section>

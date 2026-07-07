@@ -30,8 +30,11 @@ export default function LegalIndexPage() {
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.22em] text-brand">
               Legal center
             </p>
-            <h1 className="mx-auto max-w-3xl text-balance text-4xl font-bold leading-tight tracking-tight sm:text-5xl">
-              Akara Legal, Trust, and Safety Center
+            <h1 className="mx-auto max-w-3xl text-balance text-4xl font-black leading-tight tracking-tight sm:text-6xl">
+              Legal, Trust, and{" "}
+              <span className="rounded-[0.2em] bg-brand box-decoration-clone px-[0.12em] text-black">
+                Safety Center.
+              </span>
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-pretty text-base leading-relaxed text-muted sm:text-lg">
               Clear policies for how Akara coordinates peer-to-peer exchange

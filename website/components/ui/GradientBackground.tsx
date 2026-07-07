@@ -1,8 +1,9 @@
 import { cn } from "@/lib/cn";
 
 /**
- * Layered dark backdrop: radial green glow + subtle grid + grain.
- * Purely decorative — all layers are aria-hidden and non-interactive.
+ * Layered dark backdrop: aurora washes (green + electric) + subtle grid
+ * + grain. Purely decorative — all layers are aria-hidden and
+ * non-interactive.
  */
 export function GradientBackground({
   className,
@@ -24,7 +25,7 @@ export function GradientBackground({
       <div
         className={cn(
           "absolute inset-0",
-          position === "top" ? "glow-green" : "glow-green-soft",
+          position === "top" ? "aurora" : "glow-green-soft",
         )}
       />
       {grid && <div className="absolute inset-0 bg-grid" />}

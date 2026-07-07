@@ -72,17 +72,16 @@ const AUDIENCES: Array<{
 
 export function DesignedFor() {
   return (
-    <section className="border-t border-black/10 bg-[#F2F2ED] py-20 text-black sm:py-28">
+    <section className="border-t border-hairline py-20 sm:py-28">
       <Container>
         <SectionHeader
-          light
           eyebrow="Designed for"
           title="Built for how money really moves."
         />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {AUDIENCES.map((audience, i) => (
             <Reveal key={audience.title} delay={i * 0.06} className="h-full">
-              <div className="group relative aspect-[4/5] overflow-hidden rounded-[1.75rem] shadow-[0_2px_8px_rgba(0,0,0,0.08)] transition-shadow duration-500 hover:shadow-[0_24px_64px_rgba(0,0,0,0.22)]">
+              <div className="group relative aspect-[4/5] overflow-hidden rounded-[1.75rem] ring-1 ring-white/10 transition-all duration-500 hover:ring-brand/40 hover:shadow-[0_24px_64px_rgba(0,0,0,0.6)]">
                 <Image
                   src={audience.image.src}
                   alt={audience.image.alt}

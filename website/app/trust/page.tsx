@@ -65,8 +65,11 @@ export default function TrustPage() {
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.22em] text-brand">
               Trust & safety
             </p>
-            <h1 className="mx-auto max-w-3xl text-balance text-4xl font-bold leading-tight tracking-tight sm:text-5xl">
-              Trust is the product.
+            <h1 className="mx-auto max-w-3xl text-balance text-4xl font-black leading-tight tracking-tight sm:text-6xl">
+              Trust is{" "}
+              <span className="rounded-[0.2em] bg-brand box-decoration-clone px-[0.12em] text-black">
+                the product.
+              </span>
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-pretty text-base leading-relaxed text-muted sm:text-lg">
               Akara exists to make peer-to-peer currency exchange coordination
@@ -83,11 +86,11 @@ export default function TrustPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             {PRINCIPLES.map((principle, i) => (
               <Reveal key={principle.title} delay={i * 0.06} className="h-full">
-                <div className="flex h-full flex-col gap-3 rounded-2xl border border-hairline bg-surface-2 p-6 transition-colors duration-300 hover:border-brand/35">
-                  <span className="flex size-11 items-center justify-center rounded-xl border border-brand/20 bg-brand/[0.07]">
+                <div className="flex h-full flex-col gap-3 rounded-2xl border border-hairline bg-surface-2 p-6 transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20">
+                  <span className="flex size-11 items-center justify-center rounded-xl bg-brand text-black">
                     <principle.icon
                       size={22}
-                      className="text-brand"
+                      weight="duotone"
                       aria-hidden="true"
                     />
                   </span>

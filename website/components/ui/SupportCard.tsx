@@ -14,9 +14,9 @@ export function SupportCard({
 }) {
   return (
     <Reveal delay={delay} className="h-full">
-      <div className="flex h-full flex-col gap-4 rounded-2xl border border-hairline bg-surface-2 p-6 transition-all duration-300 hover:border-brand/35">
-        <span className="flex size-11 items-center justify-center rounded-xl border border-brand/20 bg-brand/[0.07]">
-          <IconComponent size={22} className="text-brand" aria-hidden="true" />
+      <div className="flex h-full flex-col gap-4 rounded-2xl border border-hairline bg-surface-2 p-6 transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20">
+        <span className="flex size-11 items-center justify-center rounded-xl bg-brand text-black">
+          <IconComponent size={22} weight="duotone" aria-hidden="true" />
         </span>
         <p className="text-base font-semibold text-white">{title}</p>
         <div className="text-sm leading-relaxed text-muted">{children}</div>
