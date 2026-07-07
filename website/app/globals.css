@@ -236,22 +236,6 @@ body {
     animation: ring-pulse 2.4s ease-out infinite;
   }
 }
-/* Wireframe globe: meridians drift one spacing and loop seamlessly */
-@keyframes globe-spin {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-44px);
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .globe-spin {
-    animation: globe-spin 3.6s linear infinite;
-  }
-}
-
 /* Corridor map: dashes flowing smoothly along the arcs */
 @keyframes dash-flow {
   from {
