@@ -40,7 +40,7 @@ export function CyclingCorridor() {
           <AnimatePresence mode="wait" initial={false}>
             <motion.span
               key={`${from}-${to}`}
-              className="flex items-center gap-[0.38em] whitespace-nowrap font-numbers leading-none tracking-wide text-brand"
+              className="flex items-center gap-[0.38em] whitespace-nowrap font-black leading-none tracking-[0.04em] text-brand"
               initial={
                 reduced
                   ? { opacity: 0 }
