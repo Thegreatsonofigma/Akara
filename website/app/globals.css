@@ -157,6 +157,14 @@ body {
   }
 }
 
+/* Hide scrollbars on carousels while keeping them scrollable */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Corridor marquee — slow horizontal drift, off for reduced motion */
 @keyframes marquee {
   from {

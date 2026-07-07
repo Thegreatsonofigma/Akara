@@ -24,12 +24,12 @@ export const IMAGES = {
     alt: "Graduates celebrating and throwing their caps",
   },
   freelancer: {
-    src: unsplash("photo-1573164713988-8665fc963095"),
-    alt: "Freelancer working on a laptop",
+    src: unsplash("photo-1522199755839-a2bacb67c546"),
+    alt: "Freelancer typing on a laptop",
   },
   traveler: {
-    src: unsplash("photo-1488646953014-85cb44e25828"),
-    alt: "Traveler with a backpack looking out at the journey ahead",
+    src: unsplash("photo-1436491865332-7a61a109cc05"),
+    alt: "View of an airplane wing above the clouds through a cabin window",
   },
   community: {
     src: unsplash("photo-1529156069898-49953e39b3ac"),

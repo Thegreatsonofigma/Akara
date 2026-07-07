@@ -4,7 +4,7 @@ import { Problem } from "@/components/home/Problem";
 import { Solution } from "@/components/home/Solution";
 import { HowItWorks } from "@/components/home/HowItWorks";
 import { Currencies } from "@/components/home/Currencies";
-import { PhotoBand } from "@/components/home/PhotoBand";
+import { WhyCarousel } from "@/components/home/WhyCarousel";
 import { Verification } from "@/components/home/Verification";
 import { NameMatch } from "@/components/home/NameMatch";
 import { ReceiptsDisputes } from "@/components/home/ReceiptsDisputes";
@@ -23,7 +23,7 @@ export default function HomePage() {
       <HowItWorks />
       <Solution />
       <Currencies />
-      <PhotoBand />
+      <WhyCarousel />
       <Verification />
       <NameMatch />
       <ReceiptsDisputes />
