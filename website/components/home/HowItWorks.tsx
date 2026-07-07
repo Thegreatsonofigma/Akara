@@ -43,6 +43,92 @@ function MiniChip({
   );
 }
 
+/** Dark wireframe globe with a green glow and looped rotation. */
+function GlowGlobe() {
+  const meridians = Array.from({ length: 8 }, (_, i) => -32 + i * 44);
+  return (
+    <div
+      className="relative mt-3 flex flex-1 items-center justify-center py-3"
+      aria-hidden="true"
+    >
+      <div className="absolute size-40 rounded-full bg-brand/10 blur-2xl" />
+      <svg
+        viewBox="0 0 200 200"
+        className="relative h-44 w-44 drop-shadow-[0_0_24px_rgba(157,255,30,0.2)]"
+      >
+        <defs>
+          <radialGradient id="akr-globe-bg" cx="38%" cy="30%" r="80%">
+            <stop offset="0%" stopColor="#16220b" />
+            <stop offset="55%" stopColor="#0a0f06" />
+            <stop offset="100%" stopColor="#050505" />
+          </radialGradient>
+          <clipPath id="akr-globe-clip">
+            <circle cx="100" cy="100" r="78" />
+          </clipPath>
+        </defs>
+
+        <circle
+          cx="100"
+          cy="100"
+          r="78"
+          fill="url(#akr-globe-bg)"
+          stroke="rgba(157,255,30,0.35)"
+          strokeWidth="1.5"
+        />
+
+        <g clipPath="url(#akr-globe-clip)">
+          <g className="globe-spin">
+            {meridians.map((x) => (
+              <ellipse
+                key={x}
+                cx={x}
+                cy="100"
+                rx="30"
+                ry="78"
+                fill="none"
+                stroke="rgba(157,255,30,0.3)"
+                strokeWidth="1"
+              />
+            ))}
+          </g>
+          <line
+            x1="22"
+            y1="100"
+            x2="178"
+            y2="100"
+            stroke="rgba(157,255,30,0.25)"
+            strokeWidth="1"
+          />
+          <ellipse
+            cx="100"
+            cy="100"
+            rx="78"
+            ry="34"
+            fill="none"
+            stroke="rgba(157,255,30,0.16)"
+          />
+          <ellipse
+            cx="100"
+            cy="100"
+            rx="78"
+            ry="62"
+            fill="none"
+            stroke="rgba(157,255,30,0.1)"
+          />
+        </g>
+
+        <circle
+          cx="100"
+          cy="100"
+          r="78"
+          fill="none"
+          stroke="rgba(255,255,255,0.08)"
+        />
+      </svg>
+    </div>
+  );
+}
+
 /** WhatsApp "Your listing is live" message, rebuilt as a crafted mockup. */
 function ListingLiveMockup() {
   return (
@@ -219,6 +305,7 @@ export function HowItWorks() {
                 Theirs
               </span>
             </div>
+            <GlowGlobe />
           </StepCard>
 
           <StepCard
