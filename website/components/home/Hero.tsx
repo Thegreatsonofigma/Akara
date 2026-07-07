@@ -48,7 +48,7 @@ export function Hero() {
                 className="inline-flex items-center gap-2 rounded-full bg-brand px-7 py-3.5 text-base font-semibold text-black transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_12px_48px_rgba(157,255,30,0.4)]"
               >
                 <WhatsappLogo size={20} weight="fill" aria-hidden="true" />
-                Start on WhatsApp
+                Try it on WhatsApp
               </a>
               <a
                 href="#how-it-works"

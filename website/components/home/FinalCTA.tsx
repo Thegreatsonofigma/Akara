@@ -38,7 +38,7 @@ export function FinalCTA() {
                     className="text-brand"
                     aria-hidden="true"
                   />
-                  Start on WhatsApp
+                  Try it on WhatsApp
                 </a>
                 <Link
                   href="/legal/no-custody-risk-disclosure"

@@ -77,7 +77,7 @@ export function Navbar() {
               className="hidden items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-black transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(157,255,30,0.35)] md:inline-flex"
             >
               <WhatsappLogo size={18} weight="fill" aria-hidden="true" />
-              Start on WhatsApp
+              Try Akara now
             </a>
 
             <button
@@ -130,7 +130,7 @@ export function Navbar() {
                     onClick={() => setOpen(false)}
                   >
                     <WhatsappLogo size={20} weight="fill" aria-hidden="true" />
-                    Start on WhatsApp
+                    Try Akara now
                   </a>
                 </li>
               </ul>
