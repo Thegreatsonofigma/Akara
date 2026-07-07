@@ -1,14 +1,7 @@
 import Link from "next/link";
 import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
-import type { LegalDoc, LegalCategory } from "@/lib/legal-content";
+import type { LegalDoc } from "@/lib/legal-content";
 import { Reveal } from "@/components/motion/Reveal";
-
-const CATEGORY_TONES: Record<LegalCategory, string> = {
-  "Core Terms": "bg-brand text-black",
-  "Risk & Safety": "bg-pink text-white",
-  "Privacy & Data": "bg-electric text-white",
-  Support: "bg-acid text-black",
-};
 
 export function LegalIndexCard({
   doc,
@@ -23,11 +16,6 @@ export function LegalIndexCard({
         href={`/legal/${doc.slug}`}
         className="group flex h-full flex-col gap-3 rounded-2xl border border-hairline bg-surface-2 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-white/20 hover:shadow-[0_20px_48px_rgba(0,0,0,0.5)]"
       >
-        <p
-          className={`inline-flex w-fit rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.16em] ${CATEGORY_TONES[doc.category]}`}
-        >
-          {doc.category}
-        </p>
         <p className="text-base font-semibold leading-snug text-white">
           {doc.shortTitle}
         </p>

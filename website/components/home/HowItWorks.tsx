@@ -53,7 +53,7 @@ function ListingLiveMockup() {
     >
       <div className="overflow-hidden rounded-lg ring-1 ring-white/10">
         <Image
-          src="/cards/listing.png"
+          src="/cards/listing.webp"
           alt=""
           width={2000}
           height={1000}
@@ -129,7 +129,7 @@ export function HowItWorks() {
             className="lg:col-span-2"
           >
             <CardShot
-              src="/cards/verified.png"
+              src="/cards/verified.webp"
               alt="Akara verification success card: You're now Verified! Now you can see available offers, create your own rate listing, set up a payout account and enjoy borderless conversions."
             />
             <div className="mt-2 flex flex-wrap gap-2">
@@ -230,7 +230,7 @@ export function HowItWorks() {
             delay={0.18}
           >
             <CardShot
-              src="/cards/exchange-completed.png"
+              src="/cards/exchange-completed.webp"
               alt="Akara exchange completed card: 1,150,000 RWF received, exchanged 1,000,000 NGN for 1,150,000 RWF, marked successful"
             />
           </StepCard>

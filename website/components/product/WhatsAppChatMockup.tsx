@@ -54,7 +54,7 @@ export function WhatsAppChatMockup({
         )}
       >
         <span className="flex size-9 items-center justify-center rounded-full bg-black ring-1 ring-brand/40">
-          <Image src="/akara-logo-mark.png" alt="" width={20} height={20} />
+          <Image src="/akara-logo-mark.webp" alt="" width={20} height={20} />
         </span>
         <div className="flex flex-col">
           <span className="flex items-center gap-1.5 text-sm font-semibold text-white">

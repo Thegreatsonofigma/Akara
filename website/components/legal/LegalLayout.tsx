@@ -5,31 +5,10 @@ import {
   ListBullets,
 } from "@phosphor-icons/react/dist/ssr";
 import type { LegalDoc } from "@/lib/legal-content";
-import {
-  BUSINESS,
-  SITE,
-  SHARED_LEGAL_NOTICE,
-  KEY_REMINDERS,
-} from "@/lib/site";
+import { SHARED_LEGAL_NOTICE, KEY_REMINDERS } from "@/lib/site";
 import { Container } from "@/components/ui/Container";
 import { GradientBackground } from "@/components/ui/GradientBackground";
 import { LegalSection, slugifyHeading } from "@/components/legal/LegalSection";
-
-const BUSINESS_ROWS = [
-  { label: "Legal business name", value: BUSINESS.legalName },
-  { label: "Registration number", value: BUSINESS.registrationNumber },
-  { label: "Entity type", value: BUSINESS.entityType },
-  { label: "Business type", value: BUSINESS.businessType },
-  { label: "Country of registration", value: BUSINESS.country },
-  { label: "Date of registration", value: BUSINESS.registrationDate },
-  { label: "Business status", value: BUSINESS.status },
-  { label: "Principal place of business", value: BUSINESS.address },
-  { label: "Public support email", value: SITE.supportEmail },
-  { label: "Temporary email", value: SITE.fallbackEmail },
-  { label: "Website", value: SITE.url },
-  { label: "Governing law", value: BUSINESS.governingLaw },
-  { label: "Regulator", value: BUSINESS.regulator },
-];
 
 function KeyRemindersCard() {
   return (
@@ -105,28 +84,6 @@ export function LegalLayout({ doc }: { doc: LegalDoc }) {
 
         <div className="mt-10 grid gap-12 lg:mt-0 lg:grid-cols-[minmax(0,1fr)_300px]">
           <div className="flex flex-col gap-10">
-            <section aria-labelledby="business-details-heading">
-              <h2
-                id="business-details-heading"
-                className="mb-4 text-xl font-bold text-white sm:text-2xl"
-              >
-                Business Details
-              </h2>
-              <dl className="overflow-hidden rounded-2xl border border-hairline bg-surface-2">
-                {BUSINESS_ROWS.map((row, i) => (
-                  <div
-                    key={row.label}
-                    className={`grid gap-1 px-5 py-3.5 sm:grid-cols-[220px_1fr] sm:gap-4 ${
-                      i > 0 ? "border-t border-hairline" : ""
-                    }`}
-                  >
-                    <dt className="text-[13px] text-faint">{row.label}</dt>
-                    <dd className="text-sm text-white/85">{row.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-
             {doc.sections.map((section, i) => (
               <LegalSection key={section.heading} section={section} index={i} />
             ))}

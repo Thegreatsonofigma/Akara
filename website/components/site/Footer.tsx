@@ -32,7 +32,7 @@ export function Footer() {
         <div className="grid gap-12 md:grid-cols-[1.4fr_1fr_1fr_1.2fr]">
           <div className="flex flex-col gap-4">
             <Link href="/" className="flex items-center gap-2.5" aria-label="Akara home">
-              <Image src="/akara-logo-mark.png" alt="" width={28} height={29} />
+              <Image src="/akara-logo-mark.webp" alt="" width={28} height={29} />
               <span className="text-lg font-bold tracking-[0.18em] text-brand">
                 AKARA
               </span>

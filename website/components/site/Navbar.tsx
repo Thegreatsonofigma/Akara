@@ -36,7 +36,7 @@ export function Navbar() {
             onClick={() => setOpen(false)}
           >
             <Image
-              src="/akara-logo-mark.png"
+              src="/akara-logo-mark.webp"
               alt=""
               width={26}
               height={27}
