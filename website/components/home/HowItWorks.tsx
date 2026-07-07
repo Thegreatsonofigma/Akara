@@ -318,7 +318,7 @@ export function HowItWorks() {
           >
             <CardShot
               src="/cards/exchange-completed.webp"
-              alt="Akara exchange completed card: 1,150,000 RWF received, exchanged 1,000,000 NGN for 1,150,000 RWF, marked successful"
+              alt="Akara exchange completed card: 60,000 RWF received, exchanged 50,000 NGN for 60,000 RWF, marked successful"
             />
           </StepCard>
         </div>
