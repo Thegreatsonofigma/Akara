@@ -2,8 +2,11 @@ import { CurrencyChip } from "@/components/product/CurrencyChip";
 import { CURRENCIES } from "@/lib/site";
 
 /**
- * Illustrated corridor network: five currency nodes joined by dashed arcs.
- * Pure SVG + CSS — no images. Collapses to a chip row on small screens.
+ * Illustrated corridor network: five currency nodes joined by arcs with
+ * energy flowing along them — a faint base line, a smoothly drifting
+ * dash stream, and a dot gliding each route with eased SMIL motion.
+ * Pure SVG + CSS. Collapses to a chip row on small screens; traveling
+ * dots hide and dashes freeze under reduced motion.
  */
 
 const NODES = [
@@ -15,11 +18,11 @@ const NODES = [
 ];
 
 const ARCS = [
-  { d: "M 400 80 Q 230 80 110 170", color: "#9DFF1E" },
-  { d: "M 400 80 Q 570 80 690 170", color: "#E8F500" },
-  { d: "M 400 80 Q 240 230 215 315", color: "#FF2D55" },
-  { d: "M 400 80 Q 560 230 585 315", color: "#7b8cff" },
-  { d: "M 215 315 Q 400 375 585 315", color: "#ffffff" },
+  { id: "akr-arc-1", d: "M 400 80 Q 230 80 110 170", color: "#9DFF1E", dur: "5.6s", begin: "0s" },
+  { id: "akr-arc-2", d: "M 400 80 Q 570 80 690 170", color: "#E8F500", dur: "6.4s", begin: "1.1s" },
+  { id: "akr-arc-3", d: "M 400 80 Q 240 230 215 315", color: "#FF2D55", dur: "7.2s", begin: "2.3s" },
+  { id: "akr-arc-4", d: "M 400 80 Q 560 230 585 315", color: "#7b8cff", dur: "6.8s", begin: "0.6s" },
+  { id: "akr-arc-5", d: "M 215 315 Q 400 375 585 315", color: "#ffffff", dur: "8.4s", begin: "1.8s" },
 ];
 
 export function CorridorMap() {
@@ -39,27 +42,64 @@ export function CorridorMap() {
           fill="none"
         >
           {ARCS.map((arc) => (
-            <path
-              key={arc.d}
-              d={arc.d}
-              stroke={arc.color}
-              strokeOpacity={arc.color === "#ffffff" ? 0.15 : 0.5}
-              strokeWidth={1.5}
-              strokeLinecap="round"
-              strokeDasharray="2 8"
-            />
+            <g key={arc.id}>
+              {/* faint base route */}
+              <path
+                id={arc.id}
+                d={arc.d}
+                stroke={arc.color}
+                strokeOpacity={arc.color === "#ffffff" ? 0.1 : 0.18}
+                strokeWidth={1.5}
+              />
+              {/* drifting dash stream */}
+              <path
+                className="dash-flow"
+                d={arc.d}
+                stroke={arc.color}
+                strokeOpacity={arc.color === "#ffffff" ? 0.3 : 0.6}
+                strokeWidth={1.75}
+                strokeLinecap="round"
+              />
+              {/* gliding dot with eased travel */}
+              <circle
+                className="motion-dot"
+                r="3"
+                fill={arc.color}
+                opacity={arc.color === "#ffffff" ? 0.55 : 0.95}
+              >
+                <animateMotion
+                  dur={arc.dur}
+                  begin={arc.begin}
+                  repeatCount="indefinite"
+                  calcMode="spline"
+                  keyPoints="0;1"
+                  keyTimes="0;1"
+                  keySplines="0.42 0 0.58 1"
+                >
+                  <mpath href={`#${arc.id}`} />
+                </animateMotion>
+              </circle>
+            </g>
           ))}
+
+          {/* calm glowing nodes — no blinking */}
           {NODES.map((node) => (
             <g key={node.code}>
               <circle
-                className="node-pulse"
                 cx={node.x}
                 cy={node.y}
-                r="10"
+                r="11"
                 fill="#9DFF1E"
-                fillOpacity="0.2"
+                fillOpacity="0.12"
               />
-              <circle cx={node.x} cy={node.y} r="3.5" fill="#9DFF1E" />
+              <circle
+                cx={node.x}
+                cy={node.y}
+                r="5.5"
+                fill="#9DFF1E"
+                fillOpacity="0.25"
+              />
+              <circle cx={node.x} cy={node.y} r="3" fill="#9DFF1E" />
             </g>
           ))}
         </svg>

@@ -236,23 +236,29 @@ body {
     animation: ring-pulse 2.4s ease-out infinite;
   }
 }
-@keyframes node-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(1);
+/* Corridor map: dashes flowing smoothly along the arcs */
+@keyframes dash-flow {
+  from {
+    stroke-dashoffset: 0;
   }
-  50% {
-    opacity: 1;
-    transform: scale(1.5);
+  to {
+    stroke-dashoffset: -72;
   }
 }
 
+.dash-flow {
+  stroke-dasharray: 10 26;
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  .node-pulse {
-    animation: node-pulse 3.2s ease-in-out infinite;
-    transform-origin: center;
-    transform-box: fill-box;
+  .dash-flow {
+    animation: dash-flow 3.4s linear infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-dot {
+    display: none;
   }
 }
 
