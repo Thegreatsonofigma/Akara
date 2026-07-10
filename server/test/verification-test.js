@@ -17,6 +17,8 @@ process.env.COIN_PROFILE_API_URL = "replace_with_disabled";
 process.env.COIN_PROFILE_API_KEY = "replace_with_disabled";
 process.env.COIN_PROFILE_USERNAME = "replace_with_disabled";
 process.env.AKARA_TYPING_INDICATOR = "false";
+process.env.AKARA_SECURITY_FLOW_ID = "replace_with_disabled";
+process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
 
 const path = require("node:path");
 
@@ -57,9 +59,21 @@ listingCard.sendVerificationSuccessCard = async (to) => {
   return null;
 };
 
+// Menu list after tier-1 success: capture payloads instead of sending.
+const listSends = [];
+whatsapp.sendWhatsAppList = async (to, payload) => {
+  listSends.push({ to, payload });
+  return null;
+};
+function lastListBody() {
+  return listSends.length ? String(listSends[listSends.length - 1].payload?.body || "") : "";
+}
+
 const { buildReply } = require("../router");
+const { config } = require("../config");
 const { findOrCreateUser } = require("../db/users");
 const { getSession } = require("../db/sessions");
+const { startVerification, handleVerificationFlowResponse } = require("../flows/verification");
 
 const { __table, __reset } = fakeSupabase;
 
@@ -280,24 +294,37 @@ async function run() {
   check("account number advances to review", reply.includes("Review payout detail"), reply);
   check("review shows the matched name", reply.includes("John Doe"), reply);
 
+  reply = await send(U1, "edit");
+  check("unsaved payout can open edit menu", reply.includes("Edit NGN payout"), reply);
+
+  reply = await send(U1, "name");
+  check("edit name offers the verified quick option", reply.includes("Quick option") && reply.includes("John Doe"), reply);
+
+  reply = await send(U1, "1");
+  check("edited verified name returns to payout review", reply.includes("Review payout detail") && reply.includes("John Doe"), reply);
+
   reply = await send(U1, "save payout");
   check("payout saved", reply.includes("Payout detail saved"), reply);
   check("saved payout asks another or submit", reply.includes("another") && reply.includes("submit"), reply);
   check("matched name auto-verifies tier 1", userRow(U1).verification_status === "verified_auto", userRow(U1).verification_status);
   check("matched name sets score 65+", Number(userRow(U1).verification_score) >= 65, userRow(U1).verification_score);
 
+  reply = await send(U1, "edit payout");
+  check("saved payout locked until verification completes", reply.includes("Payout already saved") && reply.includes("profile is approved"), reply);
+
   reply = await send(U1, "what now");
   check("gibberish at payment_more re-prompts", reply.includes("another") && reply.includes("submit"), reply);
 
+  const listSendsBeforeSubmit = listSends.length;
   reply = await send(U1, "no more");
-  check("'no more' submits instead of adding another", reply.includes("Verification submitted"), reply);
-  check("tier 1 copy on submission", reply.includes("Tier 1"), reply);
+  check("'no more' submits with the menu list", reply === null && listSends.length === listSendsBeforeSubmit + 1, JSON.stringify({ reply, listSends: listSends.length }));
+  check("tier 1 submission opens menu", lastListBody().includes("Find offers and trade with more confidence") && lastListBody().includes("make offer") && lastListBody().includes("find offers"), lastListBody());
   check("request finalized as tier 1", requestsFor(U1)[0].automated_decision === "tier_1_approved", requestsFor(U1)[0].automated_decision);
   check("session cleared after submission", (await sessionState(U1)).flow === null);
   check("success card sent once", cardSends.length === 1, JSON.stringify(cardSends));
 
   reply = await send(U1, "menu");
-  check("tier 1 user reaches the menu", reply.includes("Akara menu"), reply);
+  check("tier 1 user reaches the menu", reply === null && lastListBody().includes("Find offers and trade with more confidence"), JSON.stringify({ reply, body: lastListBody() }));
 
   // ---------- mismatched payout name → manual review
   scenario("payout mismatched name");
@@ -384,7 +411,7 @@ async function run() {
   check("decline with saved payouts is not a dead end", (await sessionState(U3)).step === "payment_more");
 
   reply = await send(U3, "submit");
-  check("submit after decline completes verification", reply.includes("Verification submitted"), reply);
+  check("submit after decline completes verification", reply === null && lastListBody().includes("Find offers and trade with more confidence"), JSON.stringify({ reply, body: lastListBody() }));
 
   // ---------- documents AND payout are both required to complete
   scenario("incomplete verification cannot complete");
@@ -425,8 +452,8 @@ async function run() {
   check("selfie after redirect returns to payout menu", reply.includes("Payout details"), reply);
 
   reply = await send(U5, "submit");
-  check("complete verification now submits", reply.includes("Verification submitted"), reply);
-  check("late documents still earn tier 1", reply.includes("Tier 1"), reply);
+  check("complete verification now submits", reply === null && lastListBody().includes("Find offers and trade with more confidence"), JSON.stringify({ reply, body: lastListBody() }));
+  check("late documents still earn tier 1", userRow(U5).verification_status === "verified_auto", userRow(U5).verification_status);
   check("user verified only after documents and payout", userRow(U5).verification_status === "verified_auto", userRow(U5).verification_status);
 
   // ---------- cancel then resume without duplicates
@@ -447,6 +474,45 @@ async function run() {
   check("verify after cancel resumes the flow", reply.toLowerCase().includes("legal name"), reply);
   check("resume reuses the open request", requestsFor(U4).length === 1, JSON.stringify(requestsFor(U4).map((row) => row.status)));
   check("resume restores the flow", (await sessionState(U4)).flow === "verification");
+
+  // ---------- native WhatsApp Flow tray
+  scenario("verification WhatsApp Flow");
+  const U6 = "250711000006";
+  const oldFlowId = config.akaraVerificationFlowId;
+  config.akaraVerificationFlowId = "flow_verification_test";
+
+  try {
+    const flowUser = await findOrCreateUser(U6, "Flow User");
+    const trayReply = await startVerification(flowUser);
+    check("verification can start as WhatsApp Flow", trayReply?.type === "whatsapp_flow", JSON.stringify(trayReply));
+    check("verification Flow uses KYC screen", trayReply?.flow?.screen === "KYC_DETAILS", JSON.stringify(trayReply?.flow || {}));
+
+    const token = trayReply.flow.flowToken;
+    reply = await handleVerificationFlowResponse({
+      from: U6,
+      flowToken: token,
+      flowResponse: {
+        mode: "verification",
+        verification_token: token,
+        legal_name: "Flow Test User",
+        nationality: "NG",
+        residence_country: "RW",
+        city: "Kigali",
+        id_type: "passport",
+        id_country: "NG",
+        id_number: "A1234567",
+      },
+    }, flowUser);
+
+    check("Flow response advances to ID upload", reply.includes("ID document") && reply.includes("front/main page"), reply);
+    check("Flow legal name saved", userRow(U6).legal_name === "Flow Test User", userRow(U6).legal_name);
+    check("Flow country ids decoded", userRow(U6).nationality === "Nigeria" && userRow(U6).residence_country === "Rwanda", JSON.stringify(userRow(U6)));
+    check("Flow ID type saved", requestsFor(U6)[0]?.id_type === "passport", JSON.stringify(requestsFor(U6)[0]));
+    check("Flow ID number hashed", String(requestsFor(U6)[0]?.extracted_id_hash || "").length === 64, requestsFor(U6)[0]?.extracted_id_hash);
+    check("Flow parks user at document upload", (await sessionState(U6)).step === "document_front");
+  } finally {
+    config.akaraVerificationFlowId = oldFlowId;
+  }
 }
 
 run()

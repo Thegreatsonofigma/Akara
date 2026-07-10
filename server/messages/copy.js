@@ -14,8 +14,8 @@ function menuOptionLines() {
 
 function mainMenu() {
   return [
-    title("Akara menu"),
-    caption("Choose a number or type the action."),
+    title("Find offers and trade with more confidence"),
+    caption("You trade directly, Akara keeps it fair. Post a rate, find a deal, or reserve one — select from the menu to start."),
     "",
     ...menuOptionLines(),
     "",
@@ -109,7 +109,7 @@ function thanksReply(user) {
 function wellbeingReply(user) {
   const name = firstName(user);
   return [
-    `I'm good${name ? `, ${name}` : ""} 😄 Thanks for asking.`,
+    `I dey alright${name ? `, ${name}` : ""} 😄 Thanks for asking.`,
     "",
     "What can I help you exchange today?",
     "",

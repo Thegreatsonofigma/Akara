@@ -21,7 +21,7 @@ const {
 const { isVerified } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { displayReference, listingShareUrl, listingTypeLabel } = require("../db/listings");
-const { explainMissingListing } = require("../messages/copy");
+const { explainMissingListing, mainMenu } = require("../messages/copy");
 const { prepareListingPreview, reserveListing } = require("./listing");
 
 const LISTING_SEARCH_SELECT = "listings?select=id,listing_code,owner_user_id,have_currency,want_currency,have_amount,want_amount,rate,listing_type,created_at,users!listings_owner_user_id_fkey(completed_deals_count,verification_status)";
@@ -51,7 +51,23 @@ function searchPromptForStep(step, details = {}) {
   return "Tell me what you need.";
 }
 
+function hasActionableSearchDetails(details = {}) {
+  return Boolean(
+    (details.have_currency && details.want_currency)
+    || (details.want_currency && (details.want_amount || details.amount))
+    || (details.have_currency && (details.have_amount || details.amount)),
+  );
+}
+
 async function continueSearchOrShowMatches(user, details) {
+  if (details.want_currency && (details.want_amount || details.amount) && !details.have_currency) {
+    return showNeedOnlyOfferMatches(user, details);
+  }
+
+  if (details.have_currency && (details.have_amount || details.amount) && !details.want_currency) {
+    return showHaveOnlyOfferMatches(user, details);
+  }
+
   if (details.have_currency && details.want_currency && details.max_want_amount) {
     return showOfferMatches(user, details);
   }
@@ -61,6 +77,192 @@ async function continueSearchOrShowMatches(user, details) {
 
   await upsertSession(user, user.whatsapp_phone, "find_offer", step, details);
   return searchPromptForStep(step, details);
+}
+
+function needOnlyAmount(details = {}) {
+  return moneyNumber(details.want_amount || details.amount || 0);
+}
+
+function sortNeedOnlyListings(listings, requestedAmount) {
+  return listings.slice().sort((a, b) => {
+    const aFlexible = a.listing_type === "negotiable" ? 0 : 1;
+    const bFlexible = b.listing_type === "negotiable" ? 0 : 1;
+    if (aFlexible !== bFlexible) return aFlexible - bFlexible;
+
+    const aDistance = Math.max(0, moneyNumber(a.have_amount) - requestedAmount);
+    const bDistance = Math.max(0, moneyNumber(b.have_amount) - requestedAmount);
+    if (aDistance !== bDistance) return aDistance - bDistance;
+
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  });
+}
+
+async function showNeedOnlyOfferMatches(user, context) {
+  const requestedAmount = needOnlyAmount(context);
+  const wantedCurrency = context.want_currency;
+
+  const query = [
+    LISTING_SEARCH_SELECT,
+    "status=eq.active",
+    `have_currency=eq.${filterValue(wantedCurrency)}`,
+    `have_amount=gte.${filterValue(requestedAmount)}`,
+    `owner_user_id=neq.${filterValue(user.id)}`,
+    "order=created_at.desc",
+    "limit=20",
+  ].filter(Boolean).join("&");
+
+  const listings = sortNeedOnlyListings(
+    (await supabaseRequest(query)).filter((listing) => listing.owner_user_id !== user.id),
+    requestedAmount,
+  ).slice(0, 5);
+
+  if (!listings.length) {
+    await upsertSession(user, user.whatsapp_phone, "find_offer", "have_currency", {
+      ...context,
+      want_currency: wantedCurrency,
+      want_amount: requestedAmount,
+      amount: requestedAmount,
+    });
+
+    return [
+      title(`No ${wantedCurrency} offer yet`),
+      `I could not find a live listing that can send ${formatMoney(requestedAmount, wantedCurrency)} right now.`,
+      "",
+      "What currency do you have to offer for it?",
+      "",
+      currencyHelpLine(wantedCurrency),
+    ].join("\n");
+  }
+
+  const resultMap = {};
+  listings.forEach((listing, index) => {
+    resultMap[String(index + 1)] = listing.id;
+  });
+
+  await upsertSession(user, user.whatsapp_phone, "search_results", "select", {
+    ...context,
+    want_currency: wantedCurrency,
+    want_amount: requestedAmount,
+    amount: requestedAmount,
+    result_map: resultMap,
+  });
+
+  return [
+    title(`${wantedCurrency} offers for ${formatMoney(requestedAmount, wantedCurrency)}`),
+    caption("Flexible offers appear first when they can cover what you need."),
+    "",
+    listings.map((listing, index) => {
+      const owner = listing.users || {};
+      const shareUrl = listingShareUrl(listing.listing_code);
+      return [
+        title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
+        labeled("They offer", formatMoney(listing.have_amount, listing.have_currency)),
+        labeled("They want", formatMoney(listing.want_amount, listing.want_currency)),
+        labeled("Rate", `1 ${listing.want_currency} gets ${(Number(listing.have_amount) / Number(listing.want_amount)).toFixed(4)} ${listing.have_currency}`),
+        labeled("Terms", listingTypeLabel(listing.listing_type)),
+        labeled("Owner record", `${owner.completed_deals_count || 0} completed`),
+        shareUrl ? labeled("Link", shareUrl) : "",
+      ].filter(Boolean).join("\n");
+    }).join("\n\n"),
+    "",
+    title("Actions"),
+    `${action("1")} or ${action("open 1")} to start an Akara Trade`,
+    `${action("negotiate 1")} if the listing is flexible`,
+    `${action("search again")} to try another request`,
+  ].join("\n");
+}
+
+function haveOnlyAmount(details = {}) {
+  return moneyNumber(details.have_amount || details.amount || 0);
+}
+
+function sortHaveOnlyListings(listings, offeredAmount) {
+  return listings.slice().sort((a, b) => {
+    const aFlexible = a.listing_type === "negotiable" ? 0 : 1;
+    const bFlexible = b.listing_type === "negotiable" ? 0 : 1;
+    if (aFlexible !== bFlexible) return aFlexible - bFlexible;
+
+    const aDistance = Math.max(0, offeredAmount - moneyNumber(a.want_amount));
+    const bDistance = Math.max(0, offeredAmount - moneyNumber(b.want_amount));
+    if (aDistance !== bDistance) return aDistance - bDistance;
+
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  });
+}
+
+async function showHaveOnlyOfferMatches(user, context) {
+  const offeredAmount = haveOnlyAmount(context);
+  const offeredCurrency = context.have_currency;
+
+  const query = [
+    LISTING_SEARCH_SELECT,
+    "status=eq.active",
+    `want_currency=eq.${filterValue(offeredCurrency)}`,
+    `want_amount=lte.${filterValue(offeredAmount)}`,
+    `owner_user_id=neq.${filterValue(user.id)}`,
+    "order=created_at.desc",
+    "limit=20",
+  ].filter(Boolean).join("&");
+
+  const listings = sortHaveOnlyListings(
+    (await supabaseRequest(query)).filter((listing) => listing.owner_user_id !== user.id),
+    offeredAmount,
+  ).slice(0, 5);
+
+  if (!listings.length) {
+    await upsertSession(user, user.whatsapp_phone, "find_offer", "want_currency", {
+      ...context,
+      have_currency: offeredCurrency,
+      have_amount: offeredAmount,
+      amount: offeredAmount,
+    });
+
+    return [
+      title(`No one needs ${offeredCurrency} yet`),
+      `I could not find a live listing that needs up to ${formatMoney(offeredAmount, offeredCurrency)} right now.`,
+      "",
+      "What currency do you need in return?",
+      "",
+      currencyHelpLine(offeredCurrency),
+    ].join("\n");
+  }
+
+  const resultMap = {};
+  listings.forEach((listing, index) => {
+    resultMap[String(index + 1)] = listing.id;
+  });
+
+  await upsertSession(user, user.whatsapp_phone, "search_results", "select", {
+    ...context,
+    have_currency: offeredCurrency,
+    have_amount: offeredAmount,
+    amount: offeredAmount,
+    result_map: resultMap,
+  });
+
+  return [
+    title(`Offers that need ${formatMoney(offeredAmount, offeredCurrency)}`),
+    caption("Flexible offers appear first when your amount can cover what they need."),
+    "",
+    listings.map((listing, index) => {
+      const owner = listing.users || {};
+      const shareUrl = listingShareUrl(listing.listing_code);
+      return [
+        title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
+        labeled("They offer", formatMoney(listing.have_amount, listing.have_currency)),
+        labeled("They want", formatMoney(listing.want_amount, listing.want_currency)),
+        labeled("Rate", `1 ${listing.want_currency} gets ${(Number(listing.have_amount) / Number(listing.want_amount)).toFixed(4)} ${listing.have_currency}`),
+        labeled("Terms", listingTypeLabel(listing.listing_type)),
+        labeled("Owner record", `${owner.completed_deals_count || 0} completed`),
+        shareUrl ? labeled("Link", shareUrl) : "",
+      ].filter(Boolean).join("\n");
+    }).join("\n\n"),
+    "",
+    title("Actions"),
+    `${action("1")} or ${action("open 1")} to start an Akara Trade`,
+    `${action("negotiate 1")} if the listing is flexible`,
+    `${action("search again")} to try another request`,
+  ].join("\n");
 }
 
 async function showOfferMatches(user, context) {
@@ -195,7 +397,7 @@ async function showOfferMatches(user, context) {
 }
 
 async function showBrowseOffers(user, currency = null, page = 0) {
-  const pageSize = 5;
+  const pageSize = 10;
   const offset = Math.max(0, Number(page || 0)) * pageSize;
   const query = [
     LISTING_SEARCH_SELECT,
@@ -291,7 +493,8 @@ async function handleFindOffer(text, user, session) {
       title("No problem"),
       "",
       "I have closed that search.",
-      "Tell me what you need next whenever you are ready.",
+      "",
+      mainMenu(),
     ].join("\n");
   }
 
@@ -314,9 +517,10 @@ async function handleFindOffer(text, user, session) {
       return prepareListingPreview(user, context.suggested_listing);
     }
 
-    if (hasDirectionalExchangeText(text) || parseCurrencyAmountPairs(text).length) {
-      const details = mergePresentDetails({}, parseSearchDetails(text));
-      return continueSearchOrShowMatches(user, details);
+    const details = parseSearchDetails(text);
+    if (hasDirectionalExchangeText(text) || parseCurrencyAmountPairs(text).length || hasActionableSearchDetails(details)) {
+      const mergedDetails = mergePresentDetails({}, details);
+      return continueSearchOrShowMatches(user, mergedDetails);
     }
 
     if (/\b(search|find|show|look)\b/i.test(text)) {
@@ -351,6 +555,13 @@ async function handleFindOffer(text, user, session) {
   if (hasDirectionalExchangeText(text)) {
     const details = mergePresentDetails(context, parseSearchDetails(text));
     return continueSearchOrShowMatches(user, details);
+  }
+
+  {
+    const details = parseSearchDetails(text);
+    if (hasActionableSearchDetails(details)) {
+      return continueSearchOrShowMatches(user, details);
+    }
   }
 
   if (step === "have_currency") {
@@ -410,13 +621,14 @@ async function handleSearchResults(text, user, session) {
       title("No problem"),
       "",
       "I have closed that selection.",
-      "Tell me what you need next whenever you are ready.",
+      "",
+      mainMenu(),
     ].join("\n");
   }
 
-  if (hasDirectionalExchangeText(text) || parseCurrencyAmountPairs(text).length) {
+  {
     const details = parseSearchDetails(text);
-    if (details.have_currency && details.want_currency) {
+    if (hasDirectionalExchangeText(text) || parseCurrencyAmountPairs(text).length || hasActionableSearchDetails(details)) {
       return continueSearchOrShowMatches(user, details);
     }
   }

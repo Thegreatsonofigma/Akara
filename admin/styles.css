@@ -203,6 +203,25 @@ button {
   color: var(--accent);
 }
 
+.nav-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.nav-badge[hidden] {
+  display: none;
+}
+
 .nav-icon {
   position: relative;
   display: grid;
@@ -846,6 +865,26 @@ td {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.payout-pills {
+  display: flex;
+  max-width: 260px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.payout-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .dispute-actions {

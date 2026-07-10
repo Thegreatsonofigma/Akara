@@ -158,8 +158,8 @@ function parseCurrencyAmountPairs(input) {
   const pairs = [];
   const seen = new Set();
 
-  const amountBefore = new RegExp(`(${amountPattern})\\s*(${currencyAlternation})\\b`, "gi");
-  const currencyBefore = new RegExp(`\\b(${currencyAlternation})\\s*(${amountPattern})`, "gi");
+  const amountBefore = new RegExp(`(${amountPattern})\\s*(?:worth\\s+of\\s+|in\\s+|of\\s+)?(${currencyAlternation})\\b`, "gi");
+  const currencyBefore = new RegExp(`\\b(${currencyAlternation})\\s*(?:of\\s+|worth\\s+)?(${amountPattern})`, "gi");
 
   for (const regex of [amountBefore, currencyBefore]) {
     let match;

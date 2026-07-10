@@ -3,9 +3,9 @@
 // process memory: losing it on restart only costs conversational context,
 // never money or state, and the session table still holds the flow state.
 
-const MAX_TURNS = 24;
+const MAX_TURNS = 34;
 const MAX_USERS = 2000;
-const MAX_TEXT_LENGTH = 500;
+const MAX_TEXT_LENGTH = 1000;
 
 const conversations = new Map(); // phone -> [{ role: "user"|"assistant", text, at }]
 
@@ -28,7 +28,7 @@ function recordMessage(phone, role, text) {
   }
 }
 
-function recentHistory(phone, limit = 12) {
+function recentHistory(phone, limit = 20) {
   const turns = conversations.get(String(phone || "").trim()) || [];
   return turns.slice(-limit);
 }
@@ -36,7 +36,7 @@ function recentHistory(phone, limit = 12) {
 // Compact transcript for the interpreter prompt. Long Akara replies (menus,
 // offer lists) are trimmed harder than user messages: the model mostly needs
 // to know what was asked and offered, not every formatted line.
-function historyTranscript(phone, limit = 12) {
+function historyTranscript(phone, limit = 20) {
   return recentHistory(phone, limit)
     .map((turn) => {
       const maxLength = turn.role === "user" ? 300 : 400;

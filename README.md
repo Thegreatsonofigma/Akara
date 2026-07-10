@@ -10,6 +10,18 @@ Akara does not hold funds in the MVP. It provides verified matching, transaction
 
 This keeps the first version lighter while leaving room for a regulated wallet or escrow model later.
 
+## Website
+
+The marketing site and legal center live in [`website/`](website/README.md) —
+a Next.js app with the landing page, trust and support pages, and the full
+legal policy system for https://tryakara.com.
+
+```bash
+cd website
+npm install
+npm run dev
+```
+
 ## Core Artifacts
 
 - [MVP build plan](docs/mvp-build-plan.md)

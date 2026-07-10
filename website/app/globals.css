@@ -1,0 +1,274 @@
+@import "tailwindcss";
+
+:root {
+  --font-main: var(--font-campton), "Inter", "Satoshi", "Helvetica Neue", Arial,
+    sans-serif;
+  --font-nums: var(--font-coolvetica), "Space Grotesk", "Inter", Arial,
+    sans-serif;
+}
+
+@theme inline {
+  --font-sans: var(--font-main);
+  --font-numbers: var(--font-nums);
+
+  --color-brand: #9dff1e;
+  --color-pink: #ff2d55;
+  --color-alert: #f80000;
+  --color-acid: #e8f500;
+  --color-electric: #422bf3;
+
+  --color-surface: #0b0b0b;
+  --color-surface-2: #101010;
+  --color-surface-3: #141414;
+
+  --color-hairline: rgba(255, 255, 255, 0.08);
+  --color-hairline-strong: rgba(157, 255, 30, 0.35);
+  --color-muted: rgba(255, 255, 255, 0.68);
+  --color-faint: rgba(255, 255, 255, 0.46);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  background-color: #050505;
+  color: #ffffff;
+  font-family: var(--font-main);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Aurora backdrop: green + electric washes on near-black */
+.aurora {
+  background:
+    radial-gradient(
+      ellipse 55% 45% at 18% 8%,
+      rgba(157, 255, 30, 0.12),
+      transparent 65%
+    ),
+    radial-gradient(
+      ellipse 45% 40% at 88% 30%,
+      rgba(66, 43, 243, 0.12),
+      transparent 65%
+    ),
+    radial-gradient(
+      ellipse 60% 50% at 55% 110%,
+      rgba(157, 255, 30, 0.05),
+      transparent 70%
+    );
+}
+
+::selection {
+  background-color: #9dff1e;
+  color: #000000;
+}
+
+:focus-visible {
+  outline: 2px solid #9dff1e;
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* Soft radial green glow used behind heroes and feature moments */
+.glow-green {
+  background: radial-gradient(
+    ellipse 60% 45% at 50% 0%,
+    rgba(157, 255, 30, 0.14) 0%,
+    rgba(157, 255, 30, 0.05) 40%,
+    transparent 70%
+  );
+}
+
+.glow-green-soft {
+  background: radial-gradient(
+    ellipse 50% 40% at 50% 100%,
+    rgba(157, 255, 30, 0.08) 0%,
+    transparent 70%
+  );
+}
+
+/* Subtle grid texture */
+.bg-grid {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(
+    ellipse 80% 60% at 50% 0%,
+    black 30%,
+    transparent 75%
+  );
+}
+
+/* Light-surface grid variant */
+.bg-grid-light {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(
+    ellipse 80% 60% at 50% 0%,
+    black 30%,
+    transparent 75%
+  );
+}
+
+/* Fine grain to keep large dark surfaces from banding */
+.bg-grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
+  opacity: 0.05;
+}
+
+/* Slow, gentle float for product cards. Disabled for reduced motion. */
+@keyframes float-a {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes float-b {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .float-a {
+    animation: float-a 9s ease-in-out infinite;
+  }
+  .float-b {
+    animation: float-b 11s ease-in-out infinite;
+    animation-delay: -3s;
+  }
+}
+
+/* Hide scrollbars on carousels while keeping them scrollable */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Corridor marquee — slow horizontal drift, off for reduced motion */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee-mask {
+  mask-image: linear-gradient(
+    90deg,
+    transparent,
+    black 12%,
+    black 88%,
+    transparent
+  );
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent,
+    black 12%,
+    black 88%,
+    transparent
+  );
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .marquee-track {
+    animation: marquee 36s linear infinite;
+  }
+}
+
+/* Money pulse traveling the direct-payment rail */
+@keyframes rail-pulse {
+  0% {
+    left: 0%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    left: calc(100% - 10px);
+    opacity: 0;
+  }
+}
+
+/* Expanding ring around the Akara node */
+@keyframes ring-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rail-pulse {
+    animation: rail-pulse 2.8s ease-in-out infinite;
+  }
+  .ring-pulse {
+    animation: ring-pulse 2.4s ease-out infinite;
+  }
+}
+/* Corridor map: dashes flowing smoothly along the arcs */
+@keyframes dash-flow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -72;
+  }
+}
+
+.dash-flow {
+  stroke-dasharray: 10 26;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dash-flow {
+    animation: dash-flow 3.4s linear infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-dot {
+    display: none;
+  }
+}
+
+/* Dotted coordination lines in the no-custody diagram */
+.dashed-line {
+  stroke-dasharray: 4 6;
+}
+
+/* Legal prose rhythm */
+.legal-prose p {
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.8;
+}
