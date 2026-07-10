@@ -59,6 +59,9 @@ const statusLabels = {
   watch: "Watch",
   limited: "Limited",
   open: "Open",
+  flagged_user: "Flagged user",
+  verification: "Verification",
+  dispute: "Dispute",
 };
 
 const disputeOutcomes = {
@@ -169,7 +172,10 @@ function renderOverview(data) {
   $("#metric-deals").textContent = data.totals.deals;
   $("#metric-completed").textContent = data.totals.completedDeals;
   $("#metric-verifications").textContent = data.totals.pendingVerifications;
+  renderNavBadge("#nav-verifications-badge", data.totals.pendingVerifications);
+  renderNavBadge("#nav-users-badge", data.totals.flaggedUsers);
   $("#metric-disputes").textContent = data.totals.openDisputes;
+  renderNavBadge("#nav-disputes-badge", data.totals.openDisputes);
   renderLineChart("#activity-chart", data.charts?.activity || [], "deals");
   renderDonutChart("#offer-status-chart", data.charts?.offerStatus || {});
   renderVerticalBarChart("#deal-status-chart", data.charts?.dealStatus || {});
@@ -185,10 +191,37 @@ function renderOverview(data) {
     meta: `${money(deal.have_amount, deal.have_currency)} -> ${money(deal.want_amount, deal.want_currency)} · ${date(deal.created_at)}`,
   }));
 
+  $("#review-queue").innerHTML = listRows(data.recent.reviewQueue || [], (item) => {
+    if (item.queue_type === "verification") {
+      return {
+        title: "Verification review",
+        meta: `${statusLabels[item.status] || item.status} · ${date(item.created_at)}`,
+      };
+    }
+    if (item.queue_type === "dispute") {
+      return {
+        title: "Open dispute",
+        meta: `${statusLabels[item.status] || item.status} · ${date(item.created_at)}`,
+      };
+    }
+    return {
+      title: "Flagged user",
+      meta: `${statusLabels[item.risk_status] || item.risk_status} · ${date(item.created_at)}`,
+    };
+  });
+
   $("#recent-listings").innerHTML = listRows(data.recent.listings, (listing) => ({
     title: listing.status,
     meta: `${money(listing.have_amount, listing.have_currency)} -> ${money(listing.want_amount, listing.want_currency)} · ${date(listing.created_at)}`,
   }));
+}
+
+function renderNavBadge(selector, count) {
+  const badge = $(selector);
+  if (!badge) return;
+  const value = Number(count || 0);
+  badge.textContent = value > 99 ? "99+" : String(value);
+  badge.hidden = value <= 0;
 }
 
 function renderLineChart(selector, rows, key) {
@@ -363,13 +396,14 @@ function listRows(rows, mapRow) {
 
 function renderUsers(rows) {
   attachTable("users-table", [
-    { label: "Name", render: (row) => escapeHtml(row.display_name || "-") },
+    { label: "Name", render: (row) => escapeHtml(row.legal_name || row.display_name || "-") },
     { label: "Phone", render: (row) => escapeHtml(row.whatsapp_phone) },
     { label: "Verification", render: (row) => chip(row.verification_status) },
     { label: "Risk", render: (row) => chip(row.risk_status) },
     { label: "Completed", render: (row) => escapeHtml(row.completed_deals_count) },
     { label: "Cancels", render: (row) => escapeHtml(row.total_cancelled_deals) },
     { label: "Disputes", render: (row) => escapeHtml(row.dispute_count) },
+    { label: "Payouts", render: (row) => payoutSummary(row.payment_profiles || []) },
     { label: "Joined", render: (row) => escapeHtml(date(row.created_at)) },
     {
       label: "Action",
@@ -377,10 +411,26 @@ function renderUsers(rows) {
         <div class="inline-actions">
           ${select("verification_status", row.id, row.verification_status, ["unverified", "pending_review", "verified_manual", "rejected", "suspended"], "user")}
           ${select("risk_status", row.id, row.risk_status, ["normal", "watch", "limited", "suspended"], "user")}
+          <button class="mini-button danger" data-user-suspend="${escapeHtml(row.id)}">Suspend</button>
         </div>
       `,
     },
   ], rows);
+}
+
+function payoutSummary(profiles) {
+  if (!profiles.length) return `<span class="row-meta">None</span>`;
+  return `
+    <div class="payout-pills">
+      ${profiles.map((profile) => {
+        const label = profile.method === "bank"
+          ? `${profile.currency} bank`
+          : `${profile.currency} ${profile.momo_network || "mobile"}`;
+        const name = profile.account_name ? ` title="${escapeHtml(profile.account_name)}"` : "";
+        return `<span class="payout-pill"${name}>${escapeHtml(label)}</span>`;
+      }).join("")}
+    </div>
+  `;
 }
 
 function renderVerifications(rows) {
@@ -402,8 +452,8 @@ function renderVerifications(rows) {
       label: "Docs",
       render: (row) => `
         <div class="inline-actions">
-          ${docButton(row.document_front_path, "ID")}
-          ${docButton(row.selfie_path, "Selfie")}
+          ${docButton(row.document_front_path, "ID", "verification-documents")}
+          ${docButton(row.selfie_path, "Selfie", "verification-documents")}
         </div>
       `,
     },
@@ -422,9 +472,21 @@ function renderVerifications(rows) {
   ], rows);
 }
 
-function docButton(path, label) {
+function docButton(path, label, bucket) {
   if (!path) return `<button class="mini-button" disabled>${escapeHtml(label)}</button>`;
-  return `<button class="mini-button" data-doc-path="${escapeHtml(path)}">${escapeHtml(label)}</button>`;
+  return `<button class="mini-button" data-doc-path="${escapeHtml(path)}" data-doc-bucket="${escapeHtml(bucket)}">${escapeHtml(label)}</button>`;
+}
+
+function proofButtons(proofs = []) {
+  if (!proofs.length) return `<span class="row-meta">No receipts</span>`;
+  return `
+    <div class="inline-actions">
+      ${proofs.map((proof, index) => {
+        const owner = proof.users?.display_name || proof.users?.whatsapp_phone || `Receipt ${index + 1}`;
+        return docButton(proof.proof_path, `${index + 1}. ${owner}`, "deal-proofs");
+      }).join("")}
+    </div>
+  `;
 }
 
 function renderListings(rows) {
@@ -450,6 +512,7 @@ function renderDeals(rows) {
     { label: "Taker", render: (row) => escapeHtml(row.taker?.display_name || row.taker?.whatsapp_phone || "-") },
     { label: "Amount", render: (row) => escapeHtml(`${money(row.have_amount, row.have_currency)} -> ${money(row.want_amount, row.want_currency)}`) },
     { label: "Status", render: (row) => chip(row.status) },
+    { label: "Receipts", render: (row) => proofButtons(row.proofs || []) },
     { label: "Reserved", render: (row) => escapeHtml(date(row.reservation_expires_at)) },
     { label: "Created", render: (row) => escapeHtml(date(row.created_at)) },
   ], rows);
@@ -463,6 +526,7 @@ function renderDisputes(rows) {
     { label: "Category", render: (row) => escapeHtml(row.category) },
     { label: "Status", render: (row) => chip(row.status) },
     { label: "Description", render: (row) => escapeHtml(row.description || "-") },
+    { label: "Evidence", render: (row) => proofButtons(row.proofs || []) },
     { label: "Resolution", render: (row) => escapeHtml(row.resolution || "-") },
     { label: "Created", render: (row) => escapeHtml(date(row.created_at)) },
     {
@@ -586,7 +650,7 @@ async function openVerificationDocument(button) {
   const signed = await api("/admin/api/storage-signed-url", {
     method: "POST",
     body: JSON.stringify({
-      bucket: "verification-documents",
+      bucket: button.dataset.docBucket || "verification-documents",
       path: button.dataset.docPath,
     }),
   });
@@ -599,11 +663,23 @@ async function decideVerification(button) {
   const label = decision === "approve" ? "approve" : "reject";
   if (!window.confirm(`Are you sure you want to ${label} this verification?`)) return;
 
+  const adminNotes = window.prompt(`Optional admin note for this ${label} decision:`, "") || "";
   await api(`/admin/api/verifications/${id}/decision`, {
     method: "PATCH",
-    body: JSON.stringify({ decision }),
+    body: JSON.stringify({ decision, admin_notes: adminNotes.trim() }),
   });
   showNotice(`Verification ${decision === "approve" ? "approved" : "rejected"}.`);
+  await loadView(state.view);
+}
+
+async function suspendUser(button) {
+  const id = button.dataset.userSuspend;
+  if (!window.confirm("Suspend this user profile now?")) return;
+  await api(`/admin/api/users/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ verification_status: "suspended", risk_status: "suspended" }),
+  });
+  showNotice("User suspended.");
   await loadView(state.view);
 }
 
@@ -645,6 +721,10 @@ function bindEvents() {
 
     if (event.target.matches("button[data-dispute-apply]")) {
       applyDisputeUpdate(event.target).catch((error) => showNotice(error.message, true));
+    }
+
+    if (event.target.matches("button[data-user-suspend]")) {
+      suspendUser(event.target).catch((error) => showNotice(error.message, true));
     }
   });
 }

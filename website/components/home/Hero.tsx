@@ -40,19 +40,31 @@ export function Hero() {
           </Reveal>
 
           <Reveal y={20} delay={0.24}>
+<<<<<<< HEAD
             <div className="mt-9 flex flex-col items-center gap-4 sm:flex-row">
+=======
+            <div className="mt-9 flex w-full max-w-sm flex-col items-stretch gap-3.5 sm:w-auto sm:max-w-none sm:flex-row sm:items-center sm:gap-4">
+>>>>>>> fd9915f77a886fcfd2ff478d206cc563f3425d52
               <a
                 href={SITE.whatsappHref}
                 target="_blank"
                 rel="noopener noreferrer"
+<<<<<<< HEAD
                 className="inline-flex items-center gap-2 rounded-full bg-brand px-7 py-3.5 text-base font-semibold text-black transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_12px_48px_rgba(157,255,30,0.4)]"
+=======
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-brand px-7 py-3.5 text-base font-semibold text-black transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_12px_48px_rgba(157,255,30,0.4)]"
+>>>>>>> fd9915f77a886fcfd2ff478d206cc563f3425d52
               >
                 <WhatsappLogo size={20} weight="fill" aria-hidden="true" />
                 Try it on WhatsApp
               </a>
               <a
                 href="#how-it-works"
+<<<<<<< HEAD
                 className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/[0.02] px-7 py-3.5 text-base font-semibold text-white transition-colors hover:border-brand/50 hover:text-brand"
+=======
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-white/20 bg-white/[0.02] px-7 py-3.5 text-base font-semibold text-white transition-colors hover:border-brand/50 hover:text-brand"
+>>>>>>> fd9915f77a886fcfd2ff478d206cc563f3425d52
               >
                 See how it works
                 <ArrowDown size={16} aria-hidden="true" />

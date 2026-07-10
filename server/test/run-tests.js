@@ -17,6 +17,9 @@ process.env.COIN_PROFILE_API_URL = "replace_with_disabled";
 process.env.COIN_PROFILE_API_KEY = "replace_with_disabled";
 process.env.COIN_PROFILE_USERNAME = "replace_with_disabled";
 process.env.AKARA_TYPING_INDICATOR = "false";
+process.env.AKARA_SECURITY_ENABLED = "false";
+process.env.AKARA_SECURITY_FLOW_ID = "replace_with_disabled";
+process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
 
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -44,7 +47,26 @@ function stubModule(relativePath, exports) {
 stubModule("lib/supabase.js", fakeSupabase);
 stubModule("lib/openai.js", openaiStub);
 
+// Menu lists are sent directly (the reply is null); capture the payloads so
+// scenarios can assert on the list body instead of the returned text.
+const whatsapp = require("../lib/whatsapp");
+const listSends = [];
+whatsapp.sendWhatsAppList = async (to, payload) => {
+  listSends.push({ to, payload });
+  return { logged: true };
+};
+whatsapp.getWhatsAppMedia = async () => ({
+  buffer: Buffer.from("fake receipt"),
+  contentType: "image/png",
+  sha256: "fake-sha",
+});
+whatsapp.uploadWhatsAppMedia = async () => "fake-whatsapp-media-id";
+function lastListBody() {
+  return listSends.length ? String(listSends[listSends.length - 1].payload?.body || "") : "";
+}
+
 const { buildReply } = require("../router");
+const { sendIdleMenus } = require("../app");
 const { findOrCreateUser } = require("../db/users");
 const { getSession } = require("../db/sessions");
 const intents = require("../nlp/intents");
@@ -131,6 +153,8 @@ function seedVerifiedUser(phone, name) {
 
 function seedPayout(user, currency) {
   const bank = currency === "NGN";
+  const digits = String(user.whatsapp_phone || user.id || "").replace(/\D/g, "");
+  const suffix = digits.slice(-6).padStart(6, "0");
   __table("payment_profiles").push({
     id: crypto.randomUUID(),
     user_id: user.id,
@@ -138,9 +162,9 @@ function seedPayout(user, currency) {
     method: bank ? "bank" : "momo",
     account_name: user.legal_name || "Test User",
     bank_name: bank ? "GTBank" : null,
-    account_number_encrypted: bank ? "0123456789" : null,
+    account_number_encrypted: bank ? `0123${suffix}`.slice(0, 10) : null,
     momo_network: bank ? null : "MTN",
-    momo_number_encrypted: bank ? null : "0788000001",
+    momo_number_encrypted: bank ? null : `0788${suffix}`.slice(0, 10),
     is_default: true,
     created_at: new Date().toISOString(),
   });
@@ -277,7 +301,7 @@ async function run() {
   // ---------- scoped views
   scenario("scoped views");
   reply = await send(ALICE, "menu");
-  check("menu shows core options", reply.includes("`make offer`") && reply.includes("`find offers`"), reply);
+  check("menu shows core options", reply === null && lastListBody().includes("`make offer`") && lastListBody().includes("`find offers`"), JSON.stringify({ reply, body: lastListBody() }));
 
   reply = await send(ALICE, "profile");
   check("profile view title", reply.includes("*Your profile*"), reply);
@@ -285,7 +309,33 @@ async function run() {
   check("profile counts completed deals from records", reply.includes("*Completed trades:* 3"), reply);
   check("profile has no bank numbers", !reply.includes("0123456789"), reply);
   check("profile has no payout list", !reply.includes("*Payouts*"), reply);
+
+  reply = await send(ALICE, "okay thanks");
+  check("session closure returns the menu", reply.includes("*Find offers and trade with more confidence*"), reply);
+  check("session closure is calm", reply.includes("*Done*"), reply);
   removeSeededDeals(completedProfileDeals);
+
+  // ---------- inactivity menu nudge
+  scenario("inactivity menu nudge");
+  const IDLE = "250700000004";
+  const idleUser = seedVerifiedUser(IDLE, "Idle User");
+  const idleTime = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+  __table("message_sessions").push({
+    id: crypto.randomUUID(),
+    user_id: idleUser.id,
+    whatsapp_phone: IDLE,
+    current_flow: null,
+    current_step: null,
+    context_json: {},
+    last_message_at: idleTime,
+    created_at: idleTime,
+  });
+  const idleResult = await sendIdleMenus({ now: new Date(), idleMs: 5 * 60 * 1000, limit: 10 });
+  const idleSession = __table("message_sessions").find((row) => row.whatsapp_phone === IDLE);
+  check("idle scan sends one menu", idleResult.sent === 1, JSON.stringify(idleResult));
+  check("idle scan marks the session", Boolean(idleSession?.context_json?.idle_menu_sent_at), JSON.stringify(idleSession));
+  const idleRepeat = await sendIdleMenus({ now: new Date(), idleMs: 5 * 60 * 1000, limit: 10 });
+  check("idle scan does not repeat before new activity", idleRepeat.sent === 0, JSON.stringify(idleRepeat));
 
   reply = await send(ALICE, "bank details");
   check("payouts view title", reply.includes("Bank & payout details"), reply);
@@ -324,6 +374,38 @@ async function run() {
 
   reply = await send(ALICE, "my listings");
   check("listing appears in scoped view", reply.includes("AKR-LIST-001"), reply);
+
+  reply = await send(ALICE, "I have 50k naira and want 55k RWF");
+  check("duplicate live listing is blocked", reply.includes("*Listing already live*"), reply);
+  check("duplicate listing points to existing reference", reply.includes("AKR-LIST-001"), reply);
+  check("duplicate listing does not open review", !reply.includes("*Review listing*"), reply);
+
+  const DORA = "250700000004";
+  const doraRow = seedVerifiedUser(DORA, "Promise Uchenna Steven");
+  seedPayout(doraRow, "NGN");
+  reply = await send(DORA, "I have 10k NGN and want 12k RWF");
+  check("missing receive payout starts payout setup", reply.includes("*Add payout detail*") && reply.includes("RWF"), reply);
+  reply = await send(DORA, "mtn");
+  check("momo network asks for registered name", reply.includes("Quick option") && reply.includes("Promise Uchenna Steven"), reply);
+  reply = await send(DORA, "option 1");
+  check("verified name shortcut advances to momo number", reply.toLowerCase().includes("mobile money phone number"), reply);
+  reply = await send(DORA, "0788123456");
+  check("momo number advances to payout review", reply.includes("Review payout detail"), reply);
+  reply = await send(DORA, "save payout");
+  check("saving payout resumes listing review", reply.includes("Payout detail saved") && reply.includes("*Review listing*"), reply);
+
+  const TIER = "250700000005";
+  const tierRow = seedVerifiedUser(TIER, "Tier One User");
+  tierRow.verification_status = "verified_auto";
+  tierRow.verification_score = 65;
+  seedPayout(tierRow, "NGN");
+  seedPayout(tierRow, "RWF");
+  reply = await send(TIER, "I have 150k NGN and want 170k RWF");
+  check("tier one high value can reach review", reply.includes("*Review listing*"), reply);
+  reply = await send(TIER, "publish");
+  check("tier one publish is blocked by limit", reply.includes("Tier 1 limit reached"), reply);
+  const tierSession = await getSession(TIER);
+  check("tier limit stores pending publish", tierSession?.current_flow === "kyc_upgrade" && tierSession?.context_json?.return_flow === "publish_listing", JSON.stringify(tierSession));
 
   const { listingCardVersion } = require("../lib/listing-card");
   check("listing card version changes with dynamic values", listingCardVersion({
@@ -374,6 +456,69 @@ async function run() {
   seedPayout(bobRow, "NGN");
   seedPayout(bobRow, "RWF");
   seedListing(bobRow, { code: "AKR-LIST-090", have_currency: "NGN", have_amount: 100000, want_currency: "RWF", want_amount: 110000 });
+  const needOnlyOwner = seedVerifiedUser("250700000009", "Flexible NGN Trader");
+  seedPayout(needOnlyOwner, "NGN");
+  seedPayout(needOnlyOwner, "RWF");
+  seedListing(needOnlyOwner, {
+    code: "AKR-LIST-089",
+    have_currency: "NGN",
+    have_amount: 50000,
+    want_currency: "RWF",
+    want_amount: 57500,
+    listing_type: "negotiable",
+  });
+  const haveOnlyListing = seedListing(needOnlyOwner, {
+    code: "AKR-LIST-088",
+    have_currency: "RWF",
+    have_amount: 36000,
+    want_currency: "NGN",
+    want_amount: 30000,
+    listing_type: "negotiable",
+  });
+  const linkedRow = seedVerifiedUser("250700000066", "Bob Trader");
+  seedPayout(linkedRow, "NGN");
+  const bobNgnPayout = __table("payment_profiles").find((row) => row.user_id === bobRow.id && row.currency === "NGN");
+  const linkedNgnPayout = __table("payment_profiles").find((row) => row.user_id === linkedRow.id && row.currency === "NGN");
+  linkedNgnPayout.account_number_encrypted = bobNgnPayout.account_number_encrypted;
+
+  reply = await send("250700000066", "open AKR-LIST-090");
+  check("linked profile cannot open owner listing", reply.includes("Trade paused for safety"), reply);
+  check("linked profile is risk flagged", linkedRow.risk_status === "watch", linkedRow.risk_status);
+
+  reply = await send(ALICE, "Hello Akara, Please I need naira 30k");
+  check("need-only search shows eligible NGN offers", reply.includes("AKR-LIST-089") && reply.includes("AKR-LIST-090"), reply);
+  check("need-only search ranks flexible first", reply.indexOf("AKR-LIST-089") !== -1 && reply.indexOf("AKR-LIST-089") < reply.indexOf("AKR-LIST-090"), reply);
+  check("need-only search does not repeat needed currency", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
+
+  reply = await send(ALICE, "who fit give me 30k naira");
+  check("pidgin need-only search shows offers", reply.includes("AKR-LIST-089"), reply);
+  check("pidgin need-only does not ask need again", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
+
+  reply = await send(ALICE, "can I get 30k in naira?");
+  check("natural need-only search supports in-currency phrasing", reply.includes("AKR-LIST-089"), reply);
+
+  reply = await send(ALICE, "send me 30k naira");
+  check("need-only search understands send-me phrasing", reply.includes("AKR-LIST-089"), reply);
+
+  reply = await send(ALICE, "I need naira, 30k");
+  check("need-only search understands separated amount phrasing", reply.includes("AKR-LIST-089"), reply);
+
+  reply = await send(ALICE, "I fit give 30k naira");
+  check("pidgin have-only search shows offers wanting NGN", reply.includes("AKR-LIST-088"), reply);
+  check("pidgin have-only does not ask have again", !reply.includes("What currency do you have?"), reply);
+
+  reply = await send(ALICE, "I can send 30k NGN");
+  check("have-only search understands can-send phrasing", reply.includes("AKR-LIST-088"), reply);
+
+  reply = await send(ALICE, "I need KES 9999999");
+  check("need-only no match asks what user has", reply.includes("What currency do you have to offer"), reply);
+  check("need-only no match keeps requested currency", reply.includes("9,999,999 KES"), reply);
+  check("need-only no match does not ask needed currency again", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
+
+  reply = await send(ALICE, "I can give 9999999 XAF");
+  check("have-only no match asks what user needs", reply.includes("What currency do you need in return"), reply);
+  check("have-only no match keeps offered currency", reply.includes("9,999,999 XAF"), reply);
+  haveOnlyListing.status = "closed";
 
   reply = await send(ALICE, "show me ngn offers");
   check("browse shows bob listing", reply.includes("AKR-LIST-090"), reply);
@@ -398,7 +543,7 @@ async function run() {
   check("bob confirms receipt", reply.includes("Receipt confirmed ✅"), reply);
 
   reply = await send(ALICE, "menu");
-  check("menu escapes deal room", reply.includes("*Akara menu*"), reply);
+  check("menu escapes deal room", reply === null && lastListBody().includes("*Find offers and trade with more confidence*"), JSON.stringify({ reply, body: lastListBody() }));
   check("deal room released", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "what's next for my trade?", { interpret: { action: "trade_action" } });
@@ -411,7 +556,13 @@ async function run() {
   check("active trade cancel does not show profile actions", !reply.includes("Manage payout details"), reply);
 
   reply = await send(ALICE, "dispute AKR-TXN-001 because amount did not arrive");
-  check("dispute opens with reason", reply.includes("*Dispute opened AKR-TXN-001*") && reply.includes("amount did not arrive"), reply);
+  check("dispute asks for proof", reply.includes("*Proof needed AKR-TXN-001*") && reply.includes("amount did not arrive"), reply);
+  check("dispute waits for proof", (await getSession(ALICE))?.current_step === "awaiting_dispute_proof", JSON.stringify(await getSession(ALICE)));
+
+  reply = await send(ALICE, "", {
+    media: { id: "proof-media-001", mimeType: "image/png", filename: "receipt.png" },
+  });
+  check("dispute opens after proof", reply.includes("*Dispute opened ✅*") && reply.includes("amount did not arrive"), reply);
 
   reply = await send(BOB, "close dispute");
   check("non opener cannot close dispute", reply.includes("Only the person who opened this dispute"), reply);
@@ -434,7 +585,7 @@ async function run() {
   });
 
   reply = await send(ALICE, "open AKR-LIST-091");
-  check("flexible listing starts negotiation", reply.includes("*Flexible listing*"), reply);
+  check("negotiable listing starts negotiation", reply.includes("*Negotiable listing*"), reply);
   check("flexible listing does not instantly reserve", (await sessionFlow(ALICE)) === "negotiation", reply);
 
   reply = await send(ALICE, "offer 105000 rwf");
@@ -445,6 +596,39 @@ async function run() {
   check("owner acceptance opens trade", reply.includes("Akara Trade opened ✅"), reply);
   const negotiatedDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-091")?.id);
   check("negotiated amount becomes deal amount", Number(negotiatedDeal?.want_amount) === 105000, JSON.stringify(negotiatedDeal));
+
+  // ---------- two-way negotiation: counters can move either side
+  scenario("two-way negotiation");
+  seedListing(charlieRow, {
+    code: "AKR-LIST-092",
+    have_currency: "NGN",
+    have_amount: 100000,
+    want_currency: "RWF",
+    want_amount: 115000,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(BOB, "open AKR-LIST-092");
+  check("flexible prompt offers both sides", reply.includes("to propose what you send") && reply.includes("to propose what you receive"), reply);
+
+  reply = await send(BOB, "offer 110000 rwf for 102000 ngn");
+  check("proposal can set both sides at once", reply.includes("110,000 RWF") && reply.includes("102,000 NGN"), reply);
+
+  reply = await send(CHARLIE, "counter 55000 ghs");
+  check("foreign currency counter is rejected", reply.includes("RWF") && reply.includes("NGN") && reply.includes("counter with an amount"), reply);
+
+  reply = await send(CHARLIE, "counter 98000 ngn");
+  check("owner can counter the side they send", reply.includes("98,000 NGN"), reply);
+  check("owner counter keeps the taker send side", reply.includes("110,000 RWF"), reply);
+
+  reply = await send(BOB, "counter 105000 rwf");
+  check("taker re-counter moves only their send side", reply.includes("105,000 RWF") && reply.includes("98,000 NGN"), reply);
+
+  reply = await send(CHARLIE, "accept");
+  check("owner accepts two-way negotiation", reply.includes("Akara Trade opened ✅"), reply);
+  const twoWayDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-092")?.id);
+  check("deal keeps negotiated send side", Number(twoWayDeal?.want_amount) === 105000, JSON.stringify(twoWayDeal));
+  check("deal keeps negotiated receive side", Number(twoWayDeal?.have_amount) === 98000, JSON.stringify(twoWayDeal));
 
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");
@@ -463,11 +647,11 @@ async function run() {
   check("question answered mid-flow", reply.includes("Akara is free"), reply);
   check("flow survives a question", (await sessionFlow(ALICE)) === "create_listing");
 
-  reply = await send(ALICE, "i wan move 50k naira make i get 55k rwf", {
-    interpret: { action: "create_listing", have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 55000 },
+  reply = await send(ALICE, "i wan move 51k naira make i get 55k rwf", {
+    interpret: { action: "create_listing", have_currency: "NGN", have_amount: 51000, want_currency: "RWF", want_amount: 55000 },
   });
   check("model slots complete the listing", reply.includes("*Review listing*"), reply);
-  check("model direction beats regex misread", reply.includes("*You send:* 50,000 NGN"), reply);
+  check("model direction beats regex misread", reply.includes("*You send:* 51,000 NGN"), reply);
   check("model want side kept", reply.includes("*You receive:* 55,000 RWF"), reply);
 
   reply = await send(ALICE, "make it 60k instead", {
@@ -478,7 +662,7 @@ async function run() {
   check("draft revision keeps other side", reply.includes("55,000 RWF"), reply);
 
   reply = await send(ALICE, "make it flexible");
-  check("terms revision applies", reply.includes("Flexible rate"), reply);
+  check("terms revision applies", reply.includes("Negotiable rate"), reply);
   check("terms revision keeps amounts", reply.includes("60,000 NGN"), reply);
   await send(ALICE, "cancel");
 
@@ -501,13 +685,11 @@ async function run() {
   // ---------- guided find flow with deterministic escape
   scenario("guided find flow");
   reply = await send(ALICE, "find offers");
-  check("find opens flow", reply.includes("Tell me what currency you need"), reply);
-
-  reply = await send(ALICE, "rwf");
-  check("asks for have currency once", reply.includes("What currency do you have?"), reply);
+  check("find opens marketplace", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
+  check("find does not ask follow-up questions", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you have?"), reply);
 
   reply = await send(ALICE, "menu");
-  check("menu escapes find flow", reply.includes("*Akara menu*"), reply);
+  check("menu escapes find flow", reply === null && lastListBody().includes("*Find offers and trade with more confidence*"), JSON.stringify({ reply, body: lastListBody() }));
   check("find flow released", (await sessionFlow(ALICE)) === null);
 
   // ---------- settings: edit instead of new payout + bulk confirm
@@ -553,11 +735,11 @@ async function run() {
   check("thanks mid-flow is warm", reply.includes("You're welcome"), reply);
   check("thanks keeps the flow", (await sessionFlow(ALICE)) === "create_listing");
   reply = await send(ALICE, "hi");
-  check("greeting mid-flow restarts", reply.includes("👋"), reply);
+  check("greeting mid-flow restarts with the menu list", reply === null && lastListBody().includes("*Find offers and trade with more confidence*"), JSON.stringify({ reply, body: lastListBody() }));
   check("greeting releases flow", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "how far");
-  check("wellbeing reply", reply.includes("I dey alright"), reply);
+  check("wellbeing reply", reply === null && lastListBody().includes("I dey alright"), JSON.stringify({ reply, body: lastListBody() }));
 
   // ---------- reserve without context
   scenario("reserve guidance");

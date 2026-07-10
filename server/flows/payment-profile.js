@@ -185,7 +185,7 @@ function accountNamePrompt(user, context = {}) {
       "",
       title("Quick option"),
       `${action("1")} ${verifiedName}`,
-      `${action("different name")} if it is not the same`,
+      `${action("different name")} if the account uses another name`,
     );
   }
 
@@ -195,7 +195,7 @@ function accountNamePrompt(user, context = {}) {
 function parseAccountNameReply(text, user, context = {}) {
   const value = compactText(text);
   const verifiedName = normalizeShortText(user?.legal_name || context.legal_name || "", 120);
-  if (verifiedName && /^(1|same|use same|use verified|verified name|my name|legal name|full name)$/.test(value)) {
+  if (verifiedName && /^(?:1|one|option 1|first|same|use same|use verified|verified name|my name|legal name|full name|use my name|my verified name)$/.test(value)) {
     return verifiedName;
   }
   if (verifiedName && /\b(different|another|not same|not the same|manual)\b/.test(value)) {
@@ -267,7 +267,7 @@ function formatPayoutReview(context) {
         labeled("Bank", context.payment_bank_name),
         labeled("Account", context.payment_account_number),
         labeled("Name", context.payment_account_name),
-        // ...(context.payment_account_resolved ? [caption("Account name confirmed by the bank ✅")] : []),
+        ...(context.payment_account_resolved ? [caption("Account name confirmed by the bank ✅")] : []),
       ]
     : [
         labeled("Type", `${currency} mobile money`),
@@ -601,7 +601,7 @@ async function finishPaymentProfileSave(user, flow, context) {
       "",
       "Add another payout method?",
       `${action("another")} to add one more`,
-      `${action("submit")} to finish verification`,
+      `${action("submit")} to review and submit`,
     ].join("\n");
   }
 

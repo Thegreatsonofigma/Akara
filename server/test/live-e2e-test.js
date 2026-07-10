@@ -13,6 +13,7 @@ process.env.AKARA_SEND_MODE = "log";
 process.env.COIN_PROFILE_API_URL = "replace_with_disabled";
 process.env.COIN_PROFILE_API_KEY = "replace_with_disabled";
 process.env.COIN_PROFILE_USERNAME = "replace_with_disabled";
+process.env.AKARA_SECURITY_ENABLED = "false";
 // OPENAI_API_KEY intentionally not set here: config loads the real one from .env
 
 const path = require("node:path");
@@ -139,7 +140,7 @@ async function run() {
   check("revision keeps rwf side", /\d[\d,]*\s*RWF/.test(reply), reply);
 
   reply = await send(ALICE, "make it flexible");
-  check("terms revision applies", reply.includes("Flexible rate"), reply);
+  check("terms revision applies", reply.includes("Negotiable rate"), reply);
 
   reply = await send(ALICE, "oya publish it");
   check("publish goes live", reply.includes("live ✅"), reply);

@@ -112,7 +112,7 @@ function listingWaOpenUrl(listingCode) {
 }
 
 function listingTypeLabel(value) {
-  return value === "negotiable" ? "Flexible rate" : "Fixed rate";
+  return value === "negotiable" ? "Negotiable rate" : "Fixed rate";
 }
 
 function listingStatusLabel(status) {
@@ -159,7 +159,7 @@ async function createResidualListing(sourceListing, usedHaveAmount, usedWantAmou
       want_currency: sourceListing.want_currency,
       have_amount: remainingHaveAmount,
       want_amount: remainingWantAmount,
-      listing_type: sourceListing.listing_type || "fixed",
+      listing_type: sourceListing.listing_type || "negotiable",
       status: "active",
     }),
   });

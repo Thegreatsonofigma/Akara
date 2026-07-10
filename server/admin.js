@@ -3,8 +3,9 @@ const { rootDir, config } = require("./config");
 const { jsonResponse, readJsonBody } = require("./lib/http");
 const { supabaseRequest, filterValue, createStorageSignedUrl } = require("./lib/supabase");
 const { sendWhatsAppText } = require("./lib/whatsapp");
-const { sendVerificationSuccessCard } = require("./lib/listing-card");
-const { updateUser } = require("./db/users");
+const { sendVerificationSuccessCard, sendUpgradeSuccessCard, sendExchangeCompletionCard } = require("./lib/listing-card");
+const { getUserById, updateUser } = require("./db/users");
+const { exchangeCompleteMessage, syncCompletedDealsCount } = require("./db/deals");
 const { mainMenu } = require("./messages/copy");
 const { title } = require("./lib/format");
 const { displayReference } = require("./db/listings");
@@ -44,6 +45,56 @@ function countBy(items, fieldOrGetter) {
     counts[label] = (counts[label] || 0) + 1;
     return counts;
   }, {});
+}
+
+async function attachDealProofs(rows, dealIdGetter = (row) => row.id) {
+  const dealIds = [...new Set(rows.map(dealIdGetter).filter(Boolean))];
+  if (!dealIds.length) return rows;
+
+  const proofs = await supabaseRequest(
+    [
+      "deal_proofs?select=id,deal_id,user_id,proof_path,proof_type,created_at,",
+      "users!deal_proofs_user_id_fkey(whatsapp_phone,display_name)",
+      `&deal_id=in.(${dealIds.map(filterValue).join(",")})`,
+      "&order=created_at.desc",
+    ].join("")
+  );
+
+  const proofsByDeal = proofs.reduce((grouped, proof) => {
+    const key = proof.deal_id;
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(proof);
+    return grouped;
+  }, {});
+
+  return rows.map((row) => {
+    const dealId = dealIdGetter(row);
+    return {
+      ...row,
+      proofs: proofsByDeal[dealId] || [],
+      evidence_count: (proofsByDeal[dealId] || []).length,
+    };
+  });
+}
+
+async function resumeApprovedUserAction(user) {
+  const sessions = await supabaseRequest(
+    `message_sessions?user_id=eq.${filterValue(user.id)}&limit=1`
+  );
+  const session = sessions[0];
+  const context = session?.context_json || {};
+  if (session?.current_flow !== "kyc_upgrade" || context.return_flow !== "publish_listing" || !context.pending_listing) {
+    return false;
+  }
+
+  const { publishListing } = require("./flows/listing");
+  const reply = await publishListing(user, context.pending_listing);
+  if (reply) {
+    await sendWhatsAppText(user.whatsapp_phone, reply).catch((error) => {
+      console.error(`[admin] approval resume reply failed for ${user.whatsapp_phone}: ${error.message}`);
+    });
+  }
+  return true;
 }
 
 function dealParticipantPhones(deal = {}) {
@@ -179,6 +230,30 @@ async function applyDisputeDealOutcome(dispute, outcome, status) {
 async function notifyDisputeParticipants(dispute, outcome) {
   const message = disputeNotice(dispute, outcome);
   await Promise.allSettled(dealParticipantPhones(dispute.deals).map((phone) => sendWhatsAppText(phone, message)));
+  if (outcome === "close_completed") {
+    await notifyDisputeExchangeCompleted(dispute);
+  }
+}
+
+async function notifyDisputeExchangeCompleted(dispute) {
+  const deal = dispute?.deals;
+  if (!deal?.id) return;
+
+  await Promise.allSettled([
+    syncCompletedDealsCount(deal.maker_user_id),
+    syncCompletedDealsCount(deal.taker_user_id),
+  ]);
+
+  const dealCode = displayReference(deal.deal_code, "deal");
+  const recipients = [
+    { phone: deal.maker?.whatsapp_phone, role: "maker" },
+    { phone: deal.taker?.whatsapp_phone, role: "taker" },
+  ].filter((recipient) => recipient.phone);
+
+  await Promise.allSettled(recipients.flatMap(({ phone, role }) => [
+    sendWhatsAppText(phone, exchangeCompleteMessage(deal, role)),
+    sendExchangeCompletionCard(phone, deal, role, `Exchange receipt for ${dealCode}`),
+  ]));
 }
 
 async function getAdminOverview() {
@@ -193,6 +268,7 @@ async function getAdminOverview() {
   const activeListings = listings.filter((item) => item.status === "active");
   const openDisputes = disputes.filter((item) => ["open", "waiting_for_user", "under_review"].includes(item.status));
   const pendingVerifications = verifications.filter((item) => ["pending_input", "pending_review"].includes(item.status));
+  const flaggedUsers = users.filter((item) => ["watch", "limited", "suspended"].includes(item.risk_status) || item.verification_status === "suspended");
   const completedDeals = deals.filter((item) => ["completed_pending_fee", "closed"].includes(item.status));
   const lastSevenDays = buildLastSevenDays();
 
@@ -204,12 +280,19 @@ async function getAdminOverview() {
       completedDeals: completedDeals.length,
       openDisputes: openDisputes.length,
       pendingVerifications: pendingVerifications.length,
+      flaggedUsers: flaggedUsers.length,
+      needsReview: openDisputes.length + pendingVerifications.length + flaggedUsers.length,
     },
     recent: {
       users: users.slice(-5).reverse(),
       listings: listings.slice(-5).reverse(),
       deals: deals.slice(-5).reverse(),
       disputes: disputes.slice(-5).reverse(),
+      reviewQueue: [
+        ...pendingVerifications.slice(0, 5).map((item) => ({ ...item, queue_type: "verification" })),
+        ...openDisputes.slice(0, 5).map((item) => ({ ...item, queue_type: "dispute" })),
+        ...flaggedUsers.slice(0, 5).map((item) => ({ ...item, queue_type: "flagged_user" })),
+      ].slice(0, 8),
     },
     charts: {
       activity: lastSevenDays.map((day) => ({
@@ -235,7 +318,7 @@ async function handleAdminApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/admin/api/users") {
     const users = await supabaseRequest(
-      "users?select=id,whatsapp_phone,display_name,verification_status,verification_score,completed_deals_count,cancelled_deals_24h,total_cancelled_deals,dispute_count,risk_status,hold_until,created_at&order=created_at.desc&limit=100"
+      "users?select=id,whatsapp_phone,display_name,legal_name,verification_status,verification_score,completed_deals_count,cancelled_deals_24h,total_cancelled_deals,dispute_count,risk_status,hold_until,created_at,payment_profiles(id,currency,method,account_name,bank_name,momo_network,created_at)&order=created_at.desc&limit=100"
     );
     return jsonResponse(res, 200, { ok: true, data: users });
   }
@@ -267,14 +350,14 @@ async function handleAdminApi(req, res, url) {
     const deals = await supabaseRequest(
       "deals?select=id,deal_code,status,have_currency,want_currency,have_amount,want_amount,rate,reservation_expires_at,completed_at,cancelled_at,created_at,maker:users!deals_maker_user_id_fkey(whatsapp_phone,display_name),taker:users!deals_taker_user_id_fkey(whatsapp_phone,display_name)&order=created_at.desc&limit=100"
     );
-    return jsonResponse(res, 200, { ok: true, data: deals });
+    return jsonResponse(res, 200, { ok: true, data: await attachDealProofs(deals) });
   }
 
   if (req.method === "GET" && url.pathname === "/admin/api/disputes") {
     const disputes = await supabaseRequest(
       "disputes?select=id,deal_id,category,description,status,resolution,created_at,resolved_at,deals!disputes_deal_id_fkey(id,deal_code,status,maker_user_id,taker_user_id,maker_sent_at,taker_sent_at,maker_received_at,taker_received_at,maker:users!deals_maker_user_id_fkey(whatsapp_phone,display_name),taker:users!deals_taker_user_id_fkey(whatsapp_phone,display_name)),users!disputes_opened_by_user_id_fkey(whatsapp_phone,display_name)&order=created_at.desc&limit=100"
     );
-    return jsonResponse(res, 200, { ok: true, data: disputes });
+    return jsonResponse(res, 200, { ok: true, data: await attachDealProofs(disputes, (row) => row.deal_id) });
   }
 
   const userStatusMatch = url.pathname.match(/^\/admin\/api\/users\/([^/]+)\/status$/);
@@ -305,6 +388,8 @@ async function handleAdminApi(req, res, url) {
 
     const approved = decision === "approve";
     const status = approved ? "verified_manual" : "rejected";
+    const previousUser = await getUserById(request.user_id);
+    const isTierUpgrade = approved && ["verified_auto", "verified_manual"].includes(previousUser?.verification_status);
     const rows = await supabaseRequest(`verification_requests?id=eq.${filterValue(request.id)}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -321,15 +406,29 @@ async function handleAdminApi(req, res, url) {
     });
 
     if (approved) {
-      const caption = [
-        title("Verified"),
-        "",
-        "Your Akara profile is approved.",
-        "",
-        "You can now see offers, create listings, open Akara Trades, and manage payout details.",
-      ].join("\n");
-      await sendVerificationSuccessCard(user.whatsapp_phone, caption).catch((error) => {
-        console.error(`[admin] verification card failed for ${user.whatsapp_phone}: ${error.message}`);
+      if (isTierUpgrade) {
+        const caption = [
+          title("Tier upgraded ✅"),
+          "",
+          "Your profile is now Tier 3 and can handle higher value exchanges.",
+        ].join("\n");
+        await sendUpgradeSuccessCard(user.whatsapp_phone, caption).catch((error) => {
+          console.error(`[admin] tier upgrade card failed for ${user.whatsapp_phone}: ${error.message}`);
+        });
+      } else {
+        const caption = [
+          title("Verified"),
+          "",
+          "Your Akara profile is approved.",
+          "",
+          "You can now see offers, create listings, open Akara Trades, and manage payout details.",
+        ].join("\n");
+        await sendVerificationSuccessCard(user.whatsapp_phone, caption).catch((error) => {
+          console.error(`[admin] verification card failed for ${user.whatsapp_phone}: ${error.message}`);
+        });
+      }
+      await resumeApprovedUserAction(user).catch((error) => {
+        console.error(`[admin] approval resume failed for ${user.whatsapp_phone}: ${error.message}`);
       });
       await sendWhatsAppText(user.whatsapp_phone, mainMenu()).catch((error) => {
         console.error(`[admin] verification menu failed for ${user.whatsapp_phone}: ${error.message}`);

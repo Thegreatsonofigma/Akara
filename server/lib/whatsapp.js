@@ -103,6 +103,80 @@ async function sendWhatsAppList(to, { body, button = "Click to Select", sections
   return text ? JSON.parse(text) : null;
 }
 
+async function sendWhatsAppFlow(to, {
+  body,
+  button = "Continue",
+  flowId,
+  flowToken,
+  screen,
+  data = {},
+  headerText = "",
+  footerText = "",
+}) {
+  if (config.sendMode === "log") {
+    console.log(`\nAkara flow -> ${to}\n${body}\n${button}\n${JSON.stringify({
+      flowId,
+      flowToken,
+      screen,
+      data,
+      headerText,
+      footerText,
+    }, null, 2)}\n`);
+    return { logged: true };
+  }
+
+  if (!config.whatsappAccessToken || !config.whatsappPhoneNumberId) {
+    throw new Error("WhatsApp credentials are required unless AKARA_SEND_MODE=log");
+  }
+  if (!flowId) {
+    throw new Error("WhatsApp Flow ID is required for flow messages");
+  }
+
+  const interactive = {
+    type: "flow",
+    ...(headerText ? { header: { type: "text", text: headerText } } : {}),
+    body: { text: body },
+    ...(footerText ? { footer: { text: footerText } } : {}),
+    action: {
+      name: "flow",
+      parameters: {
+        flow_message_version: "3",
+        flow_id: flowId,
+        flow_token: flowToken,
+        flow_cta: button,
+        flow_action: "navigate",
+        flow_action_payload: {
+          screen,
+          data,
+        },
+      },
+    },
+  };
+
+  const url = `https://graph.facebook.com/${config.whatsappGraphVersion}/${config.whatsappPhoneNumberId}/messages`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.whatsappAccessToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "interactive",
+      interactive,
+    }),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`WhatsApp flow ${response.status}: ${text}`);
+  }
+
+  return text ? JSON.parse(text) : null;
+}
+
 async function getOutboundTextByMessageId(messageId) {
   if (!messageId) return "";
   const rows = await supabaseRequest(
@@ -282,6 +356,7 @@ function extractMessages(payload) {
 
       for (const message of value.messages || []) {
         const contact = contactByWaId.get(message.from);
+        const flowResponse = getFlowResponse(message);
         messages.push({
           from: message.from,
           displayName: contact?.profile?.name,
@@ -290,6 +365,8 @@ function extractMessages(payload) {
           quotedFrom: message.context?.from || null,
           type: message.type,
           text: getMessageText(message),
+          flowResponse,
+          flowToken: flowResponse?.flow_token || message.interactive?.nfm_reply?.flow_token || null,
           media: getMessageMedia(message),
         });
       }
@@ -297,6 +374,17 @@ function extractMessages(payload) {
   }
 
   return messages;
+}
+
+function getFlowResponse(message) {
+  const nfmReply = message.interactive?.nfm_reply;
+  if (!nfmReply?.response_json) return null;
+
+  try {
+    return JSON.parse(nfmReply.response_json);
+  } catch {
+    return { raw_response_json: nfmReply.response_json };
+  }
 }
 
 function getMessageMedia(message) {
@@ -316,6 +404,9 @@ function getMessageText(message) {
   if (message.type === "text") return message.text?.body || "";
   if (message.type === "button") return message.button?.text || "";
   if (message.type === "interactive") {
+    if (message.interactive?.type === "nfm_reply") {
+      return message.interactive?.nfm_reply?.name || "flow response";
+    }
     return (
       message.interactive?.button_reply?.title ||
       message.interactive?.list_reply?.title ||
@@ -331,6 +422,7 @@ function getMessageText(message) {
 module.exports = {
   sendWhatsAppText,
   sendWhatsAppList,
+  sendWhatsAppFlow,
   getOutboundTextByMessageId,
   sendWhatsAppMedia,
   sendWhatsAppTyping,

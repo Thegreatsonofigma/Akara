@@ -40,7 +40,7 @@ loadEnv(path.join(rootDir, ".env"));
 
 const config = {
   host: process.env.HOST || "127.0.0.1",
-  port: Number(process.env.PORT || 3001),
+  port: Number(process.env.PORT || 3000),
   adminToken: optionalEnv("AKARA_ADMIN_TOKEN", "local-admin"),
   supabaseUrl: requiredEnv("SUPABASE_URL"),
   supabaseServiceRoleKey: requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
@@ -50,6 +50,8 @@ const config = {
   whatsappGraphVersion: process.env.WHATSAPP_GRAPH_VERSION || "v20.0",
   whatsappPhoneNumberId: optionalEnv("WHATSAPP_PHONE_NUMBER_ID"),
   akaraWhatsappNumber: optionalEnv("AKARA_WHATSAPP_NUMBER", "15556733907"),
+  akaraSecurityFlowId: optionalEnv("AKARA_SECURITY_FLOW_ID"),
+  akaraVerificationFlowId: optionalEnv("AKARA_VERIFICATION_FLOW_ID"),
   publicUrl: optionalEnv("AKARA_PUBLIC_URL"),
   openaiApiKey: optionalEnv("OPENAI_API_KEY"),
   openaiModel: optionalEnv("OPENAI_MODEL", "gpt-5-nano"),

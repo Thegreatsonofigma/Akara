@@ -12,6 +12,7 @@ const {
   inferIntent,
   isGreeting,
   isThanksMessage,
+  isSessionClosureMessage,
   isWellbeingQuestion,
   isMenuCommand,
   isHistoryCommand,
@@ -38,7 +39,7 @@ const { isVerified, isOnHold } = require("./db/users");
 const { getSession, upsertSession, clearSession } = require("./db/sessions");
 const { extractListingCode, extractDealCode } = require("./db/listings");
 const { getDealByCodeForUser, getLatestOpenDealForUser } = require("./db/deals");
-const { mainMenu, verificationIntro, welcomePrompt, thanksReply, wellbeingReply, explainMissingListing, mainMenuListPayload, menuOptionLines } = require("./messages/copy");
+const { mainMenu, verificationIntro, mainMenuListPayload, thanksReply, wellbeingReply, explainMissingListing, menuOptionLines } = require("./messages/copy");
 const { scopedAssistantReply } = require("./messages/assistant");
 const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
@@ -46,6 +47,7 @@ const { prepareListingPreview, reserveListingByCode, handleCreateListing, handle
 const {
   continueSearchOrShowMatches,
   showOfferMatches,
+  showBrowseOffers,
   showBrowseOrPairMatches,
   handleFindOffer,
   handleSearchResults,
@@ -93,19 +95,17 @@ function findOfferPrompt() {
   ].join("\n");
 }
 
-function greetingReply() {
-  return [
-    title("Akara menu"),
-    caption("Choose an action or type the number."),
-    "",
-    ...menuOptionLines(),
-    "",
-    "_You can also type naturally:_",
-    "`I have 50k naira and want 55k rwf`",
-    "`I have 2k naira and want rwf, show me available deals`",
-    "",
-    "_At any time:_ `menu`, `history`, `profile`, or `start over`",
-  ].join("\n")
+
+// Sends the interactive menu list directly and returns null so the caller
+// sends nothing more; falls back to returning the text when the list fails.
+async function sendMenuList(user, body) {
+  try {
+    await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(body));
+    return null;
+  } catch (error) {
+    console.error(`[router] menu list failed for ${user.whatsapp_phone}: ${error.message}`);
+    return body;
+  }
 }
 
 function listingCodesFromText(text) {
@@ -136,14 +136,14 @@ async function resolveQuotedReply(text, user, incoming = {}) {
   const number = selectedOptionNumber(text);
   if (!quotedText || !number) return null;
 
-  if (/\*?Akara menu\*?/i.test(quotedText)) {
+  if (/\*?Find offers and trade with more confidence\*?/i.test(quotedText)) {
     if (number === 1) {
       await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {});
       return makeOfferPrompt();
     }
     if (number === 2) {
-      await upsertSession(user, user.whatsapp_phone, "find_offer", "quick", {});
-      return findOfferPrompt();
+      await clearSession(user, user.whatsapp_phone);
+      return showBrowseOffers(user);
     }
     if (number === 3) return getMyListingsReply(user);
     if (number === 4) return getMyDealsReply(user);
@@ -251,7 +251,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   // flow was active: asking for something outside the flow serves it at once.
   if (interpretedAction === "menu" || isMenuCommand(text)) {
     await clearSession(user, user.whatsapp_phone);
-    return mainMenu();
+    return sendMenuList(user, mainMenu());
   }
 
   if (interpretedAction === "bulk_cancel_listings" || isBulkListingCancelIntent(text)) return requestBulkListingCancel(user);
@@ -263,16 +263,28 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   }
 
   if (interpretedAction === "view_profile" || isProfileCommand(text)) {
+    await clearSession(user, user.whatsapp_phone);
     return viewProfileReply(user);
   }
 
   if (interpretedAction === "view_payouts" || isPayoutsCommand(text)) {
+    await clearSession(user, user.whatsapp_phone);
     return viewPayoutsReply(user);
   }
 
   if (interpretedAction === "my_listings" || isMyListingsCommand(text)) {
     await clearSession(user, user.whatsapp_phone);
     return getMyListingsReply(user);
+  }
+
+  if (!session?.current_flow && (interpretedAction === "thanks" || isSessionClosureMessage(text))) {
+    await clearSession(user, user.whatsapp_phone);
+    return [
+      title("Done"),
+      caption("That session is closed."),
+      "",
+      mainMenu(),
+    ].join("\n");
   }
 
   // Thanks is unambiguous, so it gets a warm reply even mid-flow without
@@ -378,7 +390,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   }
 
   // Draft revisions at the review step: "make it 60k", "use kes instead",
-  // "make it flexible" update the draft and re-show the review, instead of
+  // "make it negotiable" update the draft and re-show the review, instead of
   // re-asking "ready to publish?".
   if (session?.current_flow === "create_listing" && session.current_step === "confirm"
       && !isListingPublishIntent(text) && !isDeclineIntent(text) && !isCancelIntent(text)) {
@@ -399,7 +411,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
         want_currency: flowContext.want_currency || null,
         have_amount: flowContext.have_amount || null,
         want_amount: flowContext.want_amount || null,
-        listing_type: flowContext.listing_type || "fixed",
+        listing_type: flowContext.listing_type || "negotiable",
         ...(flowContext.listing_code ? { listing_code: flowContext.listing_code } : {}),
         ...(flowContext.editing_listing_id ? { editing_listing_id: flowContext.editing_listing_id } : {}),
         ...(flowContext.previous_listing_status ? { previous_listing_status: flowContext.previous_listing_status } : {}),
@@ -496,18 +508,16 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   }
 
   if (interpretedAction === "wellbeing" || isWellbeingQuestion(text)){
-    //  return wellbeingReply(user);
-    await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(wellbeingReply(user)));
-    }
+    return sendMenuList(user, wellbeingReply(user));
+  }
 
   if (bareGreeting) {
     await clearSession(user, user.whatsapp_phone);
-    // welcomePrompt(user)
-    return await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(greetingReply()));
+    return sendMenuList(user, mainMenu());
   }
 
   if (command === "verify" || command === "verify me" || interpretedAction === "verify") {
-    return "You are already verified ✅\n\n" + mainMenu();
+    return sendMenuList(user, "You are already verified ✅\n\n" + mainMenu());
   }
 
   const paymentSetupCurrency = parsePaymentCurrency(text) || details.payment_currency || null;
@@ -575,6 +585,11 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
       .some((field) => listingDetails[field]);
     if (hasAnyExchangeDetail) {
       const missing = missingListingFields(listingDetails);
+      if ((listingDetails.want_currency && listingDetails.want_amount && !listingDetails.have_currency)
+          || (listingDetails.have_currency && listingDetails.have_amount && !listingDetails.want_currency)) {
+        return continueSearchOrShowMatches(user, listingDetails);
+      }
+
       if (!missing.length) {
         return showOfferMatches(user, listingDetails);
       }
@@ -594,8 +609,15 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   if (command === "find match" || command === "find offer" || command === "find offers" || command === "find money" || command === "2" || interpretedAction === "find_offer" || intent === "find_offer") {
     if (isOnHold(user)) return accountOnHoldReply(user);
 
+    if (command === "find offers" || command === "2") {
+      await clearSession(user, user.whatsapp_phone);
+      return showBrowseOffers(user);
+    }
+
     const searchDetails = mergePresentDetails(parseSearchDetails(text), interpretedExchangeDetails);
-    if (searchDetails.have_currency && searchDetails.want_currency) {
+    if ((searchDetails.have_currency && searchDetails.want_currency)
+        || (searchDetails.want_currency && (searchDetails.want_amount || searchDetails.amount))
+        || (searchDetails.have_currency && (searchDetails.have_amount || searchDetails.amount))) {
       return continueSearchOrShowMatches(user, searchDetails);
     }
 
@@ -637,6 +659,17 @@ async function routeMessage(text, user, session, incoming = {}) {
     return handleVerification(text, user, session, incoming);
   }
 
+  // Media can mean a payment receipt, verification upload, or dispute proof.
+  // When the active saved state is waiting for dispute proof, that evidence
+  // must never fall through into the normal "payment already noted" receipt
+  // guard.
+  if (incoming.media?.id) {
+    const liveSession = session?.current_flow ? session : await getSession(user.whatsapp_phone);
+    if (liveSession?.current_flow === "deal_room" && liveSession.current_step === "awaiting_dispute_proof") {
+      return handleDealRoom(text, user, liveSession, incoming);
+    }
+  }
+
   if (command === "cancel" || command === "stop") {
     if (session?.current_flow === "deal_room") {
       return handleDealRoom("cancel trade", user, session, incoming);
@@ -648,7 +681,7 @@ async function routeMessage(text, user, session, incoming = {}) {
           title("Stopped"),
           caption("That flow is closed."),
           "",
-          "Tell Akara what you want to do next.",
+          mainMenu(),
         ].join("\n")
       : "No problem. Verification paused. Type verify when you are ready.";
   }

@@ -1,0 +1,26 @@
+[
+  {
+    "file": "01-ngn-to-rwf",
+    "code": "AKR-LIST-001",
+    "have": "350000 NGN",
+    "want": "412500 RWF"
+  },
+  {
+    "file": "02-ghs-to-kes",
+    "code": "AKR-LIST-002",
+    "have": "4800 GHS",
+    "want": "48900 KES"
+  },
+  {
+    "file": "03-xaf-to-ngn",
+    "code": "AKR-LIST-003",
+    "have": "350798 XAF",
+    "want": "800000 NGN"
+  },
+  {
+    "file": "04-rwf-to-ngn",
+    "code": "AKR-LIST-004",
+    "have": "1260000 RWF",
+    "want": "1850000 NGN"
+  }
+]
