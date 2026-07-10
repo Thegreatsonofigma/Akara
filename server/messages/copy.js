@@ -171,7 +171,12 @@ function explainMissingListing(fields, context = {}) {
       ? ` for ${formatMoney(context.have_amount, context.have_currency)}`
       : "";
     const options = context.have_currency ? `\n\n${currencyHelpLine(context.have_currency)}` : "";
-    return `How much do you want${have}? Example: 55k RWF${options}`;
+    return [
+      `How much do you want${have}?`,
+      "",
+      "Example: 55k RWF",
+      options.trim(),
+    ].filter(Boolean).join("\n");
   }
 
   return [

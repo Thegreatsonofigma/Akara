@@ -303,7 +303,14 @@ function fontFace(name, fileName, weight = 700) {
   `;
 }
 
-function assetDataUri(fileName, contentType = "image/png") {
+function assetContentType(fileName) {
+  if (String(fileName).endsWith(".webp")) return "image/webp";
+  if (String(fileName).endsWith(".svg")) return "image/svg+xml";
+  if (String(fileName).endsWith(".jpg") || String(fileName).endsWith(".jpeg")) return "image/jpeg";
+  return "image/png";
+}
+
+function assetDataUri(fileName, contentType = assetContentType(fileName)) {
   const assetPath = path.join(cardAssetDir, fileName);
   if (!fs.existsSync(assetPath)) return "";
   return `data:${contentType};base64,${fs.readFileSync(assetPath).toString("base64")}`;
@@ -314,7 +321,7 @@ function cardAssetPath(fileName) {
 }
 
 function svgAsset(fileName) {
-  return assetDataUri(fileName, "image/svg+xml");
+  return assetDataUri(fileName);
 }
 
 function numberText(amount) {
@@ -467,7 +474,7 @@ function cardBackground({ footerBand = false } = {}) {
 }
 
 function akaraLogo({ x, y, width = 220, height = 224, opacity = 1 }) {
-  const logo = assetDataUri("akara-logo-mark.png");
+  const logo = assetDataUri("akara-logo-mark.webp");
   if (!logo) return "";
   return `<image href="${logo}" x="${x}" y="${y}" width="${width}" height="${height}" opacity="${opacity}" preserveAspectRatio="xMidYMid meet"/>`;
 }
@@ -477,7 +484,7 @@ function listingCardSvg(listing) {
   const haveAmount = numberText(listing.have_amount);
   const wantAmount = numberText(listing.want_amount);
   const openCode = `OPEN ${code}`;
-  const base = assetDataUri("listing-card-base.png");
+  const base = assetDataUri("listing-card-base.webp");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -579,7 +586,7 @@ function exchangeCompletionSvg(deal, role) {
   const { youSend, youReceive } = dealPartySummary(role, deal);
   const completedAt = compactDay(deal.completed_at || new Date());
   const receiveAmount = numberText(youReceive.amount);
-  const stamp = assetDataUri("success-stamp.png");
+  const stamp = assetDataUri("success-stamp.webp");
   const amountLayout = completionAmountLayout(receiveAmount);
   const chipX = completionCurrencyChipX(amountLayout.bounds);
   const timeParts = timeLabelParts(completedAt);
@@ -743,7 +750,7 @@ function verificationSuccessSvg() {
 }
 
 function upgradeSuccessSvg() {
-  const template = assetDataUri("account-tier-upgrade.png");
+  const template = assetDataUri("account-tier-upgrade.webp");
   if (template) {
     return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -798,8 +805,11 @@ async function verificationSuccessPng() {
 }
 
 async function upgradeSuccessPng() {
-  const exactAssetPath = cardAssetPath("account-tier-upgrade.png");
-  if (fs.existsSync(exactAssetPath)) return fs.readFileSync(exactAssetPath);
+  const exactAssetPath = cardAssetPath("account-tier-upgrade.webp");
+  if (fs.existsSync(exactAssetPath)) {
+    const sharp = require("sharp");
+    return sharp(exactAssetPath).png().toBuffer();
+  }
 
   fs.mkdirSync(cacheDir, { recursive: true });
   const svgPath = path.join(cacheDir, "upgrade-success.svg");

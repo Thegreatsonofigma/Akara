@@ -41,13 +41,15 @@ function assignPair(details, role, pair) {
 
 function parseListingDetails(input) {
   const text = normalizeExchangeText(input);
+  const command = compactText(text);
+  const listingType = /\b(fixed|firm)\b/.test(command) ? "fixed" : "negotiable";
   const pairs = parseCurrencyAmountPairs(text);
   const details = {
     have_currency: null,
     want_currency: null,
     have_amount: null,
     want_amount: null,
-    listing_type: /\b(negotiate|negotiable|nego|flex|flexible|offers?)\b/.test(compactText(text)) ? "negotiable" : "fixed",
+    listing_type: listingType,
   };
 
   const classifiedPairs = pairs.map((pair) => ({ ...pair, role: exchangePhraseRole(text, pair.index) }));
@@ -234,7 +236,7 @@ function listingDraftFromSearch(context) {
     want_currency: context.want_currency,
     have_amount: context.have_amount,
     want_amount: context.want_amount,
-    listing_type: context.listing_type || "fixed",
+    listing_type: context.listing_type || "negotiable",
   };
 
   return missingListingFields(draft).length === 0 ? draft : null;
