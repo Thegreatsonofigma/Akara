@@ -812,7 +812,7 @@ function offerReceiveAmount(listing, offer) {
 
 async function openListingTrade(user, listing, options = {}) {
   if (!isVerified(user)) {
-    return "Please verify first so your trade partner knows you are real. Type verify.";
+    return "Please verify first so your trade partner knows you are real. Use the Start verification button in Akara to continue.";
   }
 
   const dealHaveAmount = moneyNumber(options.have_amount || listing.have_amount);
@@ -922,7 +922,7 @@ async function openListingTrade(user, listing, options = {}) {
 
 async function reserveListing(user, listing, options = {}) {
   if (!options.force && listing.listing_type === "negotiable") {
-    if (!isVerified(user)) return "Please verify first so your trade partner knows you are real. Type verify.";
+    if (!isVerified(user)) return "Please verify first so your trade partner knows you are real. Use the Start verification button in Akara to continue.";
     if (listing.owner_user_id === user.id) return "This is your own offer. Share the link with someone else to start an Akara Trade.";
     const linkedBlock = await linkedAccountBlock(user, listing);
     if (linkedBlock) return linkedBlock;

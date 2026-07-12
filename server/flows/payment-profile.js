@@ -2,7 +2,7 @@ const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { isCoinProfileEnabled, findNigerianBanks, resolveBankAccount } = require("../lib/coinprofile");
 const { title, caption, action, labeled, normalizeShortText, digitsOnly } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
-const { paymentOptionLines } = require("../nlp/currency");
+const { paymentOptionLines, parsePaymentCurrency } = require("../nlp/currency");
 const { isEditIntent, isCancelIntent, isDeclineIntent } = require("../nlp/intents");
 const { getUserById, updateUser, latestVerificationRequest } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
@@ -24,6 +24,68 @@ function paymentChoicePrompt(excludeCurrency = null) {
   ].join("\n");
 }
 
+const PAYOUT_LIST_OPTIONS = [
+  {
+    currency: "NGN",
+    title: "🇳🇬 NGN bank",
+    description: "Nigerian bank account.",
+  },
+  {
+    currency: "RWF",
+    title: "🇷🇼 RWF MoMo",
+    description: "Rwanda mobile money.",
+  },
+  {
+    currency: "XAF",
+    title: "🇨🇲 XAF mobile",
+    description: "CFA mobile money.",
+  },
+  {
+    currency: "KES",
+    title: "🇰🇪 KES mobile",
+    description: "Kenya M-Pesa.",
+  },
+  {
+    currency: "GHS",
+    title: "🇬🇭 GHS mobile",
+    description: "Ghana mobile money.",
+  },
+];
+
+function whatsappListReply(list, fallbackText) {
+  return {
+    type: "whatsapp_list",
+    list,
+    fallbackText,
+  };
+}
+
+function payoutCurrencyListPayload(excludeCurrency = null) {
+  return {
+    body: [
+      title("Payout details"),
+      "Choose where incoming payments should land.",
+    ].join("\n"),
+    button: "Choose payout",
+    sections: [
+      {
+        title: "Payout accounts",
+        rows: PAYOUT_LIST_OPTIONS
+          .filter((option) => option.currency !== excludeCurrency)
+          .map((option) => ({
+            id: `payout_currency:${option.currency}`,
+            title: option.title,
+            description: option.description,
+          })),
+      },
+    ],
+  };
+}
+
+function paymentChoicePromptReply(excludeCurrency = null) {
+  return whatsappListReply(payoutCurrencyListPayload(excludeCurrency), paymentChoicePrompt(excludeCurrency));
+}
+
 function mobileNetworkOptions(currency) {
   const options = {
     RWF: ["MTN", "Airtel"],
@@ -39,7 +101,7 @@ function mobileNetworkOptionLines(currency) {
 }
 
 function normalizeMobileNetwork(currency, input) {
-  const value = compactText(input);
+  const value = compactText(parsePayoutNetworkSelection(input));
   const options = mobileNetworkOptions(currency);
   if (/^\d+$/.test(value)) return options[Number(value) - 1] || null;
 
@@ -59,6 +121,17 @@ function normalizeMobileNetwork(currency, input) {
   return normalized && options.includes(normalized) ? normalized : null;
 }
 
+function parsePayoutCurrencySelection(input) {
+  const match = String(input || "").trim().match(/^payout_currency:([a-z]{3})$/i);
+  if (match) return match[1].toUpperCase();
+  return parsePaymentCurrency(input);
+}
+
+function parsePayoutNetworkSelection(input) {
+  const match = String(input || "").trim().match(/^payout_network:(.+)$/i);
+  return match ? match[1] : input;
+}
+
 function networkPrompt(currency) {
   const options = mobileNetworkOptionLines(currency);
   if (!options.length) return "Which network?";
@@ -68,6 +141,30 @@ function networkPrompt(currency) {
     "",
     ...options,
   ].join("\n");
+}
+
+function networkListPayload(currency) {
+  return {
+    body: [
+      title(`${currency} mobile network`),
+      "Choose one option so the payout detail stays clean.",
+    ].join("\n"),
+    button: "Choose network",
+    sections: [
+      {
+        title: `${currency} networks`,
+        rows: mobileNetworkOptions(currency).map((network) => ({
+          id: `payout_network:${network}`,
+          title: network,
+          description: `Use ${network} for this payout.`,
+        })),
+      },
+    ],
+  };
+}
+
+function networkPromptReply(currency) {
+  return whatsappListReply(networkListPayload(currency), networkPrompt(currency));
 }
 
 function paymentProfileStartPrompt(currency) {
@@ -94,7 +191,7 @@ async function startPaymentProfileForCurrency(user, currency, context = {}) {
   };
   const nextStep = paymentMethodForCurrency(currency) === "bank" ? "payment_bank_name" : "payment_network";
   await upsertSession(user, user.whatsapp_phone, "payment_profile", nextStep, paymentContext);
-  return paymentProfileStartPrompt(currency);
+  return nextStep === "payment_network" ? networkPromptReply(currency) : paymentProfileStartPrompt(currency);
 }
 
 async function startPaymentProfileFlow(user, context = {}) {
@@ -103,7 +200,7 @@ async function startPaymentProfileFlow(user, context = {}) {
   }
 
   await upsertSession(user, user.whatsapp_phone, "payment_profile", "payment_currency", context);
-  return paymentChoicePrompt();
+  return paymentChoicePromptReply();
 }
 
 function bankAccountNumberStatus(input) {
@@ -695,6 +792,7 @@ async function handlePaymentSteps(flow, text, user, session, context, { onDeclin
     if (!nextStep) return paymentEditMenuPrompt(context);
 
     await upsertSession(user, user.whatsapp_phone, flow, nextStep, context);
+    if (nextStep === "payment_network") return networkPromptReply(context.payment_currency);
     return [
       title("Let's update that"),
       "",
@@ -703,14 +801,13 @@ async function handlePaymentSteps(flow, text, user, session, context, { onDeclin
   }
 
   if (step === "payment_currency") {
-    const { parsePaymentCurrency } = require("../nlp/currency");
-    const currency = parsePaymentCurrency(text);
-    if (!currency) return paymentChoicePrompt();
+    const currency = parsePayoutCurrencySelection(text);
+    if (!currency) return paymentChoicePromptReply();
 
     context.payment_currency = currency;
     const nextStep = paymentMethodForCurrency(currency) === "bank" ? "payment_bank_name" : "payment_network";
     await upsertSession(user, user.whatsapp_phone, flow, nextStep, context);
-    return paymentProfileStartPrompt(currency);
+    return nextStep === "payment_network" ? networkPromptReply(currency) : paymentProfileStartPrompt(currency);
   }
 
   if (step === "payment_bank_name") {
@@ -768,13 +865,7 @@ async function handlePaymentSteps(flow, text, user, session, context, { onDeclin
   if (step === "payment_network") {
     const network = normalizeMobileNetwork(context.payment_currency, text);
     if (!network) {
-      return [
-        "Choose one of the listed networks first.",
-        "",
-        "We can continue the other conversation after this payout detail is clean.",
-        "",
-        networkPrompt(context.payment_currency),
-      ].join("\n");
+      return networkPromptReply(context.payment_currency);
     }
 
     context.payment_network = network;

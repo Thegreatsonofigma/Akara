@@ -12,18 +12,37 @@ function menuOptionLines() {
   ];
 }
 
-function mainMenu() {
+function greetingMenuBody(user) {
+  const name = firstName(user);
   return [
-    title("Find offers and trade with more confidence"),
-    caption("You trade directly, Akara keeps it fair. Post a rate, find a deal, or reserve one — select from the menu to start."),
+    `Hi${name ? ` ${name}` : ""} 👋`,
+    "",
+    "Choose what you want to do next on Akara.",
+  ].join("\n");
+}
+
+function sessionEndedMenuBody(user) {
+  const name = firstName(user);
+  return [
+    `Done${name ? `, ${name}` : ""}.`,
+    "",
+    "Choose what you want to do next on Akara.",
+  ].join("\n");
+}
+
+function mainMenu(user) {
+  const name = firstName(user);
+  return [
+    title(name ? `Hi ${name}, choose your next move` : "Choose your next move"),
+    caption("Make an offer, find one, or manage your Akara account."),
     "",
     ...menuOptionLines(),
     "",
-    "_You can also type naturally:_",
+    "You can also type naturally:",
     "`I have 50k naira and want 55k rwf`",
     "`I have 2k naira and want rwf, show me available deals`",
     "",
-    "_At any time:_ `menu`, `history`, `profile`, or `start over`",
+    "At any time: `menu`, `history`, `profile`, or `start over`",
   ].join("\n");
 }
 
@@ -52,7 +71,7 @@ function verificationIntro(user) {
       "",
       "You can try again with clearer details and documents.",
       "",
-      "Type verify to resubmit.",
+      "Use the button below to resubmit.",
     ].join("\n");
   }
 
@@ -64,17 +83,13 @@ function verificationIntro(user) {
     ].join("\n");
   }
 
+  const name = firstName(user);
   return [
-    "Welcome to Akara 👋",
+    `Welcome${name ? ` ${name}` : ""} 👋`,
     "",
-    "First, let's verify you. It helps keep exchanges safer and makes your offers trusted.",
+    "First, let's verify you. It helps keep exchanges safer and unlocks offers, trades, payout details, and history.",
     "",
-    "After approval, you can:",
-    ...menuOptionLines(),
-    "",
-    "_Make an offer gives you a shareable offer link._",
-    "",
-    "Type verify to start.",
+    "Use the button below to start verification.",
   ].join("\n");
 }
 
@@ -139,6 +154,25 @@ function mainMenuListPayload(body = "Choose what you want to do next on Akara.")
   };
 }
 
+function verificationStartListPayload(body = "Start verification to continue on Akara.") {
+  return {
+    body,
+    button: "Start verification",
+    sections: [
+      {
+        title: "Verification",
+        rows: [
+          {
+            id: "verify",
+            title: "Start verification",
+            description: "ID, selfie, and payout checks.",
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function referralPitch() {
   return "🎁 Invite a friend or refer a friend to swap with you and get 10 more free trades.";
 }
@@ -185,6 +219,8 @@ module.exports = {
   menuOptionLines,
   mainMenu,
   verificationIntro,
+  greetingMenuBody,
+  sessionEndedMenuBody,
   welcomePrompt,
   thanksReply,
   wellbeingReply,
@@ -194,5 +230,5 @@ module.exports = {
   listingShareCopy,
   explainMissingListing,
   mainMenuListPayload,
-  menuOptionLines
+  verificationStartListPayload
 };

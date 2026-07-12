@@ -602,7 +602,7 @@ async function handleFindOffer(text, user, session) {
 async function handleSearchResults(text, user, session) {
   if (!isVerified(user)) {
     await clearSession(user, user.whatsapp_phone);
-    return "You need to verify before opening an Akara Trade. Type verify to start.";
+    return "You need to verify before opening an Akara Trade. Use the Start verification button in Akara to continue.";
   }
 
   if (isBrowseAllOffersIntent(text)) {

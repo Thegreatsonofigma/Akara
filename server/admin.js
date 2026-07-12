@@ -9,6 +9,20 @@ const { exchangeCompleteMessage, syncCompletedDealsCount } = require("./db/deals
 const { mainMenu } = require("./messages/copy");
 const { title } = require("./lib/format");
 const { displayReference } = require("./db/listings");
+const {
+  createDataSubjectRequest,
+  listDataSubjectRequests,
+  updateDataSubjectRequest,
+  createBreachIncident,
+  listBreachIncidents,
+  updateBreachIncident,
+  listProcessorContracts,
+  updateProcessorContract,
+  listRetentionRules,
+  listComplianceTasks,
+  updateComplianceTask,
+  getComplianceDashboard,
+} = require("./db/compliance");
 
 function requireAdmin(req) {
   const token = req.headers["x-akara-admin-token"];
@@ -257,12 +271,13 @@ async function notifyDisputeExchangeCompleted(dispute) {
 }
 
 async function getAdminOverview() {
-  const [users, listings, deals, disputes, verifications] = await Promise.all([
+  const [users, listings, deals, disputes, verifications, compliance] = await Promise.all([
     supabaseRequest("users?select=id,verification_status,risk_status,created_at&limit=1000"),
     supabaseRequest("listings?select=id,status,have_currency,want_currency,have_amount,want_amount,created_at&limit=1000"),
     supabaseRequest("deals?select=id,status,have_currency,want_currency,have_amount,want_amount,created_at&limit=1000"),
     supabaseRequest("disputes?select=id,status,created_at&limit=1000"),
     supabaseRequest("verification_requests?select=id,status,created_at&limit=1000"),
+    getComplianceDashboard(),
   ]);
 
   const activeListings = listings.filter((item) => item.status === "active");
@@ -281,7 +296,18 @@ async function getAdminOverview() {
       openDisputes: openDisputes.length,
       pendingVerifications: pendingVerifications.length,
       flaggedUsers: flaggedUsers.length,
-      needsReview: openDisputes.length + pendingVerifications.length + flaggedUsers.length,
+      privacyRequests: compliance.totals?.dataSubjectRequests || 0,
+      openBreaches: compliance.totals?.openBreaches || 0,
+      pendingProcessorReviews: compliance.totals?.pendingProcessorReviews || 0,
+      openComplianceTasks: compliance.totals?.openComplianceTasks || 0,
+      needsReview:
+        openDisputes.length +
+        pendingVerifications.length +
+        flaggedUsers.length +
+        (compliance.totals?.overdueDataSubjectRequests || 0) +
+        (compliance.totals?.openBreaches || 0) +
+        (compliance.totals?.pendingProcessorReviews || 0) +
+        (compliance.totals?.openComplianceTasks || 0),
     },
     recent: {
       users: users.slice(-5).reverse(),
@@ -292,7 +318,12 @@ async function getAdminOverview() {
         ...pendingVerifications.slice(0, 5).map((item) => ({ ...item, queue_type: "verification" })),
         ...openDisputes.slice(0, 5).map((item) => ({ ...item, queue_type: "dispute" })),
         ...flaggedUsers.slice(0, 5).map((item) => ({ ...item, queue_type: "flagged_user" })),
+        ...(compliance.queues?.dataSubjectRequests || []).slice(0, 3).map((item) => ({ ...item, queue_type: "privacy_request" })),
+        ...(compliance.queues?.breaches || []).slice(0, 3).map((item) => ({ ...item, queue_type: "breach" })),
+        ...(compliance.queues?.processorReviews || []).slice(0, 3).map((item) => ({ ...item, queue_type: "processor_review" })),
+        ...(compliance.queues?.complianceTasks || []).slice(0, 3).map((item) => ({ ...item, queue_type: "compliance_task" })),
       ].slice(0, 8),
+      compliance,
     },
     charts: {
       activity: lastSevenDays.map((day) => ({
@@ -309,11 +340,138 @@ async function getAdminOverview() {
   };
 }
 
+function pickAllowed(body, allowed) {
+  return Object.fromEntries(Object.entries(body || {}).filter(([key, value]) => allowed.includes(key) && value !== undefined));
+}
+
 async function handleAdminApi(req, res, url) {
   if (!requireAdmin(req)) return forbiddenAdmin(res);
 
   if (req.method === "GET" && url.pathname === "/admin/api/overview") {
     return jsonResponse(res, 200, { ok: true, data: await getAdminOverview() });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/compliance") {
+    return jsonResponse(res, 200, { ok: true, data: await getComplianceDashboard() });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/compliance/dsr") {
+    return jsonResponse(res, 200, { ok: true, data: await listDataSubjectRequests() });
+  }
+
+  if (req.method === "POST" && url.pathname === "/admin/api/compliance/dsr") {
+    const body = await readJsonBody(req);
+    if (!body.request_type) {
+      return jsonResponse(res, 400, { ok: false, error: "request_type is required." });
+    }
+    const request = await createDataSubjectRequest({
+      userId: body.user_id || null,
+      whatsappPhone: body.whatsapp_phone || null,
+      requestType: body.request_type,
+      description: body.description || null,
+      channel: body.channel || "admin",
+      metadata: body.metadata || {},
+    });
+    return jsonResponse(res, 201, { ok: true, data: request });
+  }
+
+  const dsrMatch = url.pathname.match(/^\/admin\/api\/compliance\/dsr\/([^/]+)$/);
+  if (req.method === "PATCH" && dsrMatch) {
+    const body = await readJsonBody(req);
+    const patch = pickAllowed(body, [
+      "status",
+      "description",
+      "identity_checked_at",
+      "legal_hold_reason",
+      "admin_owner",
+      "response_summary",
+      "completed_at",
+      "metadata",
+    ]);
+    return jsonResponse(res, 200, { ok: true, data: await updateDataSubjectRequest(dsrMatch[1], patch) });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/compliance/breaches") {
+    return jsonResponse(res, 200, { ok: true, data: await listBreachIncidents() });
+  }
+
+  if (req.method === "POST" && url.pathname === "/admin/api/compliance/breaches") {
+    const body = await readJsonBody(req);
+    if (!body.summary) {
+      return jsonResponse(res, 400, { ok: false, error: "summary is required." });
+    }
+    const incident = await createBreachIncident({
+      severity: body.severity || "low",
+      status: body.status || "suspected",
+      summary: body.summary,
+      affected_data_categories: body.affected_data_categories || [],
+      affected_subject_count: Number(body.affected_subject_count || 0),
+      notifiable_decision: body.notifiable_decision || null,
+      root_cause: body.root_cause || null,
+      remediation: body.remediation || null,
+      metadata: body.metadata || {},
+    });
+    return jsonResponse(res, 201, { ok: true, data: incident });
+  }
+
+  const breachMatch = url.pathname.match(/^\/admin\/api\/compliance\/breaches\/([^/]+)$/);
+  if (req.method === "PATCH" && breachMatch) {
+    const body = await readJsonBody(req);
+    const patch = pickAllowed(body, [
+      "severity",
+      "status",
+      "summary",
+      "affected_data_categories",
+      "affected_subject_count",
+      "contained_at",
+      "notifiable_decision",
+      "regulator_notified_at",
+      "users_notified_at",
+      "root_cause",
+      "remediation",
+      "metadata",
+    ]);
+    return jsonResponse(res, 200, { ok: true, data: await updateBreachIncident(breachMatch[1], patch) });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/compliance/processors") {
+    return jsonResponse(res, 200, { ok: true, data: await listProcessorContracts() });
+  }
+
+  const processorMatch = url.pathname.match(/^\/admin\/api\/compliance\/processors\/([^/]+)$/);
+  if (req.method === "PATCH" && processorMatch) {
+    const body = await readJsonBody(req);
+    const patch = pickAllowed(body, [
+      "dpa_status",
+      "risk_level",
+      "transfer_mechanism",
+      "contract_url",
+      "review_due_at",
+      "admin_notes",
+    ]);
+    return jsonResponse(res, 200, { ok: true, data: await updateProcessorContract(processorMatch[1], patch) });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/compliance/retention") {
+    return jsonResponse(res, 200, { ok: true, data: await listRetentionRules() });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/compliance/tasks") {
+    return jsonResponse(res, 200, { ok: true, data: await listComplianceTasks() });
+  }
+
+  const complianceTaskMatch = url.pathname.match(/^\/admin\/api\/compliance\/tasks\/([^/]+)$/);
+  if (req.method === "PATCH" && complianceTaskMatch) {
+    const body = await readJsonBody(req);
+    const patch = pickAllowed(body, [
+      "status",
+      "priority",
+      "owner",
+      "due_at",
+      "evidence_url",
+      "notes",
+    ]);
+    return jsonResponse(res, 200, { ok: true, data: await updateComplianceTask(complianceTaskMatch[1], patch) });
   }
 
   if (req.method === "GET" && url.pathname === "/admin/api/users") {
@@ -436,7 +594,7 @@ async function handleAdminApi(req, res, url) {
     } else {
       sendWhatsAppText(
         user.whatsapp_phone,
-        "Your Akara verification was not approved. Reply verify to submit again with clearer details."
+        "Your Akara verification was not approved. Use the Start verification button in Akara to submit again with clearer details."
       ).catch((error) => {
         console.error(`[admin] verification notice failed for ${user.whatsapp_phone}: ${error.message}`);
       });

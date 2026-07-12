@@ -19,7 +19,7 @@ const { getSession } = require("./db/sessions");
 const { buildReply } = require("./router");
 const { handleAdminApi, adminFilePath } = require("./admin");
 const { supabaseRequest, filterValue } = require("./lib/supabase");
-const { mainMenuListPayload, mainMenu } = require("./messages/copy");
+const { mainMenuListPayload, mainMenu, greetingMenuBody } = require("./messages/copy");
 const { handleWebsiteRoute } = require("./website");
 
 const activeInboundMessageIds = new Set();
@@ -28,12 +28,14 @@ const DEFAULT_IDLE_MENU_SCAN_MS = 60 * 1000;
 let idleMenuTimer = null;
 
 function isMainMenuReply(reply = "") {
-  return String(reply || "").trim().startsWith("*Find offers and trade with more confidence*");
+  return /^\*(Find offers and trade with more confidence|Choose your next move|Hi .+, choose your next move)\*/i
+    .test(String(reply || "").trim());
 }
 
 function splitReplyWithMainMenu(reply = "") {
   const text = String(reply || "");
-  const menuIndex = text.indexOf("*Find offers and trade with more confidence*");
+  const menuMatch = text.match(/\*(Find offers and trade with more confidence|Choose your next move|Hi .+, choose your next move)\*/i);
+  const menuIndex = menuMatch ? menuMatch.index : -1;
   if (menuIndex <= 0) return null;
   return {
     intro: text.slice(0, menuIndex).trim(),
@@ -43,6 +45,17 @@ function splitReplyWithMainMenu(reply = "") {
 
 async function sendAkaraReply(to, reply) {
   if (!reply) return null;
+  if (typeof reply === "object" && reply.type === "whatsapp_list") {
+    try {
+      return await sendWhatsAppList(to, reply.list);
+    } catch (error) {
+      console.error(`[webhook] WhatsApp list failed for ${to}: ${error.message}`);
+      if (reply.fallbackText) return sendWhatsAppText(to, reply.fallbackText);
+      if (reply.list?.body) return sendWhatsAppText(to, reply.list.body);
+      throw error;
+    }
+  }
+
   if (typeof reply === "object" && reply.type === "whatsapp_flow") {
     try {
       return await sendWhatsAppFlow(to, reply.flow);
@@ -137,10 +150,10 @@ async function sendIdleMenus(options = {}) {
     }
 
     try {
-      await sendWhatsAppList(session.whatsapp_phone, mainMenuListPayload("Choose what you want to do next on Akara."));
+      await sendWhatsAppList(session.whatsapp_phone, mainMenuListPayload(greetingMenuBody(user)));
     } catch (error) {
       console.error(`[idle-menu] list failed for ${session.whatsapp_phone}: ${error.message}`);
-      await sendWhatsAppText(session.whatsapp_phone, mainMenu());
+      await sendWhatsAppText(session.whatsapp_phone, mainMenu(user));
     }
 
     await markIdleMenuSent(session, now);
@@ -295,14 +308,47 @@ function handleWebhookGet(req, res, url) {
 function rememberPublicUrl(req) {
   const host = req.headers["x-forwarded-host"] || req.headers.host || "";
   if (!host) return;
+  if (isAdminHost(req)) return;
   const proto = req.headers["x-forwarded-proto"] || (String(host).includes("ngrok") ? "https" : "http");
   setRuntimePublicUrl(`${proto}://${host}`);
+}
+
+function headerValue(value) {
+  if (Array.isArray(value)) return value[0] || "";
+  return String(value || "").split(",")[0].trim();
+}
+
+function requestHost(req) {
+  const host = headerValue(req.headers["x-forwarded-host"] || req.headers.host);
+  return host.replace(/:\d+$/, "").toLowerCase();
+}
+
+function requestProtocol(req) {
+  return headerValue(req.headers["x-forwarded-proto"]) || "https";
+}
+
+function isAdminHost(req) {
+  return Boolean(config.adminHost && requestHost(req) === config.adminHost.toLowerCase());
+}
+
+function redirect(res, location, statusCode = 308) {
+  res.writeHead(statusCode, {
+    location,
+    "cache-control": "no-store",
+  });
+  res.end();
+}
+
+function adminRedirectUrl(req, url) {
+  const path = url.pathname.startsWith("/admin") ? url.pathname : `/admin${url.pathname}`;
+  return `${requestProtocol(req)}://${config.adminHost}${path}${url.search}`;
 }
 
 const server = http.createServer(async (req, res) => {
   try {
     rememberPublicUrl(req);
     const url = new URL(req.url, `http://${req.headers.host}`);
+    const onAdminHost = isAdminHost(req);
 
     if (req.method === "GET" && url.pathname === "/health") {
       return jsonResponse(res, 200, { ok: true, service: "akara-whatsapp-webhook" });
@@ -341,6 +387,14 @@ const server = http.createServer(async (req, res) => {
       const session = await getSession(from);
       const reply = await buildReply(text, user, session);
       return jsonResponse(res, 200, { ok: true, from, reply });
+    }
+
+    if (onAdminHost && url.pathname === "/") {
+      return redirect(res, "/admin", 302);
+    }
+
+    if (!onAdminHost && config.adminHost && url.pathname.startsWith("/admin")) {
+      return redirect(res, adminRedirectUrl(req, url));
     }
 
     if (url.pathname === "/admin") {

@@ -1,6 +1,7 @@
 const { optionalEnv } = require("../config");
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { formatMoney, moneyNumber } = require("../lib/format");
+const { recordConsent } = require("./compliance");
 
 async function findOrCreateUser(whatsappPhone, displayName) {
   const encodedPhone = filterValue(whatsappPhone);
@@ -15,7 +16,23 @@ async function findOrCreateUser(whatsappPhone, displayName) {
     }),
   });
 
-  return created[0];
+  const user = created[0];
+  recordConsent({
+    userId: user.id,
+    whatsappPhone,
+    purpose: "whatsapp_onboarding_and_service_messages",
+    lawfulBasis: "consent_and_contract_preparation",
+    source: "whatsapp_first_contact",
+    consentText: "User initiated or continued a WhatsApp conversation with Akara.",
+    metadata: {
+      displayName: displayName || null,
+      notice: "Akara privacy notice and WhatsApp messaging terms must be available before production launch.",
+    },
+  }).catch((error) => {
+    console.error(`[compliance] consent capture failed for ${whatsappPhone}: ${error.message}`);
+  });
+
+  return user;
 }
 
 async function updateUser(userId, values) {

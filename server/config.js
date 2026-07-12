@@ -50,6 +50,7 @@ const config = {
   whatsappGraphVersion: process.env.WHATSAPP_GRAPH_VERSION || "v20.0",
   whatsappPhoneNumberId: optionalEnv("WHATSAPP_PHONE_NUMBER_ID"),
   akaraWhatsappNumber: optionalEnv("AKARA_WHATSAPP_NUMBER", "15556733907"),
+  adminHost: optionalEnv("AKARA_ADMIN_HOST", "admin.tryakara.com"),
   akaraSecurityFlowId: optionalEnv("AKARA_SECURITY_FLOW_ID"),
   akaraVerificationFlowId: optionalEnv("AKARA_VERIFICATION_FLOW_ID"),
   publicUrl: optionalEnv("AKARA_PUBLIC_URL"),

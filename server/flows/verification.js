@@ -143,7 +143,7 @@ function verificationStepPrompt(step, context = {}) {
   if (step === "payment_more") return PAYMENT_MORE_PROMPT;
   if (step === "payment_confirm") return formatPayoutReview(context);
   if (String(step || "").startsWith("payment_")) return paymentStepPrompt(step, context);
-  return "Type verify to continue verification.";
+  return "Use the Start verification button to continue verification.";
 }
 
 // Bare commands must never be stored as somebody's name or nationality; the

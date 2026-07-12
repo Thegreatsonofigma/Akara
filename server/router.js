@@ -39,7 +39,18 @@ const { isVerified, isOnHold } = require("./db/users");
 const { getSession, upsertSession, clearSession } = require("./db/sessions");
 const { extractListingCode, extractDealCode } = require("./db/listings");
 const { getDealByCodeForUser, getLatestOpenDealForUser } = require("./db/deals");
-const { mainMenu, verificationIntro, mainMenuListPayload, thanksReply, wellbeingReply, explainMissingListing, menuOptionLines } = require("./messages/copy");
+const {
+  mainMenu,
+  verificationIntro,
+  mainMenuListPayload,
+  verificationStartListPayload,
+  greetingMenuBody,
+  sessionEndedMenuBody,
+  thanksReply,
+  wellbeingReply,
+  explainMissingListing,
+  menuOptionLines,
+} = require("./messages/copy");
 const { scopedAssistantReply } = require("./messages/assistant");
 const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
@@ -108,6 +119,20 @@ async function sendMenuList(user, body) {
   }
 }
 
+async function sendVerificationStartList(user, body) {
+  try {
+    await sendWhatsAppList(user.whatsapp_phone, verificationStartListPayload(body));
+    return null;
+  } catch (error) {
+    console.error(`[router] verification list failed for ${user.whatsapp_phone}: ${error.message}`);
+    return [
+      body,
+      "",
+      "Open Akara and use Start verification to continue.",
+    ].join("\n");
+  }
+}
+
 function listingCodesFromText(text) {
   const codes = [];
   const regex = /(?:^|\n)\*?\s*(\d{1,2})\.\s*(AKR-LIST-\d+)\*?/gi;
@@ -136,7 +161,7 @@ async function resolveQuotedReply(text, user, incoming = {}) {
   const number = selectedOptionNumber(text);
   if (!quotedText || !number) return null;
 
-  if (/\*?Find offers and trade with more confidence\*?/i.test(quotedText)) {
+  if (/\*?(Find offers and trade with more confidence|choose your next move|choose what you want to do next|make offer)\*?/i.test(quotedText)) {
     if (number === 1) {
       await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {});
       return makeOfferPrompt();
@@ -190,7 +215,7 @@ function actionInterruptsFlow(interpretedAction, flow) {
 // check (exact commands, codes, session flows), so routing still works when
 // the interpretation arrives as "unknown" (OpenAI off or failed).
 async function dispatchInterpretedAction(interpreted, text, user, session, incoming = {}) {
-  const command = text.trim().toLowerCase();
+  const command = normalizeInteractiveCommand(text.trim().toLowerCase());
   const interpretedAction = interpreted?.action || "unknown";
   const details = interpreted?.details || {};
   const answer = typeof interpreted?.answer === "string" ? interpreted.answer.trim() : "";
@@ -212,6 +237,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     // never trapped on the "reply with the next detail" screen. Submitted
     // (pending_review) and suspended profiles keep their intro instead.
     const wantsVerify = interpretedAction === "verify" || command === "verify" || command === "verify me"
+      || command === "start verification" || /\b(start|begin|resume|continue)\s+(my\s+)?verif/i.test(command)
       || command === "1" || inferIntent(text) === "verify";
     if (wantsVerify && !["pending_review", "suspended"].includes(user.verification_status)) {
       return startVerification(user);
@@ -219,24 +245,27 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
     if (["pending_input", "pending_review", "rejected", "suspended"].includes(user.verification_status)) {
       if (interpretedAction === "question" || isAssistantQuestion(text)) return scopedAssistantReply(text, user);
+      if (user.verification_status === "rejected") {
+        return sendVerificationStartList(user, verificationIntro(user));
+      }
       return verificationIntro(user);
     }
 
     if (interpretedAction === "greeting" || isGreeting(text)) {
-      return verificationIntro(user);
+      return sendVerificationStartList(user, verificationIntro(user));
     }
 
     if (interpretedAction === "question" || isAssistantQuestion(text)) {
       return scopedAssistantReply(text, user);
     }
 
-    return [
+    return sendVerificationStartList(user, [
       "Verification comes first 🔐",
       "",
       "Akara only lets verified people make offers or start exchanges. It keeps the trade trail cleaner for everyone.",
       "",
-      "Type verify to start.",
-    ].join("\n");
+      "Use the button below to start.",
+    ].join("\n"));
   }
 
   // Settings confirmations are destructive yes/no questions, so they are
@@ -251,7 +280,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   // flow was active: asking for something outside the flow serves it at once.
   if (interpretedAction === "menu" || isMenuCommand(text)) {
     await clearSession(user, user.whatsapp_phone);
-    return sendMenuList(user, mainMenu());
+    return sendMenuList(user, mainMenu(user));
   }
 
   if (interpretedAction === "bulk_cancel_listings" || isBulkListingCancelIntent(text)) return requestBulkListingCancel(user);
@@ -279,12 +308,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   if (!session?.current_flow && (interpretedAction === "thanks" || isSessionClosureMessage(text))) {
     await clearSession(user, user.whatsapp_phone);
-    return [
-      title("Done"),
-      caption("That session is closed."),
-      "",
-      mainMenu(),
-    ].join("\n");
+    return sendMenuList(user, sessionEndedMenuBody(user));
   }
 
   // Thanks is unambiguous, so it gets a warm reply even mid-flow without
@@ -513,11 +537,15 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   if (bareGreeting) {
     await clearSession(user, user.whatsapp_phone);
-    return sendMenuList(user, mainMenu());
+    return sendMenuList(user, greetingMenuBody(user));
   }
 
   if (command === "verify" || command === "verify me" || interpretedAction === "verify") {
-    return sendMenuList(user, "You are already verified ✅\n\n" + mainMenu());
+    return sendMenuList(user, [
+      "You are already verified ✅",
+      "",
+      mainMenu(user),
+    ].join("\n"));
   }
 
   const paymentSetupCurrency = parsePaymentCurrency(text) || details.payment_currency || null;
@@ -653,7 +681,7 @@ function paymentProfileInterrupt(interpretedAction) {
 }
 
 async function routeMessage(text, user, session, incoming = {}) {
-  const command = text.trim().toLowerCase();
+  const command = normalizeInteractiveCommand(text.trim().toLowerCase());
 
   if (!command && session?.current_flow === "verification") {
     return handleVerification(text, user, session, incoming);
@@ -677,18 +705,17 @@ async function routeMessage(text, user, session, incoming = {}) {
 
     await clearSession(user, user.whatsapp_phone);
     return isVerified(user)
-      ? [
-          title("Stopped"),
-          caption("That flow is closed."),
+      ? sendMenuList(user, sessionEndedMenuBody(user))
+      : sendVerificationStartList(user, [
+          "No problem. Verification paused.",
           "",
-          mainMenu(),
-        ].join("\n")
-      : "No problem. Verification paused. Type verify when you are ready.";
+          "Use the button below when you are ready to continue.",
+        ].join("\n"));
   }
 
   if (command === "demo approve") {
     await clearSession(user, user.whatsapp_phone);
-    return "Demo approval is now disabled. Type verify to submit a real verification request.";
+    return sendVerificationStartList(user, "Demo approval is disabled. Use the button below to submit a real verification request.");
   }
 
   if (isVerified(user) && ["post", "make offer", "create listing", "create offer", "list offer"].includes(command)) {
@@ -729,6 +756,19 @@ async function routeMessage(text, user, session, incoming = {}) {
     || session?.current_flow === "verification"
     || session?.current_flow === "payment_profile";
   return skipAnswer ? reply : applyInterpretedAnswer(reply, interpreted.answer);
+}
+
+function normalizeInteractiveCommand(command) {
+  const map = {
+    make_offer: "make offer",
+    find_offers: "find offers",
+    my_listings: "my listings",
+    view_history: "history",
+    view_profile: "profile",
+    add_payout: "add payout",
+    verify: "verify",
+  };
+  return map[command] || command;
 }
 
 async function routeInterpreted(interpreted, text, user, session, incoming = {}) {
@@ -791,13 +831,28 @@ function describeIncomingForHistory(text, incoming = {}) {
   return value;
 }
 
+function describeOutgoingForHistory(reply) {
+  if (!reply) return "";
+  if (typeof reply === "string") return reply;
+  if (reply.type === "whatsapp_list") {
+    return reply.fallbackText || reply.list?.body || "[sent interactive options]";
+  }
+  if (reply.type === "whatsapp_flow") {
+    return reply.fallbackText || reply.flow?.body || "[sent WhatsApp Flow]";
+  }
+  if (reply.type === "media") {
+    return reply.caption || reply.fallbackText || "[sent media]";
+  }
+  return String(reply);
+}
+
 async function buildReply(text, user, session, incoming = {}) {
   const reply = await routeMessage(text, user, session, incoming);
 
   // Recorded after routing so the interpreter's transcript never contains the
   // message it is currently classifying.
   recordMessage(user.whatsapp_phone, "user", describeIncomingForHistory(text, incoming));
-  recordMessage(user.whatsapp_phone, "assistant", reply);
+  recordMessage(user.whatsapp_phone, "assistant", describeOutgoingForHistory(reply));
 
   return reply;
 }

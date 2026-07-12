@@ -408,6 +408,8 @@ function getMessageText(message) {
       return message.interactive?.nfm_reply?.name || "flow response";
     }
     return (
+      message.interactive?.button_reply?.id ||
+      message.interactive?.list_reply?.id ||
       message.interactive?.button_reply?.title ||
       message.interactive?.list_reply?.title ||
       ""

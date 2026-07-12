@@ -1,3 +1,10 @@
+drop table if exists public.compliance_tasks cascade;
+drop table if exists public.retention_rules cascade;
+drop table if exists public.processor_contracts cascade;
+drop table if exists public.data_breach_incidents cascade;
+drop table if exists public.data_deletion_jobs cascade;
+drop table if exists public.data_subject_requests cascade;
+drop table if exists public.privacy_consents cascade;
 drop table if exists public.audit_events cascade;
 drop table if exists public.message_sessions cascade;
 drop table if exists public.security_challenges cascade;
@@ -14,6 +21,12 @@ drop table if exists public.users cascade;
 
 drop function if exists public.set_updated_at cascade;
 
+drop type if exists public.compliance_task_status cascade;
+drop type if exists public.processor_contract_status cascade;
+drop type if exists public.breach_status cascade;
+drop type if exists public.breach_severity cascade;
+drop type if exists public.data_subject_request_status cascade;
+drop type if exists public.data_subject_request_type cascade;
 drop type if exists public.actor_type cascade;
 drop type if exists public.dispute_status cascade;
 drop type if exists public.fee_status cascade;
