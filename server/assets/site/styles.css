@@ -103,13 +103,13 @@ h3 {
 }
 
 h1 {
-  font-size: clamp(3rem, 5.2vw, 5.9rem);
-  max-width: 11ch;
+  font-size: clamp(2.45rem, 3.7vw, 4.45rem);
+  max-width: 14.5ch;
 }
 
 h2 {
-  font-size: clamp(1.9rem, 3vw, 3.35rem);
-  max-width: 14ch;
+  font-size: clamp(1.55rem, 2.25vw, 2.7rem);
+  max-width: 17ch;
 }
 
 h3 {
@@ -252,11 +252,11 @@ textarea {
 
 .hero {
   position: relative;
-  min-height: calc(100vh - 80px);
+  min-height: calc(100vh - 92px);
   display: grid;
   align-items: center;
   overflow: hidden;
-  padding: 4.6rem 0 4rem;
+  padding: 4rem 0 3.6rem;
 }
 
 .hero::after,
@@ -277,14 +277,14 @@ textarea {
 
 .hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.84fr);
+  grid-template-columns: minmax(0, 0.94fr) minmax(360px, 0.9fr);
   align-items: center;
-  gap: clamp(2rem, 5vw, 6rem);
+  gap: clamp(2rem, 4.4vw, 5rem);
 }
 
 .hero-copy {
   display: grid;
-  gap: 1.4rem;
+  gap: 1.18rem;
 }
 
 .hero-copy h1 span {
@@ -301,10 +301,10 @@ textarea {
 }
 
 .hero-lede {
-  max-width: 36rem;
+  max-width: 33rem;
   color: #fff;
-  font-size: clamp(1.08rem, 1.45vw, 1.35rem);
-  line-height: 1.38;
+  font-size: clamp(1rem, 1.16vw, 1.2rem);
+  line-height: 1.44;
 }
 
 .hero-subcopy {
@@ -373,6 +373,123 @@ textarea {
   position: relative;
   min-height: 640px;
   perspective: 1200px;
+}
+
+.whatsapp-shot,
+.real-listing-preview,
+.real-menu-preview,
+.chat-screenshot-panel,
+.real-card-shot,
+.listing-side-card {
+  overflow: hidden;
+  background: #050505;
+}
+
+.whatsapp-shot,
+.chat-screenshot-panel {
+  position: absolute;
+  margin: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 34px 100px rgba(0, 0, 0, 0.72);
+}
+
+.whatsapp-shot img,
+.real-listing-preview img,
+.real-menu-preview img,
+.chat-screenshot-panel img,
+.real-card-shot img,
+.listing-side-card img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hero-chat-shot {
+  inset: 0 7% auto auto;
+  width: min(385px, 88vw);
+  height: 590px;
+  border-radius: 28px;
+  transform: rotateY(-10deg) rotateX(4deg);
+  animation: phone-drift 9s ease-in-out infinite;
+}
+
+.hero-chat-shot > img {
+  object-position: center top;
+}
+
+.shot-brand-mask {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  height: 112px;
+  padding: 1rem 1.25rem 0.8rem;
+  background: linear-gradient(180deg, #0b0b0b 0%, #0b0b0b 72%, rgba(11, 11, 11, 0.72) 100%);
+  color: #fff;
+}
+
+.shot-brand-mask img {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+}
+
+.shot-brand-mask span {
+  font-weight: 850;
+}
+
+.shot-brand-mask small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 0.78rem;
+}
+
+.real-listing-preview {
+  left: 0;
+  bottom: 13%;
+  width: min(430px, 72vw);
+  transform: rotateZ(-1.5deg);
+}
+
+.real-listing-preview img {
+  aspect-ratio: 2 / 1;
+}
+
+.real-menu-preview {
+  right: 0;
+  bottom: 0;
+  width: min(255px, 45vw);
+  height: 430px;
+  border-radius: 20px;
+}
+
+.real-menu-preview img {
+  object-position: center bottom;
+}
+
+.real-card-shot {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.real-card-shot::before {
+  content: none;
+}
+
+.real-card-shot > * {
+  position: static;
+}
+
+.real-card-shot img {
+  aspect-ratio: 2 / 1;
 }
 
 .phone-shell {
@@ -632,6 +749,27 @@ textarea {
   font-weight: 800;
 }
 
+.chat-screenshot-panel {
+  position: relative;
+  min-height: 310px;
+  border-radius: 26px;
+}
+
+.chat-screenshot-panel img {
+  object-position: center top;
+}
+
+.chat-screenshot-panel .shot-brand-mask {
+  height: 74px;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(180deg, #0b0b0b 0%, #0b0b0b 70%, rgba(11, 11, 11, 0.62) 100%);
+}
+
+.chat-screenshot-panel .shot-brand-mask img {
+  width: 32px;
+  height: 32px;
+}
+
 .listing-preview {
   left: 0;
   bottom: 8%;
@@ -747,6 +885,21 @@ textarea {
 .listing-shot-pills span:first-child b {
   background: var(--red);
   color: #fff;
+}
+
+.standalone-listing {
+  display: grid;
+  gap: 1rem;
+}
+
+.listing-side-card {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.listing-side-card img {
+  aspect-ratio: 2 / 1;
 }
 
 .listing-preview p,
@@ -1085,96 +1238,171 @@ textarea {
 .persona-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1rem;
+  gap: clamp(0.85rem, 1.3vw, 1.2rem);
 }
 
 .persona-card {
   display: grid;
-  gap: 1rem;
+  gap: 0.95rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 0.75rem;
-  background: #080808;
+  padding: 0.7rem 0.7rem 1rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 42%),
+    #080808;
   overflow: hidden;
 }
 
 .persona-photo {
   position: relative;
-  min-height: 250px;
+  min-height: 292px;
   border-radius: 8px;
-  background:
-    radial-gradient(circle at 50% 26%, rgba(255, 255, 255, 0.9) 0 2.1rem, transparent 2.2rem),
-    radial-gradient(ellipse at 50% 90%, rgba(157, 255, 30, 0.9) 0 4.6rem, transparent 4.7rem),
-    linear-gradient(135deg, rgba(66, 43, 243, 0.5), rgba(248, 0, 0, 0.18)),
-    #121212;
+  background: #121212;
   overflow: hidden;
+}
+
+.persona-photo img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(0.92) contrast(1.05);
+  transform: scale(1.01);
+}
+
+.persona-stock-slot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: end;
+  gap: 0.5rem;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at 18% 16%, rgba(157, 255, 30, 0.26), transparent 32%),
+    radial-gradient(circle at 82% 0%, rgba(53, 127, 255, 0.22), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+    #111;
+}
+
+.persona-stock-slot::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: linear-gradient(180deg, transparent, #000 24%, #000);
+  content: "";
+}
+
+.persona-stock-slot > * {
+  position: relative;
+  z-index: 1;
+}
+
+.persona-stock-slot small {
+  width: fit-content;
+  border: 1px solid rgba(157, 255, 30, 0.34);
+  border-radius: 999px;
+  padding: 0.32rem 0.52rem;
+  color: var(--green);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.persona-stock-slot strong {
+  max-width: 11rem;
+  color: #fff;
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.persona-stock-slot span {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  display: block;
+  min-height: 0;
+  max-width: 13rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.35;
+  backdrop-filter: none;
 }
 
 .persona-photo::before {
   position: absolute;
-  left: 50%;
-  bottom: -22px;
-  width: 132px;
-  height: 170px;
-  border-radius: 70px 70px 24px 24px;
-  background: #1c1c1c;
-  content: "";
-  transform: translateX(-50%);
-}
-
-.persona-photo::after {
-  position: absolute;
-  left: 50%;
-  top: 66px;
-  width: 84px;
-  height: 84px;
-  border-radius: 50%;
-  background: #3b2418;
-  box-shadow: 0 0 0 13px #090909;
-  content: "";
-  transform: translateX(-50%);
-}
-
-.persona-photo span,
-.persona-photo i,
-.persona-photo b {
-  position: absolute;
-  display: block;
-  border-radius: 999px;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.02), rgba(0, 0, 0, 0.72)),
+    radial-gradient(circle at 20% 15%, rgba(157, 255, 30, 0.22), transparent 42%);
   content: "";
 }
 
 .persona-photo span {
-  left: 22px;
-  top: 22px;
-  width: 64px;
-  height: 64px;
+  position: absolute;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 0.75rem;
   border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.66);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  backdrop-filter: blur(12px);
 }
 
-.persona-photo i {
-  right: 18px;
-  bottom: 24px;
-  width: 80px;
-  height: 80px;
-  background: rgba(157, 255, 30, 0.18);
+.persona-photo .persona-stock-slot {
+  z-index: 0;
 }
 
-.persona-photo b {
-  right: 34px;
-  top: 34px;
-  width: 42px;
-  height: 42px;
-  background: rgba(255, 255, 255, 0.1);
+.persona-photo .persona-stock-slot > * {
+  z-index: 2;
+}
+
+.persona-photo .persona-stock-slot span {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  display: block;
+  min-height: 0;
+  max-width: 13rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.35;
+  backdrop-filter: none;
 }
 
 .persona-card h3 {
-  font-size: 1.25rem;
+  font-size: 1.08rem;
 }
 
 .persona-card p {
-  margin-top: 0.55rem;
-  font-size: 0.94rem;
+  margin-top: 0.48rem;
+  font-size: 0.88rem;
+  line-height: 1.44;
 }
 
 .page-showcase {
@@ -1442,7 +1670,7 @@ details p {
 .subhero {
   position: relative;
   overflow: hidden;
-  padding: clamp(5rem, 10vw, 8rem) 0 clamp(3.5rem, 7vw, 5.5rem);
+  padding: clamp(4.4rem, 8.5vw, 7.1rem) 0 clamp(3.2rem, 6vw, 5rem);
 }
 
 .subhero .container {
@@ -1451,13 +1679,13 @@ details p {
 }
 
 .subhero h1 {
-  max-width: 15ch;
-  font-size: clamp(2.8rem, 5.6vw, 5.8rem);
+  max-width: 16ch;
+  font-size: clamp(2.3rem, 4.55vw, 4.9rem);
 }
 
 .subhero p:not(.eyebrow) {
-  max-width: 54rem;
-  font-size: clamp(1.02rem, 1.45vw, 1.2rem);
+  max-width: 48rem;
+  font-size: clamp(0.98rem, 1.18vw, 1.1rem);
 }
 
 .trust-stage-grid {
@@ -1929,6 +2157,23 @@ details p {
     min-height: 620px;
   }
 
+  .hero-chat-shot {
+    inset-inline: 50% auto;
+    animation: none;
+    transform: translateX(-50%);
+  }
+
+  .real-listing-preview {
+    left: 50%;
+    bottom: 2%;
+    transform: translateX(-50%);
+  }
+
+  .real-menu-preview {
+    right: 3%;
+    bottom: 6%;
+  }
+
   .phone-shell {
     inset-inline: 50% auto;
     animation: none;
@@ -2014,6 +2259,24 @@ details p {
 
   .product-stage {
     min-height: 560px;
+  }
+
+  .hero-chat-shot {
+    width: min(330px, 94vw);
+    height: 500px;
+  }
+
+  .shot-brand-mask {
+    height: 96px;
+  }
+
+  .real-listing-preview {
+    width: min(330px, 92vw);
+    bottom: 3%;
+  }
+
+  .real-menu-preview {
+    display: none;
   }
 
   .phone-shell {

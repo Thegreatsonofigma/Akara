@@ -128,7 +128,17 @@ async function send(phone, text, { interpret, media, quotedText } = {}) {
   const user = await findOrCreateUser(phone, "Test User");
   const session = await getSession(phone);
   const incoming = { from: phone, text, media: media || null, quotedText: quotedText || "" };
-  return buildReply(text, user, session, incoming);
+  const beforeLists = listSends.length;
+  const reply = await buildReply(text, user, session, incoming);
+  if (reply === null && listSends.length > beforeLists) return lastListBody();
+  if (reply && typeof reply === "object") {
+    if (typeof reply.reply === "string") return reply.reply;
+    if (typeof reply.body === "string") return reply.body;
+    if (reply.type === "whatsapp_list") return reply.fallbackText || reply.list?.body || "";
+    if (reply.type === "whatsapp_flow") return reply.fallbackText || reply.flow?.body || "";
+    if (reply.type === "media") return reply.caption || reply.fallbackText || "";
+  }
+  return reply;
 }
 
 async function sessionFlow(phone) {
@@ -180,8 +190,8 @@ function seedListing(owner, values) {
     have_amount: values.have_amount,
     want_amount: values.want_amount,
     listing_type: values.listing_type || "fixed",
-    status: "active",
-    created_at: new Date().toISOString(),
+    status: values.status || "active",
+    created_at: values.created_at || new Date().toISOString(),
   };
   __table("listings").push(listing);
   return listing;
@@ -265,7 +275,7 @@ async function run() {
   // ---------- unverified journey
   scenario("unverified journey");
   let reply = await send(ALICE, "hi");
-  check("greeting → verification intro", reply.includes("Welcome to Akara"), reply);
+  check("greeting → verification intro", reply.includes("First, let's verify you"), reply);
 
   reply = await send(ALICE, "my profile");
   check("unverified profile is scoped", reply.includes("*Your profile*"), reply);
@@ -301,7 +311,7 @@ async function run() {
   // ---------- scoped views
   scenario("scoped views");
   reply = await send(ALICE, "menu");
-  check("menu shows core options", reply === null && lastListBody().includes("`make offer`") && lastListBody().includes("`find offers`"), JSON.stringify({ reply, body: lastListBody() }));
+  check("menu shows core options", reply.includes("`make offer`") && reply.includes("`find offers`"), JSON.stringify({ reply, body: lastListBody() }));
 
   reply = await send(ALICE, "profile");
   check("profile view title", reply.includes("*Your profile*"), reply);
@@ -311,8 +321,8 @@ async function run() {
   check("profile has no payout list", !reply.includes("*Payouts*"), reply);
 
   reply = await send(ALICE, "okay thanks");
-  check("session closure returns the menu", reply.includes("*Find offers and trade with more confidence*"), reply);
-  check("session closure is calm", reply.includes("*Done*"), reply);
+  check("session closure returns the menu", reply.includes("Choose what you want to do next on Akara"), reply);
+  check("session closure is calm", reply.includes("Done"), reply);
   removeSeededDeals(completedProfileDeals);
 
   // ---------- inactivity menu nudge
@@ -347,6 +357,14 @@ async function run() {
 
   reply = await send(ALICE, "my transactions");
   check("history synonym works", reply.includes("No transaction history yet"), reply);
+
+  reply = await send(ALICE, "1");
+  check("typed menu 1 opens make offer", reply.includes("Tell me what currency you have"), reply);
+  await send(ALICE, "cancel");
+
+  reply = await send(ALICE, "2");
+  check("typed menu 2 browses offers", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
+  await send(ALICE, "cancel");
 
   reply = await send(ALICE, "5", { quotedText: "*Akara menu*\n1. make offer" });
   check("quoted menu 5 → scoped profile", reply.includes("*Your profile*"), reply);
@@ -511,12 +529,12 @@ async function run() {
   check("have-only search understands can-send phrasing", reply.includes("AKR-LIST-088"), reply);
 
   reply = await send(ALICE, "I need KES 9999999");
-  check("need-only no match asks what user has", reply.includes("What currency do you have to offer"), reply);
+  check("need-only no match asks what user has", reply.includes("Tell me what currency you have"), reply);
   check("need-only no match keeps requested currency", reply.includes("9,999,999 KES"), reply);
   check("need-only no match does not ask needed currency again", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
 
   reply = await send(ALICE, "I can give 9999999 XAF");
-  check("have-only no match asks what user needs", reply.includes("What currency do you need in return"), reply);
+  check("have-only no match asks what user needs", reply.includes("Tell me what currency you want in return"), reply);
   check("have-only no match keeps offered currency", reply.includes("9,999,999 XAF"), reply);
   haveOnlyListing.status = "closed";
 
@@ -543,7 +561,7 @@ async function run() {
   check("bob confirms receipt", reply.includes("Receipt confirmed ✅"), reply);
 
   reply = await send(ALICE, "menu");
-  check("menu escapes deal room", reply === null && lastListBody().includes("*Find offers and trade with more confidence*"), JSON.stringify({ reply, body: lastListBody() }));
+  check("menu escapes deal room", reply.includes("choose your next move"), JSON.stringify({ reply, body: lastListBody() }));
   check("deal room released", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "what's next for my trade?", { interpret: { action: "trade_action" } });
@@ -570,8 +588,8 @@ async function run() {
   reply = await send(ALICE, "close dispute");
   check("opener can withdraw dispute", reply.includes("Dispute withdrawn"), reply);
 
-  // ---------- flexible listing negotiation
-  scenario("flexible listing negotiation");
+  // ---------- negotiable listing negotiation
+  scenario("negotiable listing negotiation");
   const charlieRow = seedVerifiedUser(CHARLIE, "Charlie Owner");
   seedPayout(charlieRow, "NGN");
   seedPayout(charlieRow, "RWF");
@@ -586,7 +604,7 @@ async function run() {
 
   reply = await send(ALICE, "open AKR-LIST-091");
   check("negotiable listing starts negotiation", reply.includes("*Negotiable listing*"), reply);
-  check("flexible listing does not instantly reserve", (await sessionFlow(ALICE)) === "negotiation", reply);
+  check("negotiable listing does not instantly reserve", (await sessionFlow(ALICE)) === "negotiation", reply);
 
   reply = await send(ALICE, "offer 105000 rwf");
   check("proposal is sent", reply.includes("*Proposal sent*") && reply.includes("105,000 RWF"), reply);
@@ -689,7 +707,7 @@ async function run() {
   check("find does not ask follow-up questions", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you have?"), reply);
 
   reply = await send(ALICE, "menu");
-  check("menu escapes find flow", reply === null && lastListBody().includes("*Find offers and trade with more confidence*"), JSON.stringify({ reply, body: lastListBody() }));
+  check("menu escapes find flow", reply.includes("choose your next move"), JSON.stringify({ reply, body: lastListBody() }));
   check("find flow released", (await sessionFlow(ALICE)) === null);
 
   // ---------- settings: edit instead of new payout + bulk confirm
@@ -698,6 +716,42 @@ async function run() {
   check("update edits existing payout", reply.includes("Edit NGN payout") || reply.includes("*Edit"), reply);
   check("update does not start add flow", !reply.includes("Choose where incoming payments should land"), reply);
   await send(ALICE, "cancel");
+
+  seedListing(aliceRow, {
+    code: "AKR-LIST-778",
+    have_currency: "NGN",
+    have_amount: 5000,
+    want_currency: "RWF",
+    want_amount: 5600,
+    created_at: "2099-01-01T00:00:00.000Z",
+  });
+  reply = await send(ALICE, "cancel listing 1");
+  check("single listing cancel asks to confirm", reply.includes("Close AKR-LIST-778?"), reply);
+  check("single listing cancel prompt is scoped", !reply.includes("Manage payout details") && !reply.includes("*Payouts*"), reply);
+
+  reply = await send(ALICE, "confirm");
+  check("single listing cancel completes", reply.includes("*Listing closed*") && reply.includes("off search"), reply);
+  check("single listing cancel does not dump profile", !reply.includes("Manage payout details") && !reply.includes("*Payouts*") && !reply.includes("*Profile*"), reply);
+
+  seedListing(aliceRow, {
+    code: "AKR-LIST-779",
+    have_currency: "GHS",
+    have_amount: 200,
+    want_currency: "NGN",
+    want_amount: 10000,
+    status: "reserved",
+    created_at: "2099-01-02T00:00:00.000Z",
+  });
+  reply = await send(ALICE, "cancel listing 1");
+  check("reserved listing cancel is refused", reply.includes("*Cannot close this listing*") && reply.includes("dispute"), reply);
+  check("reserved listing refusal is scoped", !reply.includes("Manage payout details") && !reply.includes("*Payouts*") && !reply.includes("*Profile*"), reply);
+
+  const listingRows = __table("listings");
+  for (let index = listingRows.length - 1; index >= 0; index -= 1) {
+    if (["AKR-LIST-778", "AKR-LIST-779"].includes(listingRows[index].listing_code)) {
+      listingRows.splice(index, 1);
+    }
+  }
 
   seedListing(aliceRow, { code: "AKR-LIST-777", have_currency: "NGN", have_amount: 10000, want_currency: "GHS", want_amount: 200 });
   reply = await send(ALICE, "cancel all my listings");
@@ -735,11 +789,11 @@ async function run() {
   check("thanks mid-flow is warm", reply.includes("You're welcome"), reply);
   check("thanks keeps the flow", (await sessionFlow(ALICE)) === "create_listing");
   reply = await send(ALICE, "hi");
-  check("greeting mid-flow restarts with the menu list", reply === null && lastListBody().includes("*Find offers and trade with more confidence*"), JSON.stringify({ reply, body: lastListBody() }));
+  check("greeting mid-flow restarts with the menu list", reply.includes("Choose what you want to do next on Akara"), JSON.stringify({ reply, body: lastListBody() }));
   check("greeting releases flow", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "how far");
-  check("wellbeing reply", reply === null && lastListBody().includes("I dey alright"), JSON.stringify({ reply, body: lastListBody() }));
+  check("wellbeing reply", reply.includes("I dey alright"), JSON.stringify({ reply, body: lastListBody() }));
 
   // ---------- reserve without context
   scenario("reserve guidance");

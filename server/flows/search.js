@@ -125,10 +125,13 @@ async function showNeedOnlyOfferMatches(user, context) {
     });
 
     return [
-      title(`No ${wantedCurrency} offer yet`),
-      `I could not find a live listing that can send ${formatMoney(requestedAmount, wantedCurrency)} right now.`,
+      title(`No ${wantedCurrency} offer found`),
+      caption(`I checked live listings that can send ${formatMoney(requestedAmount, wantedCurrency)}.`),
       "",
-      "What currency do you have to offer for it?",
+      "Nothing currently covers that amount.",
+      "",
+      title("Next step"),
+      "Tell me what currency you have, and I can prepare your own listing for people to find.",
       "",
       currencyHelpLine(wantedCurrency),
     ].join("\n");
@@ -218,10 +221,13 @@ async function showHaveOnlyOfferMatches(user, context) {
     });
 
     return [
-      title(`No one needs ${offeredCurrency} yet`),
-      `I could not find a live listing that needs up to ${formatMoney(offeredAmount, offeredCurrency)} right now.`,
+      title(`No ${offeredCurrency} request found`),
+      caption(`I checked live listings that can receive up to ${formatMoney(offeredAmount, offeredCurrency)}.`),
       "",
-      "What currency do you need in return?",
+      "No current listing fits that side of the exchange.",
+      "",
+      title("Next step"),
+      "Tell me what currency you want in return, and I can prepare your own listing.",
       "",
       currencyHelpLine(offeredCurrency),
     ].join("\n");
@@ -323,9 +329,12 @@ async function showOfferMatches(user, context) {
       });
       return [
         title("No current offer"),
-        "No one is currently looking for that exchange.",
+        caption("I checked the live marketplace for that exact exchange."),
         "",
-        `Want me to list ${formatMoney(draft.have_amount, draft.have_currency)} for ${formatMoney(draft.want_amount, draft.want_currency)} so others can find you?`,
+        "No one is asking for it yet.",
+        "",
+        title("List yours instead?"),
+        `I can prepare ${formatMoney(draft.have_amount, draft.have_currency)} for ${formatMoney(draft.want_amount, draft.want_currency)} so interested traders can find you.`,
         "",
         `${action("yes")} to open the listing`,
         `${action("search again")} to try another pair`,
@@ -345,8 +354,11 @@ async function showOfferMatches(user, context) {
       await upsertSession(user, user.whatsapp_phone, "create_listing", missing[0], partialDraft);
       return [
         title("No current offer"),
-        "No live listing fits that request right now.",
+        caption("I checked live listings for that request."),
         "",
+        "Nothing fits it yet.",
+        "",
+        title("Next step"),
         "If you want to list yours, I need one more detail:",
         "",
         explainMissingListing(missing, partialDraft),
@@ -355,10 +367,12 @@ async function showOfferMatches(user, context) {
 
     await clearSession(user, user.whatsapp_phone);
     return [
-      "No live offers yet.",
+      title("No live offers yet"),
       "",
-      "You can make yours instead:",
-      "I have 50k naira and want 55k RWF",
+      "The marketplace is empty for that request.",
+      "",
+      "You can create the first listing:",
+      action("I have 50k naira and want 55k RWF"),
     ].join("\n");
   }
 

@@ -220,6 +220,18 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const details = interpreted?.details || {};
   const answer = typeof interpreted?.answer === "string" ? interpreted.answer.trim() : "";
 
+  if (isVerified(user) && !session?.current_flow && /^[1-5]$/.test(command)) {
+    await clearSession(user, user.whatsapp_phone);
+    if (command === "1") {
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {});
+      return makeOfferPrompt();
+    }
+    if (command === "2") return showBrowseOffers(user);
+    if (command === "3") return getMyListingsReply(user);
+    if (command === "4") return getMyDealsReply(user);
+    if (command === "5") return viewProfileReply(user);
+  }
+
   // The model's written answer is only the reply for conversational
   // classifications. Functional actions (flows, listings, trades, settings,
   // confirmations) always route through their handlers below, so an answer
@@ -566,7 +578,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const listingDetails = freshListingDetails;
   const hasCompleteListing = hasFreshCompleteListing;
   const settingsAction = interpretedAction === "settings_action"
-    || /\b(edit|update|change|delete|remove|pause|reopen|resume|activate|close)\b.*\b(payout|payment|bank|momo|details?|offer|listing)\b/.test(command);
+    || /\b(edit|update|change|delete|remove|pause|reopen|resume|activate|close|cancel)\b.*\b(payout|payment|bank|momo|details?|offer|listing)\b/.test(command);
 
   if (hasCompleteListing && (
     interpretedAction === "create_listing"
@@ -750,6 +762,16 @@ async function routeMessage(text, user, session, incoming = {}) {
   const skipAnswer = ANSWER_ACTIONS.has(interpreted.action)
     || interpreted.action === "flow_reply"
     || interpreted.action === "add_payout"
+    || interpreted.action === "create_listing"
+    || interpreted.action === "find_offer"
+    || interpreted.action === "browse_offers"
+    || interpreted.action === "reserve_listing"
+    || interpreted.action === "trade_action"
+    || interpreted.action === "settings_action"
+    || interpreted.action === "view_profile"
+    || interpreted.action === "my_listings"
+    || interpreted.action === "my_deals"
+    || interpreted.action === "menu"
     || interpreted.action === "greeting"
     || interpreted.action === "wellbeing"
     || !isVerified(user)

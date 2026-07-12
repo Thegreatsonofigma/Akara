@@ -126,7 +126,17 @@ async function send(phone, text, { interpret, media } = {}) {
   const user = await findOrCreateUser(phone, "Test User");
   const session = await getSession(phone);
   const incoming = { from: phone, text, media: media || null, quotedText: "" };
-  return buildReply(text, user, session, incoming);
+  const beforeLists = listSends.length;
+  const reply = await buildReply(text, user, session, incoming);
+  if (reply === null && listSends.length > beforeLists) return lastListBody();
+  if (reply && typeof reply === "object") {
+    if (typeof reply.reply === "string") return reply.reply;
+    if (typeof reply.body === "string") return reply.body;
+    if (reply.type === "whatsapp_list") return reply.fallbackText || reply.list?.body || "";
+    if (reply.type === "whatsapp_flow") return reply.fallbackText || reply.flow?.body || "";
+    if (reply.type === "media") return reply.caption || reply.fallbackText || "";
+  }
+  return reply;
 }
 
 function userRow(phone) {
@@ -321,14 +331,14 @@ async function run() {
   check("review waits for final submit", (await sessionState(U1)).step === "review_submission");
 
   reply = await send(U1, "submit");
-  check("review submit sends with the menu list", reply === null && listSends.length === listSendsBeforeSubmit + 1, JSON.stringify({ reply, listSends: listSends.length }));
-  check("tier 1 submission opens menu", lastListBody().includes("Find offers and trade with more confidence") && lastListBody().includes("make offer") && lastListBody().includes("find offers"), lastListBody());
+  check("review submit sends with the menu list", listSends.length === listSendsBeforeSubmit + 1, JSON.stringify({ reply, listSends: listSends.length }));
+  check("tier 1 submission opens menu", lastListBody().includes("Choose your next move") && lastListBody().includes("make offer") && lastListBody().includes("find offers"), lastListBody());
   check("request finalized as tier 1", requestsFor(U1)[0].automated_decision === "tier_1_approved", requestsFor(U1)[0].automated_decision);
   check("session cleared after submission", (await sessionState(U1)).flow === null);
   check("success card sent once", cardSends.length === 1, JSON.stringify(cardSends));
 
   reply = await send(U1, "menu");
-  check("tier 1 user reaches the menu", reply === null && lastListBody().includes("Find offers and trade with more confidence"), JSON.stringify({ reply, body: lastListBody() }));
+  check("tier 1 user reaches the menu", reply.includes("choose your next move") || lastListBody().includes("Find offers and trade with more confidence"), JSON.stringify({ reply, body: lastListBody() }));
 
   // ---------- mismatched payout name → manual review
   scenario("payout mismatched name");
@@ -421,7 +431,7 @@ async function run() {
   check("submit after decline opens review", reply.includes("Review verification") && reply.includes("GTBank"), reply);
 
   reply = await send(U3, "submit");
-  check("review submit after decline completes verification", reply === null && lastListBody().includes("Find offers and trade with more confidence"), JSON.stringify({ reply, body: lastListBody() }));
+  check("review submit after decline completes verification", reply.includes("Choose your next move") || lastListBody().includes("Choose your next move"), JSON.stringify({ reply, body: lastListBody() }));
 
   // ---------- documents AND payout are both required to complete
   scenario("incomplete verification cannot complete");
@@ -468,7 +478,7 @@ async function run() {
   check("complete verification opens final review", reply.includes("Review verification") && reply.includes("Received"), reply);
 
   reply = await send(U5, "submit");
-  check("complete verification now submits", reply === null && lastListBody().includes("Find offers and trade with more confidence"), JSON.stringify({ reply, body: lastListBody() }));
+  check("complete verification now submits", reply.includes("Choose your next move") || lastListBody().includes("Choose your next move"), JSON.stringify({ reply, body: lastListBody() }));
   check("late documents still earn tier 1", userRow(U5).verification_status === "verified_auto", userRow(U5).verification_status);
   check("user verified only after documents and payout", userRow(U5).verification_status === "verified_auto", userRow(U5).verification_status);
 

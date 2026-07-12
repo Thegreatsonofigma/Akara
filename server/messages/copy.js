@@ -13,7 +13,7 @@ function menuOptionLines() {
 }
 
 function greetingMenuBody(user) {
-  const name = firstName(user);
+  const name = user ? firstName(user) : "";
   return [
     `Hi${name ? ` ${name}` : ""} 👋`,
     "",
@@ -22,7 +22,7 @@ function greetingMenuBody(user) {
 }
 
 function sessionEndedMenuBody(user) {
-  const name = firstName(user);
+  const name = user ? firstName(user) : "";
   return [
     `Done${name ? `, ${name}` : ""}.`,
     "",
@@ -31,7 +31,7 @@ function sessionEndedMenuBody(user) {
 }
 
 function mainMenu(user) {
-  const name = firstName(user);
+  const name = user ? firstName(user) : "";
   return [
     title(name ? `Hi ${name}, choose your next move` : "Choose your next move"),
     caption("Make an offer, find one, or manage your Akara account."),
@@ -205,7 +205,12 @@ function explainMissingListing(fields, context = {}) {
       ? ` for ${formatMoney(context.have_amount, context.have_currency)}`
       : "";
     const options = context.have_currency ? `\n\n${currencyHelpLine(context.have_currency)}` : "";
-    return `How much do you want${have}? Example: 55k RWF${options}`;
+    return [
+      `How much do you want${have}?`,
+      "",
+      "Example: 55k RWF",
+      options.trim(),
+    ].filter(Boolean).join("\n");
   }
 
   return [

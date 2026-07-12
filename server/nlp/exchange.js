@@ -41,13 +41,15 @@ function assignPair(details, role, pair) {
 
 function parseListingDetails(input) {
   const text = normalizeExchangeText(input);
+  const command = compactText(text);
+  const listingType = /\b(fixed|firm)\b/.test(command) ? "fixed" : "negotiable";
   const pairs = parseCurrencyAmountPairs(text);
   const details = {
     have_currency: null,
     want_currency: null,
     have_amount: null,
     want_amount: null,
-    listing_type: /\b(firm|fixed)\b/.test(compactText(text)) ? "fixed" : "negotiable",
+    listing_type: listingType,
   };
 
   const classifiedPairs = pairs.map((pair) => ({ ...pair, role: exchangePhraseRole(text, pair.index) }));

@@ -192,7 +192,7 @@ function listingLiveMessage(heading, listingCode, listing, shareUrl) {
     "",
     `*You receive:* ${title(formatMoney(listing.want_amount, listing.want_currency))}`,
     "",
-    `*Terms:* ${listingTypeLabel(listing.listing_type || "negotiable")}`,
+    `*Terms:* ${action(listingTypeLabel(listing.listing_type || "negotiable"))}`,
     "",
     `*Service fee:* ${feeIncludedText()}`,
     "",
@@ -278,7 +278,7 @@ function formatListingReview(context) {
     "",
     title("2. Rate"),
     labeled("Rate", `1 ${context.have_currency} = ${rate.toFixed(4)} ${context.want_currency}`),
-    labeled("Terms", listingTypeLabel(context.listing_type)),
+    labeled("Terms", action(listingTypeLabel(context.listing_type || "negotiable"))),
     "",
     title("3. Fee"),
     labeled("Service fee", feeIncludedText()),
@@ -1364,7 +1364,7 @@ async function handleCreateListing(text, user, session) {
       : listingType.includes("firm") || listingType.includes("fixed")
         ? "fixed"
         : null;
-    if (!normalizedType) return "Reply fixed or negotiable.";
+    if (!normalizedType) return `Reply ${action("fixed")} or ${action("negotiable")}.`;
 
     context.listing_type = normalizedType;
     await upsertSession(user, user.whatsapp_phone, "create_listing", "confirm", context);
