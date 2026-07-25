@@ -79,6 +79,11 @@ function normalizeCurrency(input) {
   const value = String(input || "").trim().toUpperCase();
   if (supportedCurrencies().includes(value)) return value;
 
+  const interactiveCurrency = value.match(/(?:^|[_\s-])(NGN|RWF|XAF|KES|GHS)(?:$|[_\s-])/);
+  if (interactiveCurrency && /(CURRENCY|PAYOUT|PAYMENT|BANK|MOMO|MOBILE)/.test(value)) {
+    return interactiveCurrency[1];
+  }
+
   const lower = normalizeExchangeText(input);
   for (const currency of DETECTION_ORDER) {
     if (new RegExp(`\\b(?:${currencyPattern(currency)})\\b`).test(lower)) return currency;

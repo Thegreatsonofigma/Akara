@@ -484,7 +484,7 @@ function listingCardSvg(listing) {
   const haveAmount = numberText(listing.have_amount);
   const wantAmount = numberText(listing.want_amount);
   const openCode = `OPEN ${code}`;
-  const base = assetDataUri("listing-card-base.webp");
+  const base = assetDataUri("listing-card-base.png") || assetDataUri("listing-card-base.webp");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">

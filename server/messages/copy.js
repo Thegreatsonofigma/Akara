@@ -1,5 +1,5 @@
 const { title, caption, action, formatMoney } = require("../lib/format");
-const { currencyHelpLine } = require("../nlp/currency");
+const { currencyHelpLine, supportedCurrencies } = require("../nlp/currency");
 const { firstName } = require("../db/users");
 
 function menuOptionLines() {
@@ -9,6 +9,7 @@ function menuOptionLines() {
     "3. `my listings`",
     "4. `history`",
     "5. `profile`",
+    "6. `get support`",
   ];
 }
 
@@ -148,10 +149,70 @@ function mainMenuListPayload(body = "Choose what you want to do next on Akara.")
           { id: "my_listings", title: "my listings", description: "Manage your live listings." },
           { id: "history", title: "history", description: "See your past and active trades." },
           { id: "profile", title: "profile", description: "Payouts, verification, and account details." },
+          { id: "get_support", title: "get support", description: "Email Akara support." },
         ],
       },
     ],
   };
+}
+
+const CURRENCY_META = {
+  NGN: { flag: "🇳🇬", name: "Nigerian naira", route: "Bank account" },
+  RWF: { flag: "🇷🇼", name: "Rwandan franc", route: "Mobile money" },
+  XAF: { flag: "🇨🇲", name: "Central African CFA", route: "Mobile money" },
+  KES: { flag: "🇰🇪", name: "Kenyan shilling", route: "Mobile money" },
+  GHS: { flag: "🇬🇭", name: "Ghanaian cedi", route: "Mobile money" },
+};
+
+function currencyListPayload({
+  body = "Choose a currency.",
+  mode = "select",
+  excludeCurrency = null,
+  button = "Choose currency",
+} = {}) {
+  const rows = supportedCurrencies()
+    .filter((currency) => currency !== excludeCurrency)
+    .map((currency) => {
+      const meta = CURRENCY_META[currency] || {};
+      return {
+        id: `currency_${mode}_${currency}`,
+        title: `${meta.flag ? `${meta.flag} ` : ""}${currency}`,
+        description: [meta.name, meta.route].filter(Boolean).join(" • "),
+      };
+    });
+
+  return {
+    body,
+    button,
+    sections: [
+      {
+        title: "Supported currencies",
+        rows,
+      },
+    ],
+  };
+}
+
+function currencyListReply(options = {}) {
+  const list = currencyListPayload(options);
+  return {
+    type: "whatsapp_list",
+    list,
+    fallbackText: [list.body, "", currencyHelpLine(options.excludeCurrency)].join("\n"),
+  };
+}
+
+function supportReply() {
+  return [
+    title("Get support"),
+    "",
+    "For account, payout, listing, receipt, or dispute help, email Akara support.",
+    "",
+    "Tap to open your email app:",
+    "mailto:support@tryakara.com",
+    "",
+    "Email: support@tryakara.com",
+  ].join("\n");
 }
 
 function verificationStartListPayload(body = "Start verification to continue on Akara.") {
@@ -170,6 +231,20 @@ function verificationStartListPayload(body = "Start verification to continue on 
         ],
       },
     ],
+  };
+}
+
+function verificationStartButtonPayload(body = "Start verification to continue on Akara.") {
+  return {
+    body,
+    buttons: [
+      { id: "start_verification", title: "Start verification" },
+    ],
+    fallbackText: [
+      body,
+      "",
+      `Reply ${action("verify")} to start.`,
+    ].join("\n"),
   };
 }
 
@@ -233,7 +308,11 @@ module.exports = {
   feeIncludedText,
   feeIncludedNote,
   listingShareCopy,
+  supportReply,
   explainMissingListing,
   mainMenuListPayload,
-  verificationStartListPayload
+  currencyListPayload,
+  currencyListReply,
+  verificationStartListPayload,
+  verificationStartButtonPayload
 };

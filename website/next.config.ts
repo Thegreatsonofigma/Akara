@@ -1,19 +1,12 @@
 import type { NextConfig } from "next";
+import path from "node:path";
+
+const projectRoot = path.resolve(__dirname, "..");
 
 const nextConfig: NextConfig = {
-  poweredByHeader: false,
-  // The repo root has its own package-lock.json (WhatsApp bot), so pin the
-  // workspace root to this directory to stop Next.js guessing wrong.
+  outputFileTracingRoot: projectRoot,
   turbopack: {
-    root: __dirname,
-  },
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "images.unsplash.com",
-      },
-    ],
+    root: projectRoot,
   },
 };
 

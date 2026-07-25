@@ -106,6 +106,17 @@ create table public.verification_requests (
   document_back_path text,
   selfie_path text,
   extracted_name text,
+  document_ocr_engine text,
+  document_ocr_status text,
+  document_ocr_confidence numeric,
+  document_ocr_text text,
+  document_ocr_name text,
+  document_ocr_country text,
+  document_ocr_type text,
+  document_name_match boolean,
+  document_country_match boolean,
+  document_type_match boolean,
+  document_ocr_reasons text[] not null default '{}',
   extracted_id_hash text,
   extracted_expiry_date date,
   automated_decision text,
@@ -200,6 +211,14 @@ create table public.deal_proofs (
   proof_path text not null,
   proof_type text not null default 'transfer_receipt',
   notes text,
+  ocr_status text not null default 'pending' check (ocr_status in ('pending', 'matched', 'mismatch', 'unavailable')),
+  ocr_text text,
+  ocr_amount numeric(18, 2),
+  ocr_currency text,
+  ocr_expected_amount numeric(18, 2),
+  ocr_expected_currency text,
+  ocr_matched boolean not null default false,
+  ocr_mismatch_reason text,
   created_at timestamptz not null default now()
 );
 
@@ -209,6 +228,8 @@ create table public.fees (
   user_id uuid not null references public.users(id) on delete cascade,
   currency text not null check (currency in ('NGN', 'RWF', 'XAF', 'GHS', 'KES')),
   amount numeric(18, 2) not null check (amount >= 0),
+  fee_type text not null default 'success_fee',
+  billing_threshold integer not null default 5,
   status fee_status not null default 'pending',
   payment_reference text,
   proof_path text,
@@ -290,7 +311,9 @@ create index deals_taker_idx on public.deals (taker_user_id);
 create index deals_reservation_expiry_idx on public.deals (reservation_expires_at);
 
 create index deal_proofs_deal_idx on public.deal_proofs (deal_id);
+create index deal_proofs_ocr_status_idx on public.deal_proofs (ocr_status);
 create index fees_status_idx on public.fees (status);
+create index fees_user_status_idx on public.fees (user_id, status);
 create index disputes_status_idx on public.disputes (status);
 create index penalties_user_idx on public.penalties (user_id);
 create index message_sessions_phone_idx on public.message_sessions (whatsapp_phone);
@@ -352,4 +375,3 @@ values
   ('verification-documents', 'verification-documents', false),
   ('deal-proofs', 'deal-proofs', false)
 on conflict (id) do nothing;
-

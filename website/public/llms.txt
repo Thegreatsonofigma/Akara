@@ -1,0 +1,31 @@
+# Akara
+
+Akara is a WhatsApp-first peer-to-peer currency exchange coordination tool for Africa. It helps verified users list rates, discover offers, open Akara Trades, exchange payout details, upload receipts, track trade status, and raise disputes.
+
+Important: Akara does not hold, receive, escrow, custody, remit, convert, or move user funds. Users send money directly to each other through their own bank or mobile money accounts.
+
+Key pages:
+- https://tryakara.com/
+- https://tryakara.com/exchange
+- https://tryakara.com/guides
+- https://tryakara.com/trust
+- https://tryakara.com/support
+- https://tryakara.com/legal
+
+Supported currencies: NGN, RWF, GHS, KES, XAF.
+
+Exchange corridors:
+- https://tryakara.com/exchange/ngn-to-rwf
+- https://tryakara.com/exchange/ngn-to-kes
+- https://tryakara.com/exchange/rwf-to-ngn
+- https://tryakara.com/exchange/ghs-to-rwf
+- https://tryakara.com/exchange/xaf-to-ngn
+
+Useful guides:
+- https://tryakara.com/guides/how-to-exchange-naira-to-rwandan-franc-on-whatsapp
+- https://tryakara.com/guides/peer-to-peer-currency-exchange-safety
+- https://tryakara.com/guides/mobile-money-and-bank-payouts-africa
+
+Common topics: currency exchange on WhatsApp, peer-to-peer exchange, exchange rate listings, student currency exchange, expat currency exchange, mobile money exchange Africa, Naira to Rwandan Franc, Naira to Kenyan Shilling, Ghana Cedi to Rwandan Franc, CFA Franc to Naira.
+
+Contact: support@tryakara.com

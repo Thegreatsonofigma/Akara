@@ -40,7 +40,8 @@ const {
 } = require("../db/deals");
 const { storeDealProof, dealUserHasProof, sendDealProofToUser } = require("../lib/receipts");
 const { sendExchangeCompletionCard } = require("../lib/listing-card");
-const { feeIncludedNote } = require("../messages/copy");
+const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
+const { FEE_BILLING_THRESHOLD, feeLedgerNote, recordDealFees } = require("../db/fees");
 
 const REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 const receiptDeadlineTimers = new Map();
@@ -237,7 +238,7 @@ function disputeGuidance(role, dealCode, deal = null, reason = "") {
 
 function paymentNoticeForOther(dealCode, expectedAmount, alreadyPaid, proofDelivery) {
   return [
-    title("Payment marked sent ✅"),
+    title("Payment evidence received ✅"),
     "",
     fieldBlock("Transaction ref", dealCode),
     "",
@@ -246,8 +247,8 @@ function paymentNoticeForOther(dealCode, expectedAmount, alreadyPaid, proofDeliv
     title("Next"),
     alreadyPaid
       ? "Your side is already marked paid. Check your bank or MoMo app, then reply received once the funds land."
-      : "Check your bank or MoMo app before sending your side.",
-    proofDelivery.sent ? "Receipt attached in this chat." : "",
+      : "Check your bank or MoMo app before sending your side. A receipt is evidence, not final proof.",
+    proofDelivery.sent ? "Receipt attached in this chat as supporting evidence." : "",
     proofDelivery.url ? `View receipt: ${proofDelivery.url}` : "",
     "",
     title("Actions"),
@@ -258,22 +259,81 @@ function paymentNoticeForOther(dealCode, expectedAmount, alreadyPaid, proofDeliv
   ].filter(Boolean).join("\n\n");
 }
 
+function whatsappButtonsReply(body, buttons, fallbackText = body) {
+  return {
+    type: "whatsapp_buttons",
+    body,
+    buttons,
+    fallbackText,
+  };
+}
+
+function tradeRoomButtonsReply(body, includePaid = true) {
+  const buttons = [
+    includePaid ? { id: "paid", title: "Paid" } : null,
+    { id: "received", title: "Received" },
+    { id: "dispute", title: "Dispute" },
+  ].filter(Boolean);
+
+  return whatsappButtonsReply(body, buttons);
+}
+
 function paymentNotedReply(dealCode, youSend, youReceive, proof, sideComplete = false) {
-  return [
+  return tradeRoomButtonsReply([
     title(sideComplete ? "Your side is complete ✅" : "Payment noted ✅"),
     "",
     fieldBlock("Transaction ref", dealCode),
     "",
     fieldBlock("You sent", formatMoney(youSend.amount, youSend.currency)),
     "",
-    fieldBlock("Receipt", proof ? "Saved and sent" : "Needed"),
+    fieldBlock("Receipt", proof ? "Saved as supporting evidence" : "Needed"),
     "",
     fieldBlock("You are waiting for", formatMoney(youReceive.amount, youReceive.currency)),
     "",
     sideComplete
-      ? "I will confirm the exchange after the other party confirms receipt."
+      ? "I will confirm the exchange after the other party confirms the money landed."
       : `${action("received")} when it lands, ${action("remind")} if it drags, or ${action("dispute")} if something is wrong.`,
+  ].join("\n"), !sideComplete);
+}
+
+function receiptMismatchReply(dealCode, receiptCheck) {
+  return [
+    title("Receipt does not match"),
+    "",
+    fieldBlock("Transaction ref", dealCode),
+    "",
+    receiptCheck.ocr_mismatch_reason || "The receipt amount or currency does not match the locked trade.",
+    "",
+    "Upload the correct receipt before I notify your trade partner.",
   ].join("\n");
+}
+
+function receiptEvidenceNote(proof) {
+  const status = proof?.receiptCheck?.ocr_status;
+  if (status === "matched") return "Receipt amount and currency look consistent with the locked trade.";
+  if (status === "pending") return "Receipt saved as supporting evidence. The recipient must still confirm the money in their bank or MoMo account.";
+  return "";
+}
+
+async function analyzeIncomingReceipt(youSend, incoming) {
+  return analyzeReceiptEvidence({
+    amount: youSend.amount,
+    currency: youSend.currency,
+  }, incoming);
+}
+
+async function storePaymentReceiptOrReply(user, dealId, dealCode, youSend, incoming) {
+  const receiptCheck = await analyzeIncomingReceipt(youSend, incoming);
+  if (receiptCheck.ocr_status === "mismatch") {
+    return {
+      blocked: true,
+      reply: receiptMismatchReply(dealCode, receiptCheck),
+      proof: null,
+    };
+  }
+
+  const proof = await storeDealProof(user, dealId, incoming, receiptCheck);
+  return { blocked: false, reply: "", proof };
 }
 
 async function dealHasAnyProof(dealId, firstUserId, secondUserId) {
@@ -384,10 +444,11 @@ async function recordReminderSent(dealId, actorUserId, targetUserId) {
 
 async function notifyExchangeCompleteForOtherUser(otherUserId, deal, otherRole) {
   const target = await getUserById(otherUserId);
+  const { youReceive } = dealPartySummary(otherRole, deal);
   await notifyDealUser(otherUserId, [
     exchangeCompleteMessage(deal, otherRole),
     "",
-    feeIncludedNote(),
+    feeLedgerNote(youReceive.currency),
   ].join("\n"));
   if (target?.whatsapp_phone) {
     await sendExchangeCompletionCard(
@@ -453,6 +514,9 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
   const otherRole = otherDealRole(role);
   const dealCode = displayReference(deal.deal_code, "deal");
   const completedDeal = await getDealById(dealId) || updatedDeal || deal;
+  await recordDealFees(completedDeal).catch((error) => {
+    console.error(`[deal] fee ledger failed for ${dealCode}: ${error.message}`);
+  });
   await Promise.all([
     syncCompletedDealsCount(completedDeal.maker_user_id),
     syncCompletedDealsCount(completedDeal.taker_user_id),
@@ -475,13 +539,14 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
   await clearSession(user, user.whatsapp_phone);
 
   const { youSend } = dealPartySummary(role, deal);
+  const { youReceive } = dealPartySummary(role, completedDeal);
   return {
     completed: true,
     reply: [
       exchangeCompleteMessage(completedDeal, role),
       ...extraLines,
       "",
-      feeIncludedNote(youSend.currency),
+      feeLedgerNote(youReceive.currency),
     ].filter(Boolean).join("\n\n"),
   };
 }
@@ -554,10 +619,13 @@ async function handleDealRoom(text, user, session, incoming = {}) {
 
   if (command === "fee paid" || /\bfee\b.*\b(paid|sent|settled)\b/.test(command) || /\b(paid|sent|settled)\b.*\bfee\b/.test(command)) {
     return [
-      "No separate fee payment is needed.",
+      title("Fee account"),
       "",
-      `Transaction ref: ${dealCode}`,
-      feeIncludedNote(),
+      fieldBlock("Transaction ref", dealCode),
+      "",
+      "Service fees are tracked in your Akara Fee Account.",
+      `Pay only with your Akara fee reference after ${FEE_BILLING_THRESHOLD} completed trades.`,
+      "Never send exchange money to Akara's fee account.",
     ].join("\n");
   }
 
@@ -858,7 +926,9 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     let proof = null;
     let proofDelivery = { sent: false, url: "" };
     if (incoming.media?.id) {
-      proof = await storeDealProof(user, dealId, incoming);
+      const stored = await storePaymentReceiptOrReply(user, dealId, dealCode, youSend, incoming);
+      if (stored.blocked) return stored.reply;
+      proof = stored.proof;
       proofDelivery = await sendDealProofToUser(
         otherUserId,
         proof,
@@ -882,7 +952,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     });
 
     const completion = await maybeCompleteDeal(user, dealId, deal, role, otherUserId, [
-      proof ? "Receipt saved and sent to your trade partner." : "",
+      receiptEvidenceNote(proof),
     ]);
     if (completion.completed) return completion.reply;
 
@@ -891,8 +961,8 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       "",
       fieldBlock("Transaction ref", dealCode),
       "",
-      "Your trade partner marked payment sent and receipt confirmed.",
-      proofDelivery.sent ? "Receipt attached in this chat." : "",
+      "Your trade partner submitted payment evidence and confirmed receipt.",
+      proofDelivery.sent ? "Receipt attached in this chat as supporting evidence." : "",
       proofDelivery.url ? `View receipt: ${proofDelivery.url}` : "",
       "",
       `${action("received")} once your own funds land`,
@@ -907,7 +977,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       fieldBlock("Transaction ref", dealCode),
       "",
       "I will confirm the exchange after your trade partner also confirms receipt.",
-      proof ? "Receipt saved and sent to your trade partner." : "",
+      receiptEvidenceNote(proof),
     ].filter(Boolean).join("\n\n");
   }
 
@@ -917,7 +987,9 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     let proof = null;
     let proofDelivery = { sent: false, url: "" };
     if (incoming.media?.id) {
-      proof = await storeDealProof(user, dealId, incoming);
+      const stored = await storePaymentReceiptOrReply(user, dealId, dealCode, youSend, incoming);
+      if (stored.blocked) return stored.reply;
+      proof = stored.proof;
       proofDelivery = await sendDealProofToUser(
         otherUserId,
         proof,
@@ -952,7 +1024,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
 
     if (userAlreadyReceived) {
       const completion = await maybeCompleteDeal(user, dealId, deal, role, otherUserId, [
-        proof ? "Receipt saved and sent to your trade partner." : "",
+        receiptEvidenceNote(proof),
       ]);
       if (completion.completed) return completion.reply;
 
@@ -1057,7 +1129,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     ].filter(Boolean).join("\n\n");
   }
 
-  return [
+  return tradeRoomButtonsReply([
     title("Trade room"),
     caption("I am still with this Akara Trade."),
     "",
@@ -1068,7 +1140,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     `${action("remind")} if your trade partner is taking too long`,
     `${action("cancel trade")} to close this trade`,
     `${action("dispute")} if something looks wrong`,
-  ].join("\n");
+  ].join("\n"));
 }
 
 module.exports = {

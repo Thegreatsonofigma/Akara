@@ -61,13 +61,133 @@ function countBy(items, fieldOrGetter) {
   }, {});
 }
 
+const VERIFICATION_USER_SELECT =
+  "users!verification_requests_user_id_fkey(id,whatsapp_phone,display_name,legal_name,nationality,residence_country,city,verification_status)";
+
+const VERIFICATION_QUEUE_SELECT = [
+  "id",
+  "status",
+  "id_type",
+  "id_country",
+  "document_front_path",
+  "document_back_path",
+  "selfie_path",
+  "document_ocr_engine",
+  "document_ocr_status",
+  "document_ocr_confidence",
+  "document_ocr_name",
+  "document_ocr_country",
+  "document_ocr_type",
+  "document_name_match",
+  "document_country_match",
+  "document_type_match",
+  "document_ocr_reasons",
+  "automated_decision",
+  "automated_reason",
+  "admin_decision",
+  "admin_notes",
+  "created_at",
+  "reviewed_at",
+  VERIFICATION_USER_SELECT,
+].join(",");
+
+const VERIFICATION_QUEUE_LEGACY_SELECT = [
+  "id",
+  "status",
+  "id_type",
+  "id_country",
+  "document_front_path",
+  "document_back_path",
+  "selfie_path",
+  "automated_decision",
+  "automated_reason",
+  "admin_decision",
+  "admin_notes",
+  "created_at",
+  "reviewed_at",
+  VERIFICATION_USER_SELECT,
+].join(",");
+
+const VERIFICATION_SCHEMA_WARNING =
+  "Verification OCR columns are not in Supabase yet. Apply supabase/migrations/007_admin_ocr_review_fields.sql.";
+
+function getSupabaseErrorText(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+
+  const parts = [
+    error.message,
+    error.details,
+    error.hint,
+    error.code,
+    error.body,
+    error.responseText,
+  ];
+
+  if (error.error) {
+    parts.push(typeof error.error === "string" ? error.error : JSON.stringify(error.error));
+  }
+
+  try {
+    parts.push(JSON.stringify(error));
+  } catch (_) {
+    // Some error objects cannot be stringified.
+  }
+
+  return parts.filter(Boolean).join(" ");
+}
+
+function isMissingVerificationReviewColumn(error) {
+  const message = getSupabaseErrorText(error);
+  return /verification_requests/i.test(message)
+    && /(document_ocr_|document_name_match|document_country_match|document_type_match)/i.test(message)
+    && /(does not exist|column|42703)/i.test(message);
+}
+
+function withLegacyVerificationOcrFields(row) {
+  return {
+    document_ocr_engine: null,
+    document_ocr_status: "migration_required",
+    document_ocr_confidence: null,
+    document_ocr_name: null,
+    document_ocr_country: null,
+    document_ocr_type: null,
+    document_name_match: null,
+    document_country_match: null,
+    document_type_match: null,
+    document_ocr_reasons: [VERIFICATION_SCHEMA_WARNING],
+    ...row,
+  };
+}
+
+async function listVerificationQueue() {
+  try {
+    return {
+      data: await supabaseRequest(
+        `verification_requests?select=${VERIFICATION_QUEUE_SELECT}&order=created_at.desc&limit=100`
+      ),
+      schemaWarning: null,
+    };
+  } catch (error) {
+    if (!isMissingVerificationReviewColumn(error)) throw error;
+
+    const data = await supabaseRequest(
+      `verification_requests?select=${VERIFICATION_QUEUE_LEGACY_SELECT}&order=created_at.desc&limit=100`
+    );
+    return {
+      data: data.map(withLegacyVerificationOcrFields),
+      schemaWarning: VERIFICATION_SCHEMA_WARNING,
+    };
+  }
+}
+
 async function attachDealProofs(rows, dealIdGetter = (row) => row.id) {
   const dealIds = [...new Set(rows.map(dealIdGetter).filter(Boolean))];
   if (!dealIds.length) return rows;
 
   const proofs = await supabaseRequest(
     [
-      "deal_proofs?select=id,deal_id,user_id,proof_path,proof_type,created_at,",
+      "deal_proofs?select=id,deal_id,user_id,proof_path,proof_type,created_at,ocr_status,ocr_amount,ocr_currency,ocr_expected_amount,ocr_expected_currency,ocr_matched,ocr_mismatch_reason,",
       "users!deal_proofs_user_id_fkey(whatsapp_phone,display_name)",
       `&deal_id=in.(${dealIds.map(filterValue).join(",")})`,
       "&order=created_at.desc",
@@ -482,10 +602,8 @@ async function handleAdminApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/admin/api/verifications") {
-    const verifications = await supabaseRequest(
-      "verification_requests?select=id,status,id_type,id_country,document_front_path,document_back_path,selfie_path,automated_decision,automated_reason,admin_decision,admin_notes,created_at,reviewed_at,users!verification_requests_user_id_fkey(id,whatsapp_phone,display_name,legal_name,nationality,residence_country,city,verification_status)&order=created_at.desc&limit=100"
-    );
-    return jsonResponse(res, 200, { ok: true, data: verifications });
+    const { data, schemaWarning } = await listVerificationQueue();
+    return jsonResponse(res, 200, { ok: true, data, schemaWarning });
   }
 
   if (req.method === "POST" && url.pathname === "/admin/api/storage-signed-url") {

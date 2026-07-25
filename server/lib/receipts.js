@@ -9,10 +9,11 @@ const { getUserById } = require("../db/users");
 // restart.
 const receiptShortIds = new Map();
 
-async function storeDealProof(user, dealId, incoming) {
+async function storeDealProof(user, dealId, incoming, receiptCheck = {}) {
   if (!incoming.media?.id) return null;
 
-  const media = await getWhatsAppMedia(incoming.media.id);
+  const media = incoming.__receiptOcrMedia || await getWhatsAppMedia(incoming.media.id);
+  incoming.__receiptOcrMedia = media;
   const extension = mediaExtension(media.contentType, incoming.media.filename);
   const filename = incoming.media.filename || `akara-receipt-${Date.now()}.${extension}`;
   const objectPath = `${dealId}/${user.id}/receipt-${Date.now()}.${extension}`;
@@ -31,6 +32,14 @@ async function storeDealProof(user, dealId, incoming) {
       user_id: user.id,
       proof_path: objectPath,
       proof_type: "transfer_receipt",
+      ocr_status: receiptCheck.ocr_status || "pending",
+      ocr_text: receiptCheck.ocr_text || null,
+      ocr_amount: receiptCheck.ocr_amount || null,
+      ocr_currency: receiptCheck.ocr_currency || null,
+      ocr_expected_amount: receiptCheck.ocr_expected_amount || null,
+      ocr_expected_currency: receiptCheck.ocr_expected_currency || null,
+      ocr_matched: Boolean(receiptCheck.ocr_matched),
+      ocr_mismatch_reason: receiptCheck.ocr_mismatch_reason || null,
     }),
   });
 
@@ -45,13 +54,14 @@ async function storeDealProof(user, dealId, incoming) {
     contentType: media.contentType,
     filename,
     whatsappMediaId,
+    receiptCheck,
   };
 }
 
 async function getDealProofs(dealId, userId = null) {
   const filters = [`deal_id=eq.${filterValue(dealId)}`];
   if (userId) filters.push(`user_id=eq.${filterValue(userId)}`);
-  return supabaseRequest(`deal_proofs?select=id,proof_path,user_id,created_at&${filters.join("&")}&order=created_at.desc`);
+  return supabaseRequest(`deal_proofs?select=id,proof_path,user_id,created_at,ocr_status,ocr_amount,ocr_currency,ocr_expected_amount,ocr_expected_currency,ocr_matched,ocr_mismatch_reason&${filters.join("&")}&order=created_at.desc`);
 }
 
 async function dealUserHasProof(dealId, userId) {

@@ -20,6 +20,8 @@ process.env.AKARA_TYPING_INDICATOR = "false";
 process.env.AKARA_SECURITY_ENABLED = "false";
 process.env.AKARA_SECURITY_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
+process.env.AKARA_RECEIPT_OCR = "off";
+process.env.AKARA_ID_OCR = "off";
 
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -51,8 +53,13 @@ stubModule("lib/openai.js", openaiStub);
 // scenarios can assert on the list body instead of the returned text.
 const whatsapp = require("../lib/whatsapp");
 const listSends = [];
+const buttonSends = [];
 whatsapp.sendWhatsAppList = async (to, payload) => {
   listSends.push({ to, payload });
+  return { logged: true };
+};
+whatsapp.sendWhatsAppButtons = async (to, payload) => {
+  buttonSends.push({ to, payload });
   return { logged: true };
 };
 whatsapp.getWhatsAppMedia = async () => ({
@@ -65,6 +72,10 @@ function lastListBody() {
   return listSends.length ? String(listSends[listSends.length - 1].payload?.body || "") : "";
 }
 
+function lastButtonBody() {
+  return buttonSends.length ? String(buttonSends[buttonSends.length - 1].payload?.body || "") : "";
+}
+
 const { buildReply } = require("../router");
 const { sendIdleMenus } = require("../app");
 const { findOrCreateUser } = require("../db/users");
@@ -73,6 +84,7 @@ const intents = require("../nlp/intents");
 const { clearHistory } = require("../nlp/history");
 const { config } = require("../config");
 const { findNigerianBanks } = require("../lib/coinprofile");
+const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
 
 const { __table, __reset } = fakeSupabase;
 
@@ -129,12 +141,17 @@ async function send(phone, text, { interpret, media, quotedText } = {}) {
   const session = await getSession(phone);
   const incoming = { from: phone, text, media: media || null, quotedText: quotedText || "" };
   const beforeLists = listSends.length;
+  const beforeButtons = buttonSends.length;
   const reply = await buildReply(text, user, session, incoming);
   if (reply === null && listSends.length > beforeLists) return lastListBody();
+  if (reply === null && buttonSends.length > beforeButtons) return lastButtonBody();
   if (reply && typeof reply === "object") {
     if (typeof reply.reply === "string") return reply.reply;
     if (typeof reply.body === "string") return reply.body;
-    if (reply.type === "whatsapp_list") return reply.fallbackText || reply.list?.body || "";
+    if (reply.type === "whatsapp_list") {
+      listSends.push({ to: phone, payload: reply.list });
+      return reply.list?.body || reply.fallbackText || "";
+    }
     if (reply.type === "whatsapp_flow") return reply.fallbackText || reply.flow?.body || "";
     if (reply.type === "media") return reply.caption || reply.fallbackText || "";
   }
@@ -322,7 +339,7 @@ async function run() {
 
   reply = await send(ALICE, "okay thanks");
   check("session closure returns the menu", reply.includes("Choose what you want to do next on Akara"), reply);
-  check("session closure is calm", reply.includes("Done"), reply);
+  check("session closure has no duplicate closure text", !reply.includes("Done") && !reply.includes("You're welcome"), reply);
   removeSeededDeals(completedProfileDeals);
 
   // ---------- inactivity menu nudge
@@ -366,10 +383,19 @@ async function run() {
   check("typed menu 2 browses offers", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
   await send(ALICE, "cancel");
 
-  reply = await send(ALICE, "5", { quotedText: "*Akara menu*\n1. make offer" });
-  check("quoted menu 5 → scoped profile", reply.includes("*Your profile*"), reply);
+	  reply = await send(ALICE, "5", { quotedText: "*Akara menu*\n1. make offer" });
+	  check("quoted menu 5 → scoped profile", reply.includes("*Your profile*"), reply);
 
-  // ---------- service fee + referral copy
+	  reply = await send(ALICE, "menu");
+	  check("menu includes get support", reply.includes("6. `get support`"), reply);
+
+	  reply = await send(ALICE, "6");
+	  check("typed menu 6 opens support email", reply.includes("mailto:support@tryakara.com"), reply);
+
+	  reply = await send(ALICE, "contact support");
+	  check("natural support request opens email", reply.includes("support@tryakara.com"), reply);
+
+	  // ---------- service fee + referral copy
   scenario("service fee copy");
   reply = await send(ALICE, "how much do you charge?");
   check("fee answer stays simple", reply.includes("Akara is free to use") && !reply.includes("10 more free trades"), reply);
@@ -377,6 +403,25 @@ async function run() {
 
   reply = await send(ALICE, "how do i get free trades?");
   check("referral question answered", reply.includes("Invite a friend or refer a friend"), reply);
+
+  scenario("receipt evidence parser");
+  let receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
+    { text: "Paid ₦80,000 to First Bank" }
+  );
+  check("receipt parser matches amount and currency", receiptCheck.ocr_status === "matched", JSON.stringify(receiptCheck));
+
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
+    { text: "Paid 70,000 NGN" }
+  );
+  check("receipt parser rejects mismatched amount", receiptCheck.ocr_status === "mismatch", JSON.stringify(receiptCheck));
+
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
+    { media: { id: "m1", filename: "receipt.png" } }
+  );
+  check("receipt parser keeps image-only receipt pending", receiptCheck.ocr_status === "pending", JSON.stringify(receiptCheck));
 
   // ---------- one-shot listing creation + publish + free service fee in review
   scenario("one-shot listing");
@@ -541,18 +586,20 @@ async function run() {
   reply = await send(ALICE, "show me ngn offers");
   check("browse shows bob listing", reply.includes("AKR-LIST-090"), reply);
   check("browse enters search_results", (await sessionFlow(ALICE)) === "search_results");
+  const fixedOfferNumber = reply.match(/(?:^|\n)\s*(\d+)\.\s+\*?AKR-LIST-090\b/i)?.[1];
 
   reply = await send(ALICE, "9");
   check("invalid number is guided", reply.includes("valid offer number"), reply);
 
-  reply = await send(ALICE, "1");
-  check("number 1 opens the trade", reply.includes("Akara Trade opened ✅"), reply);
+  reply = await send(ALICE, fixedOfferNumber || "1");
+  check("displayed fixed-offer number opens the trade", reply.includes("Akara Trade opened ✅"), reply);
   check("selection enters deal room", (await sessionFlow(ALICE)) === "deal_room");
+  const openedDealCode = (await getSession(ALICE))?.context_json?.deal_code || __table("deals").at(-1)?.deal_code;
 
   // ---------- deal room actions
   scenario("deal room");
   reply = await send(ALICE, "status");
-  check("status shows summary", reply.includes("_Transaction ref_") && reply.includes("*AKR-TXN-001*"), reply);
+  check("status shows summary", reply.includes("_Transaction ref_") && reply.includes(`*${openedDealCode}*`), reply);
 
   reply = await send(ALICE, "i don pay");
   check("paid asks for receipt", reply.includes("Receipt needed"), reply);
@@ -565,16 +612,17 @@ async function run() {
   check("deal room released", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "what's next for my trade?", { interpret: { action: "trade_action" } });
-  check("trade recall reopens deal", reply.includes("AKR-TXN-001"), reply);
-  const recalledDeal = __table("deals").find((row) => row.deal_code === "AKR-TXN-001");
-  recalledDeal.taker_sent_at = new Date().toISOString();
+  check("trade recall reopens deal", reply.includes(openedDealCode), reply);
+  const recalledDeal = __table("deals").find((row) => row.deal_code === openedDealCode);
+  check("recalled deal exists", Boolean(recalledDeal), JSON.stringify({ openedDealCode, deals: __table("deals").map((row) => row.deal_code) }));
+  if (recalledDeal) recalledDeal.taker_sent_at = new Date().toISOString();
   reply = await send(ALICE, "cancel");
   check("active trade cancel stays deal-specific", reply.includes("Cannot close from chat"), reply);
-  check("active trade cancel points to dispute", reply.includes("dispute AKR-TXN-001"), reply);
+  check("active trade cancel points to dispute", reply.includes(`dispute ${openedDealCode}`), reply);
   check("active trade cancel does not show profile actions", !reply.includes("Manage payout details"), reply);
 
-  reply = await send(ALICE, "dispute AKR-TXN-001 because amount did not arrive");
-  check("dispute asks for proof", reply.includes("*Proof needed AKR-TXN-001*") && reply.includes("amount did not arrive"), reply);
+  reply = await send(ALICE, `dispute ${openedDealCode} because amount did not arrive`);
+  check("dispute asks for proof", reply.includes(`*Proof needed ${openedDealCode}*`) && reply.includes("amount did not arrive"), reply);
   check("dispute waits for proof", (await getSession(ALICE))?.current_step === "awaiting_dispute_proof", JSON.stringify(await getSession(ALICE)));
 
   reply = await send(ALICE, "", {
@@ -647,6 +695,40 @@ async function run() {
   const twoWayDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-092")?.id);
   check("deal keeps negotiated send side", Number(twoWayDeal?.want_amount) === 105000, JSON.stringify(twoWayDeal));
   check("deal keeps negotiated receive side", Number(twoWayDeal?.have_amount) === 98000, JSON.stringify(twoWayDeal));
+
+  // ---------- partial fill matching
+  scenario("partial fill matching");
+  seedListing(charlieRow, {
+    code: "AKR-LIST-993",
+    have_currency: "RWF",
+    have_amount: 65000,
+    want_currency: "NGN",
+    want_amount: 60000,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(ALICE, "open AKR-LIST-993");
+  check("partial fill starts negotiation", reply.includes("*Negotiable listing*"), reply);
+
+  reply = await send(ALICE, "offer 50000 ngn for 55000 rwf");
+  check("partial proposal is sent", reply.includes("50,000 NGN") && reply.includes("55,000 RWF"), reply);
+
+  reply = await send(CHARLIE, "accept");
+  check("partial acceptance opens trade", reply.includes("Akara Trade opened ✅"), reply);
+  check("partial acceptance tells owner remaining value", reply.includes("_Still listed_") && reply.includes("*10,000 RWF for 10,000 NGN*"), reply);
+  const partialSource = __table("listings").find((listing) => listing.listing_code === "AKR-LIST-993");
+  const partialResidual = __table("listings").find((listing) => (
+    listing.owner_user_id === charlieRow.id
+    && listing.id !== partialSource?.id
+    && listing.status === "active"
+    && listing.have_currency === "RWF"
+    && listing.want_currency === "NGN"
+    && Number(listing.have_amount) === 10000
+    && Number(listing.want_amount) === 10000
+  ));
+  check("partial source listing is reserved", partialSource?.status === "reserved", JSON.stringify(partialSource));
+  check("partial residual listing remains live", Boolean(partialResidual), JSON.stringify(__table("listings").filter((listing) => listing.owner_user_id === charlieRow.id)));
+  if (partialResidual) partialResidual.status = "closed";
 
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");

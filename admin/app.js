@@ -433,11 +433,57 @@ function payoutSummary(profiles) {
   `;
 }
 
+function formatPercent(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return escapeHtml(String(value));
+  return `${Math.round(numeric * 100)}%`;
+}
+
+function reviewCheck(value) {
+  if (value === true) return `<span class="check-pass">Pass</span>`;
+  if (value === false) return `<span class="check-fail">Review</span>`;
+  return `<span class="row-meta">Pending</span>`;
+}
+
+function renderVerificationOcr(row) {
+  const reasons = Array.isArray(row.document_ocr_reasons)
+    ? row.document_ocr_reasons
+    : (row.document_ocr_reasons ? [row.document_ocr_reasons] : []);
+  const flags = Array.isArray(row.risk_flags)
+    ? row.risk_flags
+    : (row.risk_flags ? [row.risk_flags] : []);
+  const rawText = row.document_ocr_text
+    || (row.document_ocr_raw && typeof row.document_ocr_raw === "object" ? row.document_ocr_raw.text : "")
+    || "";
+
+  return `
+    <div class="stacked-cell ocr-cell">
+      <div><strong>${escapeHtml(row.document_ocr_status || "not checked")}</strong>${row.document_ocr_engine ? ` <span class="row-meta">${escapeHtml(row.document_ocr_engine)}</span>` : ""}</div>
+      <div class="row-meta">Confidence: ${formatPercent(row.document_ocr_confidence)}</div>
+      <div>Name: <strong>${escapeHtml(row.document_ocr_name || "-")}</strong></div>
+      <div>Country: ${escapeHtml(row.document_ocr_country || "-")} · Type: ${escapeHtml(row.document_ocr_type || "-")}</div>
+      <div class="ocr-checks">
+        <span>Name ${reviewCheck(row.document_name_match)}</span>
+        <span>Country ${reviewCheck(row.document_country_match)}</span>
+        <span>ID ${reviewCheck(row.document_type_match)}</span>
+        <span>Face ${reviewCheck(row.document_face_match)}</span>
+        <span>Payout ${reviewCheck(row.payout_name_match)}</span>
+      </div>
+      ${flags.length ? `<div class="row-meta">Flags: ${escapeHtml(flags.join(", "))}</div>` : ""}
+      ${reasons.length ? `<div class="row-meta">Notes: ${escapeHtml(reasons.join("; "))}</div>` : ""}
+      ${rawText ? `<details><summary>OCR text</summary><pre>${escapeHtml(rawText)}</pre></details>` : ""}
+    </div>
+  `;
+}
+
 function renderVerifications(rows) {
   attachTable("verifications-table", [
     { label: "User", render: (row) => escapeHtml(row.users?.legal_name || row.users?.display_name || row.users?.whatsapp_phone || "-") },
     { label: "Phone", render: (row) => escapeHtml(row.users?.whatsapp_phone || "-") },
     { label: "Status", render: (row) => chip(row.status) },
+    { label: "Review", render: (row) => renderVerificationOcr(row) },
+    { label: "Priority", render: (row) => chip(row.review_priority || "normal") },
     { label: "ID Type", render: (row) => escapeHtml(row.id_type || "-") },
     { label: "Country", render: (row) => escapeHtml(row.id_country || "-") },
     {

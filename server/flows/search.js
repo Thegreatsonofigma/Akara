@@ -1,7 +1,7 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { title, caption, action, labeled, formatMoney, moneyNumber } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
-const { normalizeCurrency, parseAmount, parseCurrencyAmountPairs, browseOfferCurrency, currencyHelpLine } = require("../nlp/currency");
+const { normalizeCurrency, parseAmount, parseCurrencyAmountPairs, browseOfferCurrency } = require("../nlp/currency");
 const {
   parseSearchDetails,
   missingListingFields,
@@ -21,17 +21,21 @@ const {
 const { isVerified } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { displayReference, listingShareUrl, listingTypeLabel } = require("../db/listings");
-const { explainMissingListing, mainMenu } = require("../messages/copy");
+const { explainMissingListing, mainMenu, currencyListReply } = require("../messages/copy");
 const { prepareListingPreview, reserveListing } = require("./listing");
 
 const LISTING_SEARCH_SELECT = "listings?select=id,listing_code,owner_user_id,have_currency,want_currency,have_amount,want_amount,rate,listing_type,created_at,users!listings_owner_user_id_fkey(completed_deals_count,verification_status)";
 
 function searchPromptForStep(step, details = {}) {
   if (step === "have_currency") {
-    return [title("What currency do you have?"), currencyHelpLine()].join("\n\n");
+    return currencyListReply({ mode: "have", body: "What currency do you have?" });
   }
   if (step === "want_currency") {
-    return [title("What currency do you need?"), currencyHelpLine(details.have_currency)].join("\n\n");
+    return currencyListReply({
+      mode: "want",
+      body: "What currency do you need?",
+      excludeCurrency: details.have_currency || null,
+    });
   }
   if (step === "have_amount") {
     return [
@@ -124,17 +128,19 @@ async function showNeedOnlyOfferMatches(user, context) {
       amount: requestedAmount,
     });
 
-    return [
-      title(`No ${wantedCurrency} offer found`),
-      caption(`I checked live listings that can send ${formatMoney(requestedAmount, wantedCurrency)}.`),
-      "",
-      "Nothing currently covers that amount.",
-      "",
-      title("Next step"),
-      "Tell me what currency you have, and I can prepare your own listing for people to find.",
-      "",
-      currencyHelpLine(wantedCurrency),
-    ].join("\n");
+    return currencyListReply({
+      mode: "have",
+      body: [
+        title(`No ${wantedCurrency} offer found`),
+        caption(`I checked live listings that can send ${formatMoney(requestedAmount, wantedCurrency)}.`),
+        "",
+        "Nothing currently covers that amount.",
+        "",
+        title("Next step"),
+        "Tell me what currency you have. I can use it to prepare your own listing for people to find.",
+      ].join("\n"),
+      excludeCurrency: wantedCurrency,
+    });
   }
 
   const resultMap = {};
@@ -220,17 +226,19 @@ async function showHaveOnlyOfferMatches(user, context) {
       amount: offeredAmount,
     });
 
-    return [
-      title(`No ${offeredCurrency} request found`),
-      caption(`I checked live listings that can receive up to ${formatMoney(offeredAmount, offeredCurrency)}.`),
-      "",
-      "No current listing fits that side of the exchange.",
-      "",
-      title("Next step"),
-      "Tell me what currency you want in return, and I can prepare your own listing.",
-      "",
-      currencyHelpLine(offeredCurrency),
-    ].join("\n");
+    return currencyListReply({
+      mode: "want",
+      body: [
+        title(`No ${offeredCurrency} request found`),
+        caption(`I checked live listings that can receive up to ${formatMoney(offeredAmount, offeredCurrency)}.`),
+        "",
+        "No current listing fits that side of the exchange.",
+        "",
+        title("Next step"),
+        "Tell me what currency you want in return. I can use it to prepare your own listing.",
+      ].join("\n"),
+      excludeCurrency: offeredCurrency,
+    });
   }
 
   const resultMap = {};
@@ -580,7 +588,7 @@ async function handleFindOffer(text, user, session) {
 
   if (step === "have_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return [title("Choose what currency you have"), currencyHelpLine()].join("\n\n");
+    if (!currency) return currencyListReply({ mode: "have", body: "Choose what currency you have." });
 
     context.have_currency = currency;
     return continueSearchOrShowMatches(user, context);
@@ -588,7 +596,13 @@ async function handleFindOffer(text, user, session) {
 
   if (step === "want_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return [title("Choose what currency you need"), currencyHelpLine(context.have_currency)].join("\n\n");
+    if (!currency) {
+      return currencyListReply({
+        mode: "want",
+        body: "Choose what currency you need.",
+        excludeCurrency: context.have_currency || null,
+      });
+    }
     if (currency === context.have_currency) return "Choose a different currency from the one you have.";
 
     context.want_currency = currency;

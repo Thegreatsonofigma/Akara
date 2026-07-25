@@ -103,6 +103,58 @@ async function sendWhatsAppList(to, { body, button = "Click to Select", sections
   return text ? JSON.parse(text) : null;
 }
 
+async function sendWhatsAppButtons(to, { body, buttons = [], fallbackText = "" }) {
+  const safeButtons = buttons.slice(0, 3).map((button, index) => ({
+    type: "reply",
+    reply: {
+      id: String(button.id || `button_${index + 1}`).slice(0, 256),
+      title: String(button.title || button.label || `Option ${index + 1}`).slice(0, 20),
+    },
+  }));
+
+  if (!safeButtons.length) {
+    throw new Error("At least one WhatsApp reply button is required");
+  }
+
+  const messageBody = String(body || fallbackText || "").slice(0, 1024);
+
+  if (config.sendMode === "log") {
+    console.log(`\nAkara buttons -> ${to}\n${messageBody}\n${JSON.stringify(safeButtons, null, 2)}\n`);
+    return { logged: true };
+  }
+
+  if (!config.whatsappAccessToken || !config.whatsappPhoneNumberId) {
+    throw new Error("WhatsApp credentials are required unless AKARA_SEND_MODE=log");
+  }
+
+  const url = `https://graph.facebook.com/${config.whatsappGraphVersion}/${config.whatsappPhoneNumberId}/messages`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.whatsappAccessToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: messageBody },
+        action: { buttons: safeButtons },
+      },
+    }),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`WhatsApp buttons ${response.status}: ${text}`);
+  }
+
+  return text ? JSON.parse(text) : null;
+}
+
 async function sendWhatsAppFlow(to, {
   body,
   button = "Continue",
@@ -424,6 +476,7 @@ function getMessageText(message) {
 module.exports = {
   sendWhatsAppText,
   sendWhatsAppList,
+  sendWhatsAppButtons,
   sendWhatsAppFlow,
   getOutboundTextByMessageId,
   sendWhatsAppMedia,

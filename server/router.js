@@ -1,6 +1,6 @@
 const { title, caption, action, applyInterpretedAnswer } = require("./lib/format");
-const { sendWhatsAppList } = require("./lib/whatsapp");
-const { normalizeCurrency, currencyHelpLine, parsePaymentCurrency, parseCurrencyAmountPairs } = require("./nlp/currency");
+const { sendWhatsAppList, sendWhatsAppButtons } = require("./lib/whatsapp");
+const { normalizeCurrency, parsePaymentCurrency, parseCurrencyAmountPairs } = require("./nlp/currency");
 const {
   parseListingDetails,
   parseSearchDetails,
@@ -43,13 +43,15 @@ const {
   mainMenu,
   verificationIntro,
   mainMenuListPayload,
-  verificationStartListPayload,
+  verificationStartButtonPayload,
   greetingMenuBody,
   sessionEndedMenuBody,
   thanksReply,
   wellbeingReply,
+  supportReply,
   explainMissingListing,
   menuOptionLines,
+  currencyListReply,
 } = require("./messages/copy");
 const { scopedAssistantReply } = require("./messages/assistant");
 const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
@@ -86,24 +88,25 @@ function accountOnHoldReply(user) {
 }
 
 function makeOfferPrompt() {
-  return [
+  return currencyListReply({
+    mode: "have",
+    body: [
       "Tell me what currency you have.",
       "",
-      currencyHelpLine(),
-      "",
       "Example: I have 50k naira and want 55k RWF",
-    ].join("\n");
+    ].join("\n"),
+  });
 }
 
 function findOfferPrompt() {
-  return [
-    "Tell me what currency you need.",
-    "",
-    "Example:",
-    "I have 55k RWF and need naira",
-    "or",
-    "Show me RWF offers",
-  ].join("\n");
+  return currencyListReply({
+    mode: "want",
+    body: [
+      "Tell me what currency you want to receive.",
+      "",
+      "Example: Show me RWF offers",
+    ].join("\n"),
+  });
 }
 
 
@@ -121,14 +124,14 @@ async function sendMenuList(user, body) {
 
 async function sendVerificationStartList(user, body) {
   try {
-    await sendWhatsAppList(user.whatsapp_phone, verificationStartListPayload(body));
+    await sendWhatsAppButtons(user.whatsapp_phone, verificationStartButtonPayload(body));
     return null;
   } catch (error) {
-    console.error(`[router] verification list failed for ${user.whatsapp_phone}: ${error.message}`);
+    console.error(`[router] verification button failed for ${user.whatsapp_phone}: ${error.message}`);
     return [
       body,
       "",
-      "Open Akara and use Start verification to continue.",
+      `Reply ${action("verify")} to start.`,
     ].join("\n");
   }
 }
@@ -154,6 +157,14 @@ function payoutCurrencyFromQuotedOption(quotedText, optionNumber) {
   return null;
 }
 
+function isSupportCommand(text) {
+  const value = String(text || "").trim().toLowerCase();
+  if (!value) return false;
+  return /^(6|get support|support|contact support|email support|customer support|help desk|complaints?|complaint support)$/i.test(value)
+    || /\b(contact|email|reach|message|talk to|get)\b.*\bsupport\b/i.test(value)
+    || /\bsupport@tryakara\.com\b/i.test(value);
+}
+
 // Handles a numeric reply that quotes an earlier Akara message (menu, offer
 // list, or payout options).
 async function resolveQuotedReply(text, user, incoming = {}) {
@@ -173,6 +184,7 @@ async function resolveQuotedReply(text, user, incoming = {}) {
     if (number === 3) return getMyListingsReply(user);
     if (number === 4) return getMyDealsReply(user);
     if (number === 5) return viewProfileReply(user);
+    if (number === 6) return supportReply();
   }
 
   const listingCode = listingCodesFromText(quotedText)[number];
@@ -220,7 +232,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const details = interpreted?.details || {};
   const answer = typeof interpreted?.answer === "string" ? interpreted.answer.trim() : "";
 
-  if (isVerified(user) && !session?.current_flow && /^[1-5]$/.test(command)) {
+  if (isVerified(user) && !session?.current_flow && /^[1-6]$/.test(command)) {
     await clearSession(user, user.whatsapp_phone);
     if (command === "1") {
       await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {});
@@ -230,6 +242,12 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     if (command === "3") return getMyListingsReply(user);
     if (command === "4") return getMyDealsReply(user);
     if (command === "5") return viewProfileReply(user);
+    if (command === "6") return supportReply();
+  }
+
+  if (interpretedAction === "get_support" || isSupportCommand(text)) {
+    await clearSession(user, user.whatsapp_phone);
+    return supportReply();
   }
 
   // The model's written answer is only the reply for conversational
@@ -249,7 +267,8 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     // never trapped on the "reply with the next detail" screen. Submitted
     // (pending_review) and suspended profiles keep their intro instead.
     const wantsVerify = interpretedAction === "verify" || command === "verify" || command === "verify me"
-      || command === "start verification" || /\b(start|begin|resume|continue)\s+(my\s+)?verif/i.test(command)
+      || command === "start verification" || command === "start_verification"
+      || /\b(start|begin|resume|continue)\s+(my\s+)?verif/i.test(command)
       || command === "1" || inferIntent(text) === "verify";
     if (wantsVerify && !["pending_review", "suspended"].includes(user.verification_status)) {
       return startVerification(user);
@@ -295,6 +314,11 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return sendMenuList(user, mainMenu(user));
   }
 
+  if (interpretedAction === "get_support" || isSupportCommand(text)) {
+    await clearSession(user, user.whatsapp_phone);
+    return supportReply();
+  }
+
   if (interpretedAction === "bulk_cancel_listings" || isBulkListingCancelIntent(text)) return requestBulkListingCancel(user);
   if (interpretedAction === "bulk_delete_payouts" || isBulkPayoutDeleteIntent(text)) return requestBulkPayoutDelete(user);
 
@@ -320,7 +344,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   if (!session?.current_flow && (interpretedAction === "thanks" || isSessionClosureMessage(text))) {
     await clearSession(user, user.whatsapp_phone);
-    return sendMenuList(user, sessionEndedMenuBody(user));
+    return sendMenuList(user);
   }
 
   // Thanks is unambiguous, so it gets a warm reply even mid-flow without
@@ -606,6 +630,10 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return viewProfileReply(user);
   }
 
+  if (command === "6" || isSupportCommand(text)) {
+    return supportReply();
+  }
+
   if (isRateQuestion(text)) {
     return scopedAssistantReply(text, user);
   }
@@ -717,7 +745,7 @@ async function routeMessage(text, user, session, incoming = {}) {
 
     await clearSession(user, user.whatsapp_phone);
     return isVerified(user)
-      ? sendMenuList(user, sessionEndedMenuBody(user))
+      ? sendMenuList(user)
       : sendVerificationStartList(user, [
           "No problem. Verification paused.",
           "",
@@ -771,6 +799,7 @@ async function routeMessage(text, user, session, incoming = {}) {
     || interpreted.action === "view_profile"
     || interpreted.action === "my_listings"
     || interpreted.action === "my_deals"
+    || interpreted.action === "get_support"
     || interpreted.action === "menu"
     || interpreted.action === "greeting"
     || interpreted.action === "wellbeing"
@@ -787,6 +816,7 @@ function normalizeInteractiveCommand(command) {
     my_listings: "my listings",
     view_history: "history",
     view_profile: "profile",
+    get_support: "get support",
     add_payout: "add payout",
     verify: "verify",
   };

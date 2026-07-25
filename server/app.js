@@ -6,6 +6,7 @@ const {
   extractMessages,
   sendWhatsAppText,
   sendWhatsAppList,
+  sendWhatsAppButtons,
   sendWhatsAppFlow,
   sendWhatsAppTyping,
   getOutboundTextByMessageId,
@@ -44,7 +45,16 @@ function splitReplyWithMainMenu(reply = "") {
 }
 
 async function sendAkaraReply(to, reply) {
-  if (!reply) return null;
+  if (reply == null || reply === "") return null;
+
+  if (Array.isArray(reply)) {
+    let result = null;
+    for (const part of reply.filter((item) => item != null && item !== "")) {
+      result = await sendAkaraReply(to, part);
+    }
+    return result;
+  }
+
   if (typeof reply === "object" && reply.type === "whatsapp_list") {
     try {
       return await sendWhatsAppList(to, reply.list);
@@ -52,6 +62,17 @@ async function sendAkaraReply(to, reply) {
       console.error(`[webhook] WhatsApp list failed for ${to}: ${error.message}`);
       if (reply.fallbackText) return sendWhatsAppText(to, reply.fallbackText);
       if (reply.list?.body) return sendWhatsAppText(to, reply.list.body);
+      throw error;
+    }
+  }
+
+  if (typeof reply === "object" && reply.type === "whatsapp_buttons") {
+    try {
+      return await sendWhatsAppButtons(to, reply.buttonsPayload || reply);
+    } catch (error) {
+      console.error(`[webhook] WhatsApp buttons failed for ${to}: ${error.message}`);
+      if (reply.fallbackText) return sendWhatsAppText(to, reply.fallbackText);
+      if (reply.body) return sendWhatsAppText(to, reply.body);
       throw error;
     }
   }
@@ -64,6 +85,17 @@ async function sendAkaraReply(to, reply) {
       if (reply.fallbackText) return sendWhatsAppText(to, reply.fallbackText);
       throw error;
     }
+  }
+
+  if (typeof reply === "object") {
+    const fallback =
+      reply.fallbackText ||
+      reply.text ||
+      reply.body ||
+      reply.list?.body ||
+      reply.buttonsPayload?.body ||
+      JSON.stringify(reply);
+    return sendWhatsAppText(to, fallback);
   }
 
   const splitMenu = splitReplyWithMainMenu(reply);
@@ -335,6 +367,11 @@ function requestHost(req) {
   return host.replace(/:\d+$/, "").toLowerCase();
 }
 
+function isLocalHost(req) {
+  const host = requestHost(req).replace(/^\[|\]$/g, "");
+  return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1";
+}
+
 function requestProtocol(req) {
   return headerValue(req.headers["x-forwarded-proto"]) || "https";
 }
@@ -361,6 +398,7 @@ const server = http.createServer(async (req, res) => {
     rememberPublicUrl(req);
     const url = new URL(req.url, `http://${req.headers.host}`);
     const onAdminHost = isAdminHost(req);
+    const onLocalHost = isLocalHost(req);
 
     if (req.method === "GET" && url.pathname === "/health") {
       return jsonResponse(res, 200, { ok: true, service: "akara-whatsapp-webhook" });
@@ -405,7 +443,7 @@ const server = http.createServer(async (req, res) => {
       return redirect(res, "/admin", 302);
     }
 
-    if (!onAdminHost && config.adminHost && url.pathname.startsWith("/admin")) {
+    if (!onAdminHost && !onLocalHost && config.adminHost && url.pathname.startsWith("/admin")) {
       return redirect(res, adminRedirectUrl(req, url));
     }
 

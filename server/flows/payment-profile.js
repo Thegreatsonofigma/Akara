@@ -7,7 +7,6 @@ const { isEditIntent, isCancelIntent, isDeclineIntent } = require("../nlp/intent
 const { getUserById, updateUser, latestVerificationRequest } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { mainMenu } = require("../messages/copy");
-const { sendVerificationSuccessCard } = require("../lib/listing-card");
 
 function paymentMethodForCurrency(currency) {
   return currency === "NGN" ? "bank" : "momo";
@@ -60,6 +59,15 @@ function whatsappListReply(list, fallbackText) {
   };
 }
 
+function whatsappButtonsReply(body, buttons, fallbackText = body) {
+  return {
+    type: "whatsapp_buttons",
+    body,
+    buttons,
+    fallbackText,
+  };
+}
+
 function payoutCurrencyListPayload(excludeCurrency = null) {
   return {
     body: [
@@ -82,8 +90,10 @@ function payoutCurrencyListPayload(excludeCurrency = null) {
   };
 }
 
-function paymentChoicePromptReply(excludeCurrency = null) {
-  return whatsappListReply(payoutCurrencyListPayload(excludeCurrency), paymentChoicePrompt(excludeCurrency));
+function paymentChoicePromptReply(excludeCurrency = null, bodyOverride = null) {
+  const list = payoutCurrencyListPayload(excludeCurrency);
+  if (bodyOverride) list.body = bodyOverride;
+  return whatsappListReply(list, paymentChoicePrompt(excludeCurrency));
 }
 
 function mobileNetworkOptions(currency) {
@@ -359,7 +369,7 @@ function formatPayoutReview(context) {
   const method = paymentMethodForCurrency(currency);
   const lines = method === "bank"
     ? [
-        labeled("Type", `${currency} bank account`),
+        labeled("Payout method", `${currency} bank account`),
         "",
         labeled("Bank", context.payment_bank_name),
         labeled("Account", context.payment_account_number),
@@ -367,7 +377,7 @@ function formatPayoutReview(context) {
         ...(context.payment_account_resolved ? [caption("Account name confirmed by the bank ✅")] : []),
       ]
     : [
-        labeled("Type", `${currency} mobile money`),
+        labeled("Payout method", `${currency} mobile money`),
         "",
         labeled("Network", context.payment_network),
         labeled("Number", context.payment_number),
@@ -380,8 +390,8 @@ function formatPayoutReview(context) {
     "",
     ...lines,
     "",
-    title("Important"),
-    "Only save details you own or control. Wrong payout details can send money to the wrong place, and Akara may not be able to reverse external transfers.",
+    title("Check before saving"),
+    "Only save payout details you own. Confirm carefully before saving.",
     "",
     `${action("save payout")} to confirm`,
     `${action("edit")} to correct something`,
@@ -389,9 +399,17 @@ function formatPayoutReview(context) {
   ].join("\n");
 }
 
+function payoutReviewReply(context) {
+  return whatsappButtonsReply(formatPayoutReview(context), [
+    { id: "save payout", title: "Save payout" },
+    { id: "edit", title: "Edit" },
+    { id: "cancel", title: "Cancel" },
+  ]);
+}
+
 async function promptPaymentProfileConfirmation(user, flow, context) {
   await upsertSession(user, user.whatsapp_phone, flow, "payment_confirm", context);
-  return formatPayoutReview(context);
+  return payoutReviewReply(context);
 }
 
 function normalizeNameForMatch(name) {
@@ -545,8 +563,6 @@ async function assessPayoutNameTrust(user, payoutName, { notifyVerificationSucce
   const kycName = freshUser.legal_name || request?.extracted_name || "";
   if (!kycName || !payoutName) return { status: "unknown", reason: "KYC name or payout name is missing." };
 
-  // Payout details alone never complete a verification: auto-verifying also
-  // requires the identity documents already collected on the request.
   const hasIdentityEvidence = Boolean(request?.document_front_path && request?.selfie_path);
 
   const matched = namesLikelyMatch(kycName, payoutName);
@@ -555,25 +571,9 @@ async function assessPayoutNameTrust(user, payoutName, { notifyVerificationSucce
       await supabaseRequest(`verification_requests?id=eq.${filterValue(request.id)}`, {
         method: "PATCH",
         body: JSON.stringify({
-          automated_decision: "tier_1_candidate",
-          automated_reason: "Payout account name matches the submitted KYC name. Tier 1 auto-check passed.",
+          automated_decision: "payout_name_matched",
+          automated_reason: "Payout account name matches the submitted legal name. Document-name and selfie match checks are still required before approval.",
         }),
-      });
-    }
-
-    const canAutoVerify = hasIdentityEvidence
-      && ["unverified", "pending_input", "pending_review"].includes(freshUser.verification_status);
-    const shouldNotifySuccess = notifyVerificationSuccess && canAutoVerify;
-    if (canAutoVerify) {
-      await updateUser(user.id, {
-        verification_status: "verified_auto",
-        verification_score: Math.max(Number(freshUser.verification_score || 0), 65),
-        risk_status: "normal",
-      });
-    }
-    if (shouldNotifySuccess) {
-      sendVerificationSuccessCard(freshUser.whatsapp_phone || user.whatsapp_phone).catch((error) => {
-        console.error(`[kyc] verification card failed for ${user.id}: ${error.message}`);
       });
     }
 
@@ -779,13 +779,13 @@ async function handlePaymentSteps(flow, text, user, session, context, { onDeclin
       return onDecline(context);
     }
 
-    return formatPayoutReview(context);
+    return payoutReviewReply(context);
   }
 
   if (step === "payment_edit_menu") {
     if (isCancelIntent(text) || isDeclineIntent(text)) {
       await upsertSession(user, user.whatsapp_phone, flow, "payment_confirm", context);
-      return formatPayoutReview(context);
+      return payoutReviewReply(context);
     }
 
     const nextStep = paymentEditMenuStep(text, context);
@@ -931,6 +931,7 @@ async function handlePaymentProfile(text, user, session) {
 module.exports = {
   paymentMethodForCurrency,
   paymentChoicePrompt,
+  paymentChoicePromptReply,
   paymentStepPrompt,
   startPaymentProfileForCurrency,
   startPaymentProfileFlow,
