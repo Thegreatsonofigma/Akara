@@ -1,10 +1,16 @@
 const path = require("node:path");
 const { config } = require("../config");
 const { supabaseRequest, filterValue } = require("./supabase");
+const { formatMessageLayout } = require("./format");
+
+function containsPreviewableUrl(message) {
+  return /https:\/\/[^\s]+/i.test(String(message || ""));
+}
 
 async function sendWhatsAppText(to, message) {
+  const formattedMessage = formatMessageLayout(message);
   if (config.sendMode === "log") {
-    console.log(`\nAkara -> ${to}\n${message}\n`);
+    console.log(`\nAkara -> ${to}\n${formattedMessage}\n`);
     return { logged: true };
   }
 
@@ -25,8 +31,8 @@ async function sendWhatsAppText(to, message) {
       to,
       type: "text",
       text: {
-        preview_url: false,
-        body: message,
+        preview_url: containsPreviewableUrl(formattedMessage),
+        body: formattedMessage,
       },
     }),
   });
@@ -37,7 +43,7 @@ async function sendWhatsAppText(to, message) {
   }
 
   const parsed = text ? JSON.parse(text) : null;
-  await recordOutboundText(to, message, parsed).catch((error) => {
+  await recordOutboundText(to, formattedMessage, parsed).catch((error) => {
     console.error(`[webhook] outbound message memory failed for ${to}: ${error.message}`);
   });
   return parsed;
@@ -63,8 +69,9 @@ async function recordOutboundText(to, message, response) {
 }
 
 async function sendWhatsAppList(to, { body, button = "Click to Select", sections = [] }) {
+  const formattedBody = formatMessageLayout(body).slice(0, 1024);
   if (config.sendMode === "log") {
-    console.log(`\nAkara list -> ${to}\n${body}\n${button}\n${JSON.stringify(sections, null, 2)}\n`);
+    console.log(`\nAkara list -> ${to}\n${formattedBody}\n${button}\n${JSON.stringify(sections, null, 2)}\n`);
     return { logged: true };
   }
 
@@ -86,7 +93,7 @@ async function sendWhatsAppList(to, { body, button = "Click to Select", sections
       type: "interactive",
       interactive: {
         type: "list",
-        body: { text: body },
+        body: { text: formattedBody },
         action: {
           button,
           sections,
@@ -103,6 +110,58 @@ async function sendWhatsAppList(to, { body, button = "Click to Select", sections
   return text ? JSON.parse(text) : null;
 }
 
+async function sendWhatsAppButtons(to, { body, buttons = [], fallbackText = "" }) {
+  const safeButtons = buttons.slice(0, 3).map((button, index) => ({
+    type: "reply",
+    reply: {
+      id: String(button.id || `button_${index + 1}`).slice(0, 256),
+      title: String(button.title || button.label || `Option ${index + 1}`).slice(0, 20),
+    },
+  }));
+
+  if (!safeButtons.length) {
+    throw new Error("At least one WhatsApp reply button is required");
+  }
+
+  const messageBody = formatMessageLayout(body || fallbackText || "").slice(0, 1024);
+
+  if (config.sendMode === "log") {
+    console.log(`\nAkara buttons -> ${to}\n${messageBody}\n${JSON.stringify(safeButtons, null, 2)}\n`);
+    return { logged: true };
+  }
+
+  if (!config.whatsappAccessToken || !config.whatsappPhoneNumberId) {
+    throw new Error("WhatsApp credentials are required unless AKARA_SEND_MODE=log");
+  }
+
+  const url = `https://graph.facebook.com/${config.whatsappGraphVersion}/${config.whatsappPhoneNumberId}/messages`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.whatsappAccessToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: messageBody },
+        action: { buttons: safeButtons },
+      },
+    }),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`WhatsApp buttons ${response.status}: ${text}`);
+  }
+
+  return text ? JSON.parse(text) : null;
+}
+
 async function sendWhatsAppFlow(to, {
   body,
   button = "Continue",
@@ -113,8 +172,9 @@ async function sendWhatsAppFlow(to, {
   headerText = "",
   footerText = "",
 }) {
+  const formattedBody = formatMessageLayout(body).slice(0, 1024);
   if (config.sendMode === "log") {
-    console.log(`\nAkara flow -> ${to}\n${body}\n${button}\n${JSON.stringify({
+    console.log(`\nAkara flow -> ${to}\n${formattedBody}\n${button}\n${JSON.stringify({
       flowId,
       flowToken,
       screen,
@@ -135,7 +195,7 @@ async function sendWhatsAppFlow(to, {
   const interactive = {
     type: "flow",
     ...(headerText ? { header: { type: "text", text: headerText } } : {}),
-    body: { text: body },
+    body: { text: formattedBody },
     ...(footerText ? { footer: { text: footerText } } : {}),
     action: {
       name: "flow",
@@ -193,8 +253,9 @@ async function getOutboundTextByMessageId(messageId) {
 }
 
 async function sendWhatsAppMedia(to, mediaType, mediaId, caption = "", filename = "") {
+  const formattedCaption = formatMessageLayout(caption).slice(0, 1024);
   if (config.sendMode === "log") {
-    console.log(`\nAkara media -> ${to}\n${mediaType}: ${mediaId}\n${caption}\n`);
+    console.log(`\nAkara media -> ${to}\n${mediaType}: ${mediaId}\n${formattedCaption}\n`);
     return { logged: true };
   }
 
@@ -205,7 +266,7 @@ async function sendWhatsAppMedia(to, mediaType, mediaId, caption = "", filename 
   const type = mediaType === "document" ? "document" : "image";
   const mediaBody = {
     id: mediaId,
-    ...(caption ? { caption } : {}),
+    ...(formattedCaption ? { caption: formattedCaption } : {}),
     ...(type === "document" && filename ? { filename } : {}),
   };
 
@@ -263,6 +324,37 @@ async function sendWhatsAppTyping(messageId) {
   }
 
   return text ? JSON.parse(text) : null;
+}
+
+function startWhatsAppTyping(messageId, options = {}) {
+  if (!messageId || !config.typingIndicatorEnabled || config.sendMode === "log") {
+    return () => {};
+  }
+
+  const refreshMs = Math.max(10000, Number(options.refreshMs || 20000));
+  let stopped = false;
+  let inFlight = false;
+
+  const pulse = async () => {
+    if (stopped || inFlight) return;
+    inFlight = true;
+    try {
+      await sendWhatsAppTyping(messageId);
+    } catch (error) {
+      options.onError?.(error);
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  pulse();
+  const timer = setInterval(pulse, refreshMs);
+  timer.unref?.();
+
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
 }
 
 async function getWhatsAppMedia(mediaId) {
@@ -422,12 +514,15 @@ function getMessageText(message) {
 }
 
 module.exports = {
+  containsPreviewableUrl,
   sendWhatsAppText,
   sendWhatsAppList,
+  sendWhatsAppButtons,
   sendWhatsAppFlow,
   getOutboundTextByMessageId,
   sendWhatsAppMedia,
   sendWhatsAppTyping,
+  startWhatsAppTyping,
   getWhatsAppMedia,
   uploadWhatsAppMedia,
   mediaExtension,

@@ -188,7 +188,7 @@ async function run() {
   check("bulk cancel confirms first", reply.includes("Cancel all listings?"), reply);
 
   reply = await send(ALICE, "yes go ahead");
-  check("bulk cancel completes", reply.includes("Listings cancelled"), reply);
+  check("bulk cancel completes", reply.includes("Listings closed"), reply);
 
   const total = passed + failures.length;
   realLog(`\n${passed}/${total} live e2e checks passed`);

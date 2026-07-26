@@ -1,6 +1,14 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { formatMoney } = require("../lib/format");
 
+const CURRENCY_FLAGS = {
+  NGN: "🇳🇬",
+  RWF: "🇷🇼",
+  XAF: "🇨🇲",
+  KES: "🇰🇪",
+  GHS: "🇬🇭",
+};
+
 async function getDefaultPaymentProfile(userId, currency) {
   const rows = await supabaseRequest(
     [
@@ -63,20 +71,24 @@ function paymentExpectationLine(amount, currency, profile) {
 
 function formatPaymentProfileCompact(profile, index = null) {
   const prefix = index ? `${index}. ` : "";
+  const flag = CURRENCY_FLAGS[profile.currency] || "";
+  const heading = `${prefix}${flag ? `${flag} ` : ""}${profile.currency}`;
   if (profile.method === "bank") {
     return [
-      `*${prefix}${profile.currency} bank account*${profile.is_default ? " ✅" : ""}`,
+      `*${heading} bank account*${profile.is_default ? " ✅" : ""}`,
+      "",
       `*Bank:* ${profile.bank_name}`,
-      `*Name:* ${profile.account_name}`,
-      `*Account:* ${profile.account_number_encrypted}`,
+      `*Account name:* ${profile.account_name}`,
+      `*Account number:* ${profile.account_number_encrypted}`,
     ].join("\n");
   }
 
   return [
-    `*${prefix}${profile.currency} mobile money*${profile.is_default ? " ✅" : ""}`,
+    `*${heading} mobile money*${profile.is_default ? " ✅" : ""}`,
+    "",
     `*Network:* ${profile.momo_network}`,
-    `*Name:* ${profile.account_name}`,
-    `*Number:* ${profile.momo_number_encrypted}`,
+    `*Account name:* ${profile.account_name}`,
+    `*MoMo number:* ${profile.momo_number_encrypted}`,
   ].join("\n");
 }
 

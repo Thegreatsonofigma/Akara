@@ -27,6 +27,13 @@ function exchangePhraseRole(normalizedText, index) {
   return roleFromPhrase(last);
 }
 
+function mentionedCurrencyRole(input) {
+  const text = normalizeExchangeText(input);
+  const mentions = currencyMentions(text);
+  if (mentions.length !== 1) return null;
+  return exchangePhraseRole(text, mentions[0].index);
+}
+
 function assignPair(details, role, pair) {
   if (role === "have") {
     details.have_amount = pair.amount;
@@ -244,6 +251,7 @@ function listingDraftFromSearch(context) {
 
 module.exports = {
   exchangePhraseRole,
+  mentionedCurrencyRole,
   parseListingDetails,
   parseSearchDetails,
   missingListingFields,

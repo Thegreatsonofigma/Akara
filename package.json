@@ -6,12 +6,16 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node server/test/run-tests.js && node server/test/verification-test.js",
+    "test": "node server/test/run-tests.js && node server/test/verification-test.js && node server/test/integrity-test.js",
     "test:verification": "node server/test/verification-test.js",
-    "check": "node --check server/index.js && node --check server/app.js && node --check server/website.js && node --check server/lib/listing-card.js"
+    "test:integrity": "node server/test/integrity-test.js",
+    "stellar:backfill": "node scripts/backfill-stellar-integrity.js",
+    "check": "node --check server/index.js && node --check server/app.js && node --check server/website.js && node --check server/lib/listing-card.js && node --check server/lib/integrity-crypto.js && node --check server/lib/stellar.js && node --check server/db/integrity.js && node --check server/db/market.js && node --check server/db/quotes.js && node --check server/db/credentials.js && node --check server/db/liquidity.js && node --check server/flows/listing.js && node --check server/flows/search.js"
   },
   "dependencies": {
+    "@stellar/stellar-sdk": "^14.6.1",
     "opentype.js": "^2.0.0",
-    "sharp": "^0.33.5"
+    "sharp": "^0.33.5",
+    "tesseract.js": "^7.0.0"
   }
 }

@@ -1,9 +1,20 @@
-const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { title, caption, action, labeled } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { currencyMentions, currencyHelpLine } = require("../nlp/currency");
-const { isRateQuestion } = require("../nlp/intents");
+const {
+  isRateQuestion,
+  isGreeting,
+  isThanksMessage,
+  isWellbeingQuestion,
+} = require("../nlp/intents");
 const { isVerified, firstName } = require("../db/users");
+const { getMarketRate } = require("../db/market");
+const {
+  issueReputationCredential,
+  getReputationCredential,
+  credentialShareUrl,
+} = require("../db/credentials");
+const { calculateReputation } = require("../db/integrity");
 const { mainMenu } = require("./copy");
 
 function explainAkaraReply() {
@@ -111,20 +122,89 @@ function disputeAssistantReply() {
   ].join("\n");
 }
 
-function genericAkaraAssistantReply(user) {
+function cleanConversationalAnswer(answer) {
+  return String(answer || "")
+    .replace(/[—–]/g, ",")
+    .replace(/\s+\n/g, "\n")
+    .trim()
+    .slice(0, 900);
+}
+
+function personalizeGreeting(answer, name, mode) {
+  if (!name || mode !== "greeting" || answer.toLowerCase().includes(name.toLowerCase())) {
+    return answer;
+  }
+
+  if (/^(hi|hello|hey)\s+there\b/i.test(answer)) {
+    return answer.replace(/^(hi|hello|hey)\s+there\b/i, `$1 ${name}`);
+  }
+  if (/^(hi|hello|hey)\b/i.test(answer)) {
+    return answer.replace(/^(hi|hello|hey)\b/i, `$1 ${name}`);
+  }
+  if (/^good (morning|afternoon|evening)\b/i.test(answer)) {
+    return answer.replace(/^good (morning|afternoon|evening)\b/i, (greeting) => `${greeting}, ${name}`);
+  }
+  return `Hi ${name}. ${answer}`;
+}
+
+function conversationNudge(user, activeFlow = "") {
+  if (!isVerified(user)) {
+    if (user?.verification_status === "pending_review") {
+      return caption("Your verification is in review. I will let you know as soon as it is ready.");
+    }
+    if (user?.verification_status === "suspended") {
+      return caption("Your account needs a review before you can exchange. Contact support if you need help.");
+    }
+    if (user?.verification_status === "rejected") {
+      return [
+        caption("Your verification needs another look before you can exchange."),
+        action("verify"),
+      ].join("\n");
+    }
+    return [
+      caption("To exchange with Akara, complete verification first."),
+      action("verify"),
+    ].join("\n");
+  }
+
+  const active = {
+    create_listing: "Your listing draft is still open. Reply with the next detail when you are ready.",
+    find_offer: "Your offer search is still open. Reply with the next detail when you are ready.",
+    search_results: "Your offer results are still open. Choose an offer or ask to see more.",
+    negotiation: "Your negotiation is still open. Reply with your offer or decision when you are ready.",
+    payment_profile: "Your payout setup is still open. Reply with the requested detail to continue.",
+    deal_room: "Your Akara Trade is still open. Ask for its status whenever you need it.",
+    verification: "Your verification is still open. Reply with the requested detail to continue.",
+  }[activeFlow];
+  if (active) return caption(active);
+
+  return caption("What would you like to do next?");
+}
+
+function genericAkaraAssistantReply(user, options = {}) {
   const name = firstName(user);
-  return [
-    `I hear you${name ? `, ${name}` : ""}.`,
-    "",
-    "I can answer questions about Akara, exchange rates, offers, payouts, receipts, reminders, disputes, verification, and transaction history.",
-    "",
-    "Tell me what you want to do next, or choose one:",
-    "",
-    action("find offers"),
-    action("make offer"),
-    action("history"),
-    action("profile"),
-  ].join("\n");
+  const mode = options.interpretedAction || "unknown";
+  const fallback = {
+    greeting: `Hi${name ? ` ${name}` : ""}. Good to hear from you.`,
+    wellbeing: "I dey good, and I am ready when you are.",
+    thanks: `You are welcome${name ? `, ${name}` : ""}.`,
+    question: "I can help with that where it relates to Akara and currency exchange.",
+    unknown: "I hear you. That is outside what I can do directly inside Akara.",
+  }[mode] || `I hear you${name ? `, ${name}` : ""}.`;
+  const cleanedAnswer = cleanConversationalAnswer(options.modelAnswer) || fallback;
+  const answer = personalizeGreeting(cleanedAnswer, name, mode);
+
+  if (options.suppressNudge) return answer;
+  if (mode === "greeting" && !options.activeFlow) {
+    return [
+      answer,
+      "",
+      "If you need money in another currency, tell me what you have and what you want.",
+      "",
+      "I will check live offers first. If nothing fits, I can prepare your own listing and keep every exchange step organized here in WhatsApp.",
+    ].join("\n");
+  }
+  return [answer, "", conversationNudge(user, options.activeFlow)].join("\n");
 }
 
 async function rateAssistantReply(text) {
@@ -151,30 +231,21 @@ async function rateAssistantReply(text) {
     ].join("\n");
   }
 
-  const rows = await supabaseRequest(
-    [
-      "listings?select=have_currency,want_currency,have_amount,want_amount,created_at",
-      "status=eq.active",
-      `have_currency=eq.${filterValue(toCurrency)}`,
-      `want_currency=eq.${filterValue(fromCurrency)}`,
-      "order=created_at.desc",
-      "limit=5",
-    ].join("&")
-  );
-
-  if (rows.length) {
-    const rates = rows
-      .map((row) => Number(row.have_amount) / Number(row.want_amount))
-      .filter((rate) => Number.isFinite(rate) && rate > 0);
-    const average = rates.reduce((sum, rate) => sum + rate, 0) / rates.length;
-    const best = Math.max(...rates);
+  const snapshot = await getMarketRate(fromCurrency, toCurrency);
+  if (snapshot) {
     return [
       title(`${fromCurrency} to ${toCurrency}`),
-      caption("Based on live Akara listings, not a central bank or forex feed."),
+      caption("Akara Market Rate uses live peer listings and recent completed exchanges."),
       "",
-      labeled("Typical", `1 ${fromCurrency} gets about ${average.toFixed(4)} ${toCurrency}`),
-      labeled("Best visible", `1 ${fromCurrency} gets ${best.toFixed(4)} ${toCurrency}`),
-      labeled("Listings checked", String(rows.length)),
+      labeled("Market rate", `1 ${fromCurrency} gets about ${Number(snapshot.weighted_rate).toFixed(4)} ${toCurrency}`),
+      labeled("Current range", `${Number(snapshot.low_rate).toFixed(4)} to ${Number(snapshot.high_rate).toFixed(4)} ${toCurrency}`),
+      labeled("Best visible", `1 ${fromCurrency} gets ${Number(snapshot.best_rate).toFixed(4)} ${toCurrency}`),
+      labeled(
+        "Market depth",
+        `${snapshot.active_listing_count} live · ${snapshot.completed_trade_count} recent completed`
+      ),
+      "",
+      caption("Peer-set market information, not a guaranteed exchange rate. Your accepted terms are locked before payment."),
       "",
       action(`find ${toCurrency} offers`),
     ].join("\n");
@@ -192,10 +263,92 @@ async function rateAssistantReply(text) {
   ].join("\n");
 }
 
-async function scopedAssistantReply(text, user) {
+function trustCredentialMessage(credential, heading = "Akara Trust Record") {
+  const claims = credential.claims || {};
+  const link = credentialShareUrl(credential.credential_code);
+  return [
+    title(heading),
+    caption("Your activity and reliability on Akara."),
+    "",
+    `*Reference:* ${credential.credential_code}`,
+    "",
+    `*🏅 Trust level:* ${String(credential.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())}`,
+    "",
+    `*✅ Completed trades:* ${claims.completed_trades || 0}`,
+    "",
+    `*📈 Completion rate:* ${Number(claims.completion_rate || 0).toFixed(0)}%`,
+    "",
+    `*⚠️ Open disputes:* ${claims.unresolved_disputes || 0}`,
+    "",
+    `*🔐 Record integrity:* ${claims.integrity_status === "verified" ? "Stellar verified" : "Updating"}`,
+    "",
+    `*Valid until:* ${new Date(credential.expires_at).toLocaleDateString("en-GB")}`,
+    "",
+    link ? `*🔗 Share record:* ${link}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+async function reputationAssistantReply(text, user) {
+  const code = String(text || "").match(/\bAKR-TRUST-[A-F0-9]{8}\b/i)?.[0];
+  if (code) {
+    const credential = await getReputationCredential(code);
+    if (!credential || credential.status !== "active" || Date.parse(credential.expires_at) <= Date.now()) {
+      return [
+        title("Trust record unavailable"),
+        "That Akara credential is invalid, expired, or revoked.",
+      ].join("\n");
+    }
+    return trustCredentialMessage(credential, "Verified Akara Trust Record");
+  }
+
+  if (!isVerified(user)) {
+    return "Complete verification before Akara can issue your Trust Record.";
+  }
+  const credential = await issueReputationCredential(user.id);
+  if (!credential) {
+    const reputation = await calculateReputation(user.id);
+    return [
+      title("Your trust record"),
+      caption("Your activity and reliability on Akara."),
+      "",
+      `*🏅 Trust level:* ${String(reputation.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())}`,
+      "",
+      `*✅ Completed trades:* ${reputation.completed_trades || 0}`,
+      "",
+      `*📈 Completion rate:* ${Number(reputation.completion_rate || 0).toFixed(0)}%`,
+      "",
+      `*⚠️ Open disputes:* ${reputation.open_disputes || 0}`,
+    ].join("\n");
+  }
+  return trustCredentialMessage(credential);
+}
+
+function accountMigrationReply() {
+  return [
+    title("Moving to another phone"),
+    "",
+    "If you keep the same WhatsApp number, your Akara account, verification, listings, and history move with it. You do not need to verify again.",
+    "",
+    title("Changing your WhatsApp number"),
+    "",
+    "Akara must securely transfer the account. We confirm the old number where possible, check that no trade or dispute is open, verify the account owner, then revoke access from the old number.",
+    "",
+    caption("Ask Akara to move your account when the new number is ready. Support will open a protected migration review."),
+  ].join("\n");
+}
+
+async function scopedAssistantReply(text, user, options = {}) {
   const value = compactText(text);
 
+  if (/\bAKR-TRUST-[A-F0-9]{8}\b/i.test(text)
+      || /\b(trust record|reputation passport|reputation record|my reputation|my trust|trust credential)\b/.test(value)) {
+    return reputationAssistantReply(text, user);
+  }
   if (isRateQuestion(text)) return rateAssistantReply(text);
+  if (/\b(new|another|change|changing|move|moving|migrate|migration|transfer)\b.*\b(phone|device|whatsapp number|number|account)\b/.test(value)
+      || /\b(phone|device|whatsapp number|number|account)\b.*\b(change|move|migrate|transfer)\b/.test(value)) {
+    return accountMigrationReply();
+  }
   if (/\b(what is akara|who are you|what do you do|how does akara work|explain akara)\b/.test(value)) return explainAkaraReply();
   if (/\b(refer|referral|referrals|invite|inviting|free trades?)\b/.test(value)) return referralAssistantReply();
   if (/\b(fee|fees|charge|charges|cost|costs|pricing|service fee|akara credits)\b/.test(value)) return feeAssistantReply();
@@ -206,9 +359,18 @@ async function scopedAssistantReply(text, user) {
   if (/\b(dispute|problem|issue|wrong|fake|not received|no alert)\b/.test(value)) return disputeAssistantReply();
   if (/\b(what can you do|help|options|commands|menu)\b/.test(value)) return mainMenu();
 
-  return genericAkaraAssistantReply(user);
+  let interpretedAction = options.interpretedAction || "unknown";
+  if (isWellbeingQuestion(text)) interpretedAction = "wellbeing";
+  else if (isThanksMessage(text)) interpretedAction = "thanks";
+  else if (isGreeting(text)) interpretedAction = "greeting";
+
+  return genericAkaraAssistantReply(user, {
+    ...options,
+    interpretedAction,
+  });
 }
 
 module.exports = {
   scopedAssistantReply,
+  reputationAssistantReply,
 };

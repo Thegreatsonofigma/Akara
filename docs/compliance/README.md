@@ -16,6 +16,7 @@ These documents are not legal advice and do not, by themselves, certify Akara wi
 - [Data Breach Response Plan](./data-breach-response-plan.md)
 - [Vendor And Processor Register](./vendor-and-processor-register.md)
 - [NDPC Compliance Audit](./ndpc-compliance-audit.md)
+- [Stellar Integrity Layer](../stellar-integrity.md)
 
 ## Certification Readiness Path
 

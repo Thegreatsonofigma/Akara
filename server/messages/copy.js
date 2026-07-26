@@ -1,5 +1,5 @@
 const { title, caption, action, formatMoney } = require("../lib/format");
-const { currencyHelpLine } = require("../nlp/currency");
+const { currencyHelpLine, supportedCurrencies } = require("../nlp/currency");
 const { firstName } = require("../db/users");
 
 function menuOptionLines() {
@@ -9,6 +9,7 @@ function menuOptionLines() {
     "3. `my listings`",
     "4. `history`",
     "5. `profile`",
+    "6. `get support`",
   ];
 }
 
@@ -17,7 +18,9 @@ function greetingMenuBody(user) {
   return [
     `Hi${name ? ` ${name}` : ""} 👋`,
     "",
-    "Choose what you want to do next on Akara.",
+    "Need money in another currency? Tell me what you have and what you need.",
+    "",
+    "I can help you find a live offer or create your own, then keep the exchange clear inside WhatsApp.",
   ].join("\n");
 }
 
@@ -143,14 +146,61 @@ function mainMenuListPayload(body = "Choose what you want to do next on Akara.")
       {
         title: "Akara actions",
         rows: [
-          { id: "make_offer", title: "make offer", description: "Create a rate listing people can take." },
-          { id: "find_offers", title: "find offers", description: "Browse available currency offers." },
-          { id: "my_listings", title: "my listings", description: "Manage your live listings." },
-          { id: "history", title: "history", description: "See your past and active trades." },
-          { id: "profile", title: "profile", description: "Payouts, verification, and account details." },
+          { id: "make_offer", title: "Make an offer", description: "I want to create a listing people can take." },
+          { id: "find_offers", title: "Find offers", description: "I want to browse available exchanges." },
+          { id: "my_listings", title: "My listings", description: "I want to manage the offers I posted." },
+          { id: "history", title: "History", description: "I want to see my current and past trades." },
+          { id: "profile", title: "Profile", description: "I want to manage my account and payout details." },
+          { id: "get_support", title: "Get support", description: "I want help from Akara support." },
         ],
       },
     ],
+  };
+}
+
+const CURRENCY_META = {
+  NGN: { flag: "🇳🇬", name: "Nigerian naira", route: "Bank account" },
+  RWF: { flag: "🇷🇼", name: "Rwandan franc", route: "Mobile money" },
+  XAF: { flag: "🇨🇲", name: "Central African CFA", route: "Mobile money" },
+  KES: { flag: "🇰🇪", name: "Kenyan shilling", route: "Mobile money" },
+  GHS: { flag: "🇬🇭", name: "Ghanaian cedi", route: "Mobile money" },
+};
+
+function currencyListPayload({
+  body = "Choose a currency.",
+  mode = "select",
+  excludeCurrency = null,
+  button = "Choose currency",
+} = {}) {
+  const rows = supportedCurrencies()
+    .filter((currency) => currency !== excludeCurrency)
+    .map((currency) => {
+      const meta = CURRENCY_META[currency] || {};
+      return {
+        id: `currency_${mode}_${currency}`,
+        title: `${meta.flag ? `${meta.flag} ` : ""}${currency}`,
+        description: [meta.name, meta.route].filter(Boolean).join(" • "),
+      };
+    });
+
+  return {
+    body,
+    button,
+    sections: [
+      {
+        title: "Supported currencies",
+        rows,
+      },
+    ],
+  };
+}
+
+function currencyListReply(options = {}) {
+  const list = currencyListPayload(options);
+  return {
+    type: "whatsapp_list",
+    list,
+    fallbackText: [list.body, "", currencyHelpLine(options.excludeCurrency)].join("\n"),
   };
 }
 
@@ -173,6 +223,20 @@ function verificationStartListPayload(body = "Start verification to continue on 
   };
 }
 
+function verificationStartButtonPayload(body = "Start verification to continue on Akara.") {
+  return {
+    body,
+    buttons: [
+      { id: "start_verification", title: "Start verification" },
+    ],
+    fallbackText: [
+      body,
+      "",
+      `Reply ${action("verify")} to start.`,
+    ].join("\n"),
+  };
+}
+
 function referralPitch() {
   return "🎁 Invite a friend or refer a friend to swap with you and get 10 more free trades.";
 }
@@ -186,7 +250,7 @@ function feeIncludedNote() {
 }
 
 function listingShareCopy() {
-  return "Share this with anyone interested. They can review it and open the Akara Trade from their own chat.";
+  return "Share this link with anyone interested. It previews your swap card and opens the listing in Akara on WhatsApp.";
 }
 
 function explainMissingListing(fields, context = {}) {
@@ -235,5 +299,8 @@ module.exports = {
   listingShareCopy,
   explainMissingListing,
   mainMenuListPayload,
-  verificationStartListPayload
+  currencyListPayload,
+  currencyListReply,
+  verificationStartListPayload,
+  verificationStartButtonPayload
 };

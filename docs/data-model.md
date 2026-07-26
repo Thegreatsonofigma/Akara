@@ -239,3 +239,144 @@ Allowed statuses:
 - event_payload
 - created_at
 
+## integrity_records
+
+- event_key
+- record_type
+- entity_type
+- entity_id
+- subject_ref
+- payload_version
+- payload_snapshot
+- salt
+- commitment_hash
+- previous_commitment_hash
+- status
+- batch_id
+- leaf_index
+- merkle_proof
+- anchored_at
+
+## stellar_anchor_batches
+
+- network
+- merkle_root
+- leaf_count
+- status
+- source_account
+- transaction_hash
+- transaction_xdr
+- ledger_sequence
+- explorer_url
+- attempt_count
+- next_retry_at
+- last_error
+- submitted_at
+- confirmed_at
+
+## user_reputation_snapshots
+
+- user_id
+- trigger_type
+- trigger_entity_id
+- completed_trades
+- cancelled_trades
+- expired_trades
+- completion_rate
+- disputes_total
+- open_disputes
+- resolved_disputes
+- reputation_band
+- previous_commitment_hash
+- commitment_hash
+- integrity_record_id
+
+## market_rate_snapshots
+
+- corridor_key
+- send_currency
+- receive_currency
+- median_rate
+- weighted_rate
+- low_rate
+- high_rate
+- best_rate
+- active_listing_count
+- completed_trade_count
+- total_visible_liquidity
+- source_window_start
+- source_window_end
+- expires_at
+- commitment_hash
+- integrity_record_id
+
+Snapshots are append-only after the integrity commitment is attached.
+
+## locked_quotes
+
+- quote_code
+- listing_id
+- negotiable_offer_id
+- maker_user_id
+- taker_user_id
+- send_currency
+- receive_currency
+- send_amount
+- receive_amount
+- rate
+- quote_type
+- status
+- terms_commitment_hash
+- integrity_record_id
+- deal_id
+- expires_at
+
+Financial terms cannot change after the quote is created.
+
+## reputation_credentials
+
+- credential_code
+- user_id
+- reputation_snapshot_id
+- subject_ref
+- reputation_band
+- claims
+- commitment_hash
+- integrity_record_id
+- status
+- expires_at
+- revoked_at
+
+Credential claims exclude names, phone numbers, payout details, ID data, and
+transaction amounts.
+
+## liquidity_route_plans
+
+- route_code
+- requester_user_id
+- send_currency
+- receive_currency
+- requested_send_amount
+- requested_receive_amount
+- planned_send_amount
+- planned_receive_amount
+- coverage_percent
+- leg_count
+- status
+- commitment_hash
+- integrity_record_id
+- expires_at
+
+## liquidity_route_legs
+
+- route_plan_id
+- leg_index
+- listing_id
+- send_amount
+- receive_amount
+- rate
+- deal_id
+- status
+
+Each route has two to four explicit legs. Each selected leg opens its own deal
+and locked quote.

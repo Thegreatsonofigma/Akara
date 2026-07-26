@@ -1,38 +1,110 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { title, caption, action, labeled, formatMoney } = require("../lib/format");
-const { getUserListings, displayReference, listingShareUrl, listingStatusLabel } = require("../db/listings");
+const { getUserListings, displayReference, listingStatusLabel } = require("../db/listings");
 const { userRoleInDeal, dealPartySummary, readableDealStatus } = require("../db/deals");
+const { upsertSession } = require("../db/sessions");
+const { mainMenu, mainMenuListPayload } = require("../messages/copy");
+
+function listingStatusMarker(status) {
+  return {
+    active: "🟢",
+    paused: "🟡",
+    reserved: "🔒",
+    cancelled: "⚫",
+  }[status] || "•";
+}
+
+function listingPickerRow(listing) {
+  return {
+    id: `manage_listing_${listing.menu_number}`,
+    title: `${listingStatusMarker(listing.status)} ${displayReference(listing.listing_code, "listing")}`.slice(0, 24),
+    description: [
+      listing.status === "cancelled" ? "CLOSED" : listingStatusLabel(listing.status),
+      `${formatMoney(listing.have_amount, listing.have_currency)} to ${formatMoney(listing.want_amount, listing.want_currency)}`,
+    ].join(" | ").slice(0, 72),
+  };
+}
+
+function listingPickerReply(listings, body) {
+  const openListings = listings.filter((listing) => listing.status !== "cancelled");
+  const closedListings = listings.filter((listing) => listing.status === "cancelled");
+  const sections = [
+    openListings.length
+      ? {
+          title: "Open listings",
+          rows: openListings.map(listingPickerRow),
+        }
+      : null,
+    closedListings.length
+      ? {
+          title: "Closed history",
+          rows: closedListings.map(listingPickerRow),
+        }
+      : null,
+  ].filter(Boolean);
+
+  return {
+    type: "whatsapp_list",
+    list: {
+      body,
+      button: "Choose listing",
+      sections,
+    },
+    fallbackText: body,
+  };
+}
 
 async function getMyListingsReply(user) {
-  const listings = await getUserListings(user.id, 5);
+  const listings = (await getUserListings(user.id, 10, {
+    statuses: ["active", "reserved", "paused", "cancelled"],
+  })).map((listing, index) => ({
+    ...listing,
+    menu_number: index + 1,
+  }));
 
   if (listings.length === 0) {
-    return [
+    const body = [
       title("No listings yet"),
       "",
-      caption("Make one by typing what you have and what you want."),
+      "Your live and closed listings will appear here.",
       "",
-      action("I have 50k naira and want 55k RWF"),
+      caption("What would you like to do next?"),
     ].join("\n");
+
+    return {
+      type: "whatsapp_list",
+      list: mainMenuListPayload(body),
+      fallbackText: [
+        body,
+        "",
+        mainMenu(user),
+      ].join("\n"),
+    };
   }
 
-  return [
+  const listingMap = {};
+  listings.forEach((listing) => {
+    listingMap[String(listing.menu_number)] = listing.id;
+  });
+  await upsertSession(user, user.whatsapp_phone, "settings", "listing_picker", {
+    payout_map: {},
+    listing_map: listingMap,
+  });
+
+  const body = [
     title("Your listings"),
-    caption("Live and recent listings from your account."),
+    caption("Choose a listing to view its details and available actions."),
     "",
-    listings.map((listing, index) => {
-      const shareUrl = listing.status === "active" ? listingShareUrl(listing.listing_code) : "";
-      return [
-        title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
-        labeled("Send", formatMoney(listing.have_amount, listing.have_currency)),
-        labeled("Receive", formatMoney(listing.want_amount, listing.want_currency)),
-        labeled("Status", listingStatusLabel(listing.status)),
-        shareUrl ? labeled("Share", shareUrl) : "",
-      ].filter(Boolean).join("\n");
-    }).join("\n\n"),
+    `${listingStatusMarker("active")} Live`,
     "",
-    `${action("profile")} for controls`,
+    `${listingStatusMarker("paused")} Paused`,
+    "",
+    `${listingStatusMarker("reserved")} In trade`,
+    "",
+    `${listingStatusMarker("cancelled")} Closed`,
   ].join("\n");
+
+  return listingPickerReply(listings, body);
 }
 
 async function getMyDealsReply(user) {
@@ -46,11 +118,26 @@ async function getMyDealsReply(user) {
   );
 
   if (deals.length === 0) {
-    return [
+    const body = [
       title("No transaction history yet"),
       "",
-      `${action("find offers")} when you are ready.`,
+      caption("Your completed and active exchanges will appear here."),
+      "",
+      "Browse live offers whenever you are ready.",
     ].join("\n");
+
+    return {
+      type: "whatsapp_buttons",
+      body,
+      buttons: [
+        { id: "find offers", title: "Find offers" },
+      ],
+      fallbackText: [
+        body,
+        "",
+        `${action("find offers")} to browse the marketplace.`,
+      ].join("\n"),
+    };
   }
 
   return [

@@ -20,6 +20,10 @@ process.env.AKARA_TYPING_INDICATOR = "false";
 process.env.AKARA_SECURITY_ENABLED = "false";
 process.env.AKARA_SECURITY_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
+process.env.AKARA_RECEIPT_OCR = "off";
+process.env.AKARA_ID_OCR = "off";
+process.env.AKARA_PUBLIC_URL = "https://akara-share.example";
+process.env.AKARA_SHARE_URL = "https://akara-share.example";
 
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -50,9 +54,15 @@ stubModule("lib/openai.js", openaiStub);
 // Menu lists are sent directly (the reply is null); capture the payloads so
 // scenarios can assert on the list body instead of the returned text.
 const whatsapp = require("../lib/whatsapp");
+const { containsPreviewableUrl } = whatsapp;
 const listSends = [];
+const buttonSends = [];
 whatsapp.sendWhatsAppList = async (to, payload) => {
   listSends.push({ to, payload });
+  return { logged: true };
+};
+whatsapp.sendWhatsAppButtons = async (to, payload) => {
+  buttonSends.push({ to, payload });
   return { logged: true };
 };
 whatsapp.getWhatsAppMedia = async () => ({
@@ -65,14 +75,34 @@ function lastListBody() {
   return listSends.length ? String(listSends[listSends.length - 1].payload?.body || "") : "";
 }
 
+function lastButtonBody() {
+  return buttonSends.length ? String(buttonSends[buttonSends.length - 1].payload?.body || "") : "";
+}
+
+function lastListPayload() {
+  return listSends.length ? listSends[listSends.length - 1].payload : null;
+}
+
+function lastButtonPayload() {
+  return buttonSends.length ? buttonSends[buttonSends.length - 1].payload : null;
+}
+
 const { buildReply } = require("../router");
 const { sendIdleMenus } = require("../app");
 const { findOrCreateUser } = require("../db/users");
-const { getSession } = require("../db/sessions");
+const { getSession, rememberFailedMessage } = require("../db/sessions");
 const intents = require("../nlp/intents");
 const { clearHistory } = require("../nlp/history");
 const { config } = require("../config");
 const { findNigerianBanks } = require("../lib/coinprofile");
+const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
+const { normalizeMobileMoneyNumber } = require("../lib/mobile-number");
+const { formatMessageLayout } = require("../lib/format");
+const {
+  handlePaymentProfile,
+  mobileMoneyNumberPrompt,
+  verifiedBankNameMatch,
+} = require("../flows/payment-profile");
 
 const { __table, __reset } = fakeSupabase;
 
@@ -108,6 +138,9 @@ function fullInterpretation(partial) {
     want_currency: null,
     want_amount: null,
     payment_currency: null,
+    settings_target: null,
+    settings_operation: null,
+    settings_item_number: null,
     answer: null,
     ...partial,
   };
@@ -129,12 +162,21 @@ async function send(phone, text, { interpret, media, quotedText } = {}) {
   const session = await getSession(phone);
   const incoming = { from: phone, text, media: media || null, quotedText: quotedText || "" };
   const beforeLists = listSends.length;
+  const beforeButtons = buttonSends.length;
   const reply = await buildReply(text, user, session, incoming);
   if (reply === null && listSends.length > beforeLists) return lastListBody();
+  if (reply === null && buttonSends.length > beforeButtons) return lastButtonBody();
   if (reply && typeof reply === "object") {
     if (typeof reply.reply === "string") return reply.reply;
+    if (reply.type === "whatsapp_list") {
+      listSends.push({ to: phone, payload: reply.list });
+      return reply.list?.body || reply.fallbackText || "";
+    }
+    if (reply.type === "whatsapp_buttons") {
+      buttonSends.push({ to: phone, payload: reply });
+      return reply.body || reply.fallbackText || "";
+    }
     if (typeof reply.body === "string") return reply.body;
-    if (reply.type === "whatsapp_list") return reply.fallbackText || reply.list?.body || "";
     if (reply.type === "whatsapp_flow") return reply.fallbackText || reply.flow?.body || "";
     if (reply.type === "media") return reply.caption || reply.fallbackText || "";
   }
@@ -257,6 +299,7 @@ async function run() {
   check("payment details → payouts", intents.isPayoutsCommand("payment details"));
   check("my momo → payouts", intents.isPayoutsCommand("my momo"));
   check("view my payout details → payouts", intents.isPayoutsCommand("view my payout details"));
+  check("my trust record → trust record", intents.isTrustRecordCommand("my trust record"));
   check("my profile → profile", intents.isProfileCommand("my profile"));
   check("my account → profile", intents.isProfileCommand("my account"));
   check("account info → profile", intents.isProfileCommand("account info"));
@@ -271,11 +314,79 @@ async function run() {
   check("show my records → history", intents.isHistoryCommand("show my records"));
   check("find offers not listings", !intents.isMyListingsCommand("find offers"));
   check("delete all payouts not payouts view", !intents.isPayoutsCommand("delete all my payouts"));
+  check("https listing links enable WhatsApp previews", containsPreviewableUrl("Open https://www.tryakara.com/l/AKR-LIST-001"));
+  check("ordinary chat does not request a link preview", !containsPreviewableUrl("Show me my listings"));
+
+  // ---------- shared WhatsApp message formatting
+  scenario("message formatting");
+  const formattedMessage = formatMessageLayout([
+    "*Offer summary*",
+    "*You send:* 50,000 NGN",
+    "*You receive:* 55,000 RWF",
+    "",
+    "",
+    "`publish` to continue",
+  ].join("\n"));
+  check(
+    "consecutive information fields have breathing room",
+    formattedMessage.includes("*You send:* 50,000 NGN\n\n*You receive:* 55,000 RWF"),
+    formattedMessage
+  );
+  check("excess blank lines are collapsed", !formattedMessage.includes("\n\n\n"), formattedMessage);
+  check("actions are separated from information", formattedMessage.includes("55,000 RWF\n\n`publish`"), formattedMessage);
+
+  // ---------- mobile money number formatting
+  scenario("mobile money number formatting");
+  check(
+    "Rwanda international number becomes local format",
+    normalizeMobileMoneyNumber("RWF", "+250 788 123 456").number === "0788123456"
+  );
+  check(
+    "Rwanda 00 country code becomes local format",
+    normalizeMobileMoneyNumber("RWF", "00250 788 123 456").number === "0788123456"
+  );
+  check(
+    "Kenya international number becomes local format",
+    normalizeMobileMoneyNumber("KES", "+254 712 345 678").number === "0712345678"
+  );
+  check(
+    "Ghana country code without plus becomes local format",
+    normalizeMobileMoneyNumber("GHS", "233 24 123 4567").number === "0241234567"
+  );
+  check(
+    "Cameroon international number becomes nine local digits",
+    normalizeMobileMoneyNumber("XAF", "+237 670 123 456").number === "670123456"
+  );
+  check(
+    "Nigeria international number becomes eleven local digits",
+    normalizeMobileMoneyNumber("NGN", "+234 803 123 4567").number === "08031234567"
+  );
+  check(
+    "short Rwanda number is rejected",
+    normalizeMobileMoneyNumber("RWF", "07881234").reason === "short"
+  );
+  check(
+    "wrong international country code is rejected",
+    normalizeMobileMoneyNumber("RWF", "+254 712 345 678").reason === "wrong_country"
+  );
+  check(
+    "mobile number prompt keeps backend normalization invisible",
+    !mobileMoneyNumberPrompt("KES").toLowerCase().includes("country code"),
+    mobileMoneyNumberPrompt("KES")
+  );
+  const longKenyanNumber = normalizeMobileMoneyNumber("KES", "071234567890");
+  check(
+    "mobile number error explains the country format without technical processing copy",
+    mobileMoneyNumberPrompt("KES", longKenyanNumber).includes("longer than a Kenya mobile money number")
+      && !mobileMoneyNumberPrompt("KES", longKenyanNumber).includes("after formatting"),
+    mobileMoneyNumberPrompt("KES", longKenyanNumber)
+  );
 
   // ---------- unverified journey
   scenario("unverified journey");
   let reply = await send(ALICE, "hi");
-  check("greeting → verification intro", reply.includes("First, let's verify you"), reply);
+  check("unverified greeting is conversational", reply.includes("Hi Test") && reply.includes("Complete verification"), reply);
+  check("unverified greeting keeps verification CTA", lastButtonBody().includes("Complete verification"), lastButtonBody());
 
   reply = await send(ALICE, "my profile");
   check("unverified profile is scoped", reply.includes("*Your profile*"), reply);
@@ -319,11 +430,114 @@ async function run() {
   check("profile counts completed deals from records", reply.includes("*Completed trades:* 3"), reply);
   check("profile has no bank numbers", !reply.includes("0123456789"), reply);
   check("profile has no payout list", !reply.includes("*Payouts*"), reply);
+  const profileRows = (lastListPayload()?.sections || []).flatMap((section) => section.rows || []);
+  const profileActionIds = profileRows.map((row) => row.id);
+  check("profile uses one native management tray", lastListPayload()?.button === "Manage profile", JSON.stringify(lastListPayload()));
+  check(
+    "profile tray contains the core payout and listing actions",
+    [
+      "profile_add_payout",
+      "profile_delete_payout",
+      "profile_delete_all_payouts",
+      "profile_pause_all_listings",
+      "profile_reopen_all_listings",
+      "profile_close_all_listings",
+    ].every((id) => profileActionIds.includes(id)),
+    JSON.stringify(profileActionIds)
+  );
+  check(
+    "profile tray has one canonical close-all action",
+    profileActionIds.filter((id) => id === "profile_close_all_listings").length === 1
+      && !profileRows.some((row) => /cancel all listings/i.test(row.title || "")),
+    JSON.stringify(profileRows)
+  );
+  check(
+    "profile action descriptions speak in the user's voice",
+    profileRows.find((row) => row.id === "profile_add_payout")?.description.startsWith("I want to")
+      && profileRows.find((row) => row.id === "profile_listings")?.description.startsWith("I want to"),
+    JSON.stringify(profileRows)
+  );
+  check(
+    "profile body does not repeat tray actions as text",
+    !reply.includes("cancel all listings")
+      && !reply.includes("delete all payouts")
+      && !reply.includes("*See more*"),
+    reply
+  );
+
+  reply = await send(ALICE, "my trust record");
+  check("trust record opens its own view", reply.includes("*Akara Trust Record*") || reply.includes("*Your trust record*"), reply);
+  check("trust record does not resend profile", !reply.includes("*Your profile*"), reply);
+  check("trust record shows concise activity", reply.includes("Completed trades") && reply.includes("Completion rate"), reply);
+  check("trust record uses restrained visual cues", reply.includes("✅") && reply.includes("📈") && reply.includes("⚠️"), reply);
+  check(
+    "trust record keeps each label and value on one row",
+    /\*🏅 Trust level:\*\s+\w+/.test(reply)
+      && /\*✅ Completed trades:\*\s+\d+/.test(reply)
+      && /\*📈 Completion rate:\*\s+\d+%/.test(reply)
+      && /\*⚠️ Open disputes:\*\s+\d+/.test(reply),
+    reply
+  );
+  check(
+    "trust record omits unnecessary hidden-data disclaimer",
+    !reply.includes("phone number") && !reply.includes("payout detail") && !reply.includes("transaction amount"),
+    reply
+  );
+
+  reply = await send(ALICE, "my trust record", {
+    interpret: { action: "view_profile", answer: "Here is your profile." },
+  });
+  check("trust record wording overrides a generic profile classification", !reply.includes("*Your profile*"), reply);
+
+  reply = await send(ALICE, "How do I move my Akara account to a new phone?");
+  check(
+    "device migration keeps the same-number account intact",
+    reply.includes("same WhatsApp number") && reply.includes("do not need to verify again"),
+    reply
+  );
+
+  reply = await send(ALICE, "Please move my Akara account to my new WhatsApp number");
+  check("new-number migration opens a protected support review", reply.includes("*Support request received*"), reply);
+  check(
+    "new-number migration reaches the admin queue with its own category",
+    __table("audit_events").some((row) =>
+      row.entity_type === "support_request"
+      && row.event_payload?.category === "account_migration"
+    ),
+    JSON.stringify(__table("audit_events").filter((row) => row.entity_type === "support_request"))
+  );
+
+  await rememberFailedMessage(aliceRow, ALICE, { text: "my trust record", type: "text" });
+  reply = await send(ALICE, "retry_last_message");
+  check("retry resumes the saved action from its original context", reply.includes("Trust Record") || reply.includes("trust record"), reply);
+  check("successful retry clears the saved failure", !(await getSession(ALICE))?.context_json?.pending_retry, JSON.stringify(await getSession(ALICE)));
 
   reply = await send(ALICE, "okay thanks");
-  check("session closure returns the menu", reply.includes("Choose what you want to do next on Akara"), reply);
-  check("session closure is calm", reply.includes("Done"), reply);
+  check("session closure is conversational", reply.includes("You are welcome, Test"), reply);
+  check("session closure gives one concise nudge", reply.includes("What would you like to do next?"), reply);
+  check(
+    "session closure embeds the native menu without static menu copy",
+    lastListPayload()?.sections?.[0]?.rows?.length === 6
+      && !reply.includes("1. `make offer`")
+      && !reply.includes("Choose what you want to do next on Akara"),
+    JSON.stringify({ reply, list: lastListPayload() })
+  );
   removeSeededDeals(completedProfileDeals);
+
+  reply = await send(ALICE, "hello", {
+    interpret: { action: "greeting", answer: "Hi there." },
+  });
+  check(
+    "verified greeting explains Akara's value before the menu",
+    reply.includes("check live offers first")
+      && reply.includes("organized here in WhatsApp"),
+    reply
+  );
+  check(
+    "verified greeting keeps one embedded native menu",
+    lastListPayload()?.sections?.[0]?.rows?.length === 6,
+    JSON.stringify(lastListPayload())
+  );
 
   // ---------- inactivity menu nudge
   scenario("inactivity menu nudge");
@@ -351,12 +565,35 @@ async function run() {
   check("payouts view title", reply.includes("Bank & payout details"), reply);
   check("payouts view shows bank", reply.includes("GTBank"), reply);
   check("payouts view has no listings", !reply.includes("*Listings*"), reply);
+  check(
+    "payouts view uses native actions",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "manage_payout_add,manage_payout_edit,manage_payout_delete",
+    JSON.stringify(lastButtonPayload())
+  );
+
+  reply = await send(ALICE, "manage_payout_edit");
+  check("edit payout action opens account picker", reply.includes("Choose the payout detail you want to edit"), reply);
+  check(
+    "edit payout picker lists saved accounts",
+    (lastListPayload()?.sections?.[0]?.rows || []).length === 2,
+    JSON.stringify(lastListPayload())
+  );
+  await send(ALICE, "menu");
 
   reply = await send(ALICE, "my listings");
   check("listings view empty state", reply.includes("No listings yet"), reply);
 
   reply = await send(ALICE, "my transactions");
   check("history synonym works", reply.includes("No transaction history yet"), reply);
+  check(
+    "empty history offers one-tap marketplace browsing",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "find offers",
+    JSON.stringify(lastButtonPayload())
+  );
+
+  reply = await send(ALICE, "find offers");
+  check("empty history button opens all offers", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
+  await send(ALICE, "cancel");
 
   reply = await send(ALICE, "1");
   check("typed menu 1 opens make offer", reply.includes("Tell me what currency you have"), reply);
@@ -366,10 +603,52 @@ async function run() {
   check("typed menu 2 browses offers", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
   await send(ALICE, "cancel");
 
-  reply = await send(ALICE, "5", { quotedText: "*Akara menu*\n1. make offer" });
-  check("quoted menu 5 → scoped profile", reply.includes("*Your profile*"), reply);
+	  reply = await send(ALICE, "5", { quotedText: "*Akara menu*\n1. make offer" });
+	  check("quoted menu 5 → scoped profile", reply.includes("*Your profile*"), reply);
 
-  // ---------- service fee + referral copy
+	  reply = await send(ALICE, "menu");
+	  check("menu includes get support", reply.includes("6. `get support`"), reply);
+	  const menuRows = lastListPayload()?.sections?.[0]?.rows || [];
+	  check(
+	    "menu descriptions use the user's voice",
+	    menuRows.find((row) => row.id === "make_offer")?.description === "I want to create a listing people can take."
+	      && menuRows.find((row) => row.id === "my_listings")?.description === "I want to manage the offers I posted.",
+	    JSON.stringify(menuRows)
+	  );
+
+	  reply = await send(ALICE, "6");
+	  check("typed menu 6 opens support channels", reply.includes("support@tryakara.com") && reply.includes("tryakara.com/support"), reply);
+	  check(
+	    "support menu uses clear native actions",
+	    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "support_email,support_report,support_dispute",
+	    JSON.stringify(lastButtonPayload())
+	  );
+
+	  reply = await send(ALICE, "get_support", {
+	    interpret: { action: "question", answer: "Akara is free to use for swapping currencies." },
+	  });
+	  check("support menu action cannot be hijacked by fee copy", reply.includes("*Akara support*") && !reply.includes("free to use"), reply);
+
+	  reply = await send(ALICE, "contact support");
+	  check("natural support request opens email", reply.includes("support@tryakara.com"), reply);
+
+	  reply = await send(ALICE, "I have an issue and need an admin to look into it");
+	  check("frustrated help request creates support record", reply.includes("*Support request received*"), reply);
+	  check(
+	    "support request reaches admin queue",
+	    __table("audit_events").some((row) =>
+	      row.entity_type === "support_request"
+	      && row.event_payload?.description.includes("need an admin")
+	    ),
+	    JSON.stringify(__table("audit_events").filter((row) => row.entity_type === "support_request"))
+	  );
+
+	  reply = await send(ALICE, "report issue");
+	  check("report issue asks for one concise message", reply.includes("*Report an issue*"), reply);
+	  reply = await send(ALICE, "My payout account update is stuck");
+	  check("support flow saves the submitted issue", reply.includes("*Support request received*"), reply);
+
+	  // ---------- service fee + referral copy
   scenario("service fee copy");
   reply = await send(ALICE, "how much do you charge?");
   check("fee answer stays simple", reply.includes("Akara is free to use") && !reply.includes("10 more free trades"), reply);
@@ -377,6 +656,25 @@ async function run() {
 
   reply = await send(ALICE, "how do i get free trades?");
   check("referral question answered", reply.includes("Invite a friend or refer a friend"), reply);
+
+  scenario("receipt evidence parser");
+  let receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
+    { text: "Paid ₦80,000 to First Bank" }
+  );
+  check("receipt parser matches amount and currency", receiptCheck.ocr_status === "matched", JSON.stringify(receiptCheck));
+
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
+    { text: "Paid 70,000 NGN" }
+  );
+  check("receipt parser rejects mismatched amount", receiptCheck.ocr_status === "mismatch", JSON.stringify(receiptCheck));
+
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
+    { media: { id: "m1", filename: "receipt.png" } }
+  );
+  check("receipt parser keeps image-only receipt pending", receiptCheck.ocr_status === "pending", JSON.stringify(receiptCheck));
 
   // ---------- one-shot listing creation + publish + free service fee in review
   scenario("one-shot listing");
@@ -391,12 +689,23 @@ async function run() {
   check("session cleared after publish", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "my listings");
-  check("listing appears in scoped view", reply.includes("AKR-LIST-001"), reply);
+  check(
+    "listing appears in scoped view",
+    (lastListPayload()?.sections || []).some((section) =>
+      (section.rows || []).some((row) => String(row.title || "").includes("AKR-LIST-001"))
+    ),
+    JSON.stringify(lastListPayload())
+  );
 
   reply = await send(ALICE, "I have 50k naira and want 55k RWF");
   check("duplicate live listing is blocked", reply.includes("*Listing already live*"), reply);
   check("duplicate listing points to existing reference", reply.includes("AKR-LIST-001"), reply);
   check("duplicate listing does not open review", !reply.includes("*Review listing*"), reply);
+  check(
+    "duplicate listing offers concise native next steps",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "my_listings,find_offers",
+    JSON.stringify(lastButtonPayload())
+  );
 
   const DORA = "250700000004";
   const doraRow = seedVerifiedUser(DORA, "Promise Uchenna Steven");
@@ -406,11 +715,42 @@ async function run() {
   reply = await send(DORA, "mtn");
   check("momo network asks for registered name", reply.includes("Quick option") && reply.includes("Promise Uchenna Steven"), reply);
   reply = await send(DORA, "option 1");
-  check("verified name shortcut advances to momo number", reply.toLowerCase().includes("mobile money phone number"), reply);
-  reply = await send(DORA, "0788123456");
+  check("verified name shortcut advances to momo number", reply.includes("*Mobile money number*"), reply);
+  reply = await send(DORA, "+250 788 123 456");
   check("momo number advances to payout review", reply.includes("Review payout detail"), reply);
+  check("momo review shows normalized local number", reply.includes("0788123456") && !reply.includes("+250"), reply);
   reply = await send(DORA, "save payout");
   check("saving payout resumes listing review", reply.includes("Payout detail saved") && reply.includes("*Review listing*"), reply);
+  const doraRwfPayout = __table("payment_profiles").find((row) => row.user_id === doraRow.id && row.currency === "RWF");
+  check("saved momo number uses local digits only", doraRwfPayout?.momo_number_encrypted === "0788123456", JSON.stringify(doraRwfPayout));
+
+  const PAYOUT_MENU = "250700000019";
+  const payoutMenuUser = seedVerifiedUser(PAYOUT_MENU, "Payout Menu User");
+  reply = await handlePaymentProfile("save payout", payoutMenuUser, {
+    current_flow: "payment_profile",
+    current_step: "payment_confirm",
+    context_json: {
+      payment_currency: "KES",
+      payment_network: "M-Pesa",
+      payment_number: "0712345678",
+      payment_account_name: "Payout Menu User",
+    },
+  });
+  check(
+    "standalone payout save ends with a useful next-step menu",
+    reply?.type === "whatsapp_list"
+      && reply.list?.body?.includes("*Payout ready ✅*")
+      && reply.list?.sections?.[0]?.rows?.some((row) => row.id === "make_offer"),
+    JSON.stringify(reply)
+  );
+
+  const recoveredPaymentReply = await handlePaymentProfile("continue", doraRow, {
+    current_flow: "payment_profile",
+    current_step: "legacy_payment_step",
+    context_json: {},
+  });
+  check("stale payout session recovers with the payout picker", recoveredPaymentReply?.type === "whatsapp_list", JSON.stringify(recoveredPaymentReply));
+  check("stale payout recovery does not expose reset copy", !String(recoveredPaymentReply?.fallbackText || "").includes("reset payment setup"), JSON.stringify(recoveredPaymentReply));
 
   const TIER = "250700000005";
   const tierRow = seedVerifiedUser(TIER, "Tier One User");
@@ -425,7 +765,8 @@ async function run() {
   const tierSession = await getSession(TIER);
   check("tier limit stores pending publish", tierSession?.current_flow === "kyc_upgrade" && tierSession?.context_json?.return_flow === "publish_listing", JSON.stringify(tierSession));
 
-  const { listingCardVersion } = require("../lib/listing-card");
+  const { listingShareUrl } = require("../db/listings");
+  const { listingCardVersion, listingSharePage } = require("../lib/listing-card");
   check("listing card version changes with dynamic values", listingCardVersion({
     listing_code: "AKR-LIST-001",
     have_currency: "KES",
@@ -444,22 +785,64 @@ async function run() {
     status: "active",
   }), "Card version did not change after amount edit");
 
+  const shareListing = {
+    listing_code: "AKR-LIST-321",
+    have_currency: "NGN",
+    have_amount: 50000,
+    want_currency: "RWF",
+    want_amount: 55000,
+    listing_type: "negotiable",
+    status: "active",
+    updated_at: "2026-07-26T12:00:00.000Z",
+  };
+  const previewUrl = listingShareUrl(shareListing);
+  const previewPage = listingSharePage(shareListing);
+  check(
+    "listing share URL uses the previewable Akara listing page",
+    previewUrl.startsWith("https://akara-share.example/l/AKR-LIST-321?v="),
+    previewUrl
+  );
+  check(
+    "listing share page includes the dynamic card preview and WhatsApp deep link",
+    previewPage.includes('property="og:image" content="https://akara-share.example/l/AKR-LIST-321/card')
+      && previewPage.includes("https://wa.me/")
+      && previewPage.includes("open%20AKR-LIST-321"),
+    previewPage.slice(0, 600)
+  );
+
   reply = await send(ALICE, "hi, I want to convert 16,728 naira for 18,500 RWF. Is there any available offer that is within around this rate?", {
     interpret: { action: "find_offer", have_currency: "NGN", have_amount: 16728, want_currency: "RWF", want_amount: 18500 },
   });
-  check("rate-shaped request offers to list when no offer fits", reply.includes("*No current offer*"), reply);
+  check("rate-shaped request offers to list when no offer fits", reply.includes("*No matching offer yet*"), reply);
   check("no-match offer keeps extracted send amount", reply.includes("16,728 NGN"), reply);
   check("no-match offer keeps extracted receive amount", reply.includes("18,500 RWF"), reply);
+  check("no-match copy addresses people inclusively", reply.includes("people looking for this exchange"), reply);
+  check("no-match copy does not call users traders", !reply.toLowerCase().includes("trader"), reply);
+  check(
+    "no-match decision uses native reply buttons",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "yes,search again,no thanks",
+    JSON.stringify(lastButtonPayload())
+  );
   check("no-match offer waits for confirmation", (await sessionFlow(ALICE)) === "find_offer");
 
-  reply = await send(ALICE, "yes", { interpret: { action: "flow_reply" } });
-  check("yes after no-match opens prefilled review", reply.includes("*Review listing*"), reply);
+  reply = await send(ALICE, "please make this one live", {
+    interpret: {
+      action: "create_listing",
+      have_currency: "NGN",
+      have_amount: 16728,
+      want_currency: "RWF",
+      want_amount: 18500,
+    },
+  });
+  check("contextual approval after no-match opens prefilled review", reply.includes("*Review listing*"), reply);
   check("prefilled review keeps send amount", reply.includes("16,728 NGN"), reply);
   check("prefilled review keeps receive amount", reply.includes("18,500 RWF"), reply);
 
   reply = await send(ALICE, "edit", { interpret: { action: "settings_action" } });
   check("review edit asks what to edit", reply.includes("*What do you want to edit?*"), reply);
   check("review edit offers amount choices", reply.includes("`send amount`") && reply.includes("`receive amount`"), reply);
+  const reviewEditButtonIds = (lastButtonPayload()?.buttons || []).map((button) => button.id);
+  check("review edit uses publish and cancel buttons", reviewEditButtonIds.join(",") === "publish,cancel", JSON.stringify(lastButtonPayload()));
 
   reply = await send(ALICE, "1");
   check("review edit number selects send amount", reply.includes("*Edit send amount*"), reply);
@@ -503,6 +886,34 @@ async function run() {
   check("linked profile cannot open owner listing", reply.includes("Trade paused for safety"), reply);
   check("linked profile is risk flagged", linkedRow.risk_status === "watch", linkedRow.risk_status);
 
+  reply = await send(ALICE, "Good morning, please, I also need Naira.", {
+    interpret: { action: "greeting", answer: "Good morning!" },
+  });
+  check(
+    "implied receive currency overrides a greeting classification",
+    reply.includes("*Offers paying NGN*") && reply.includes("AKR-LIST-089") && reply.includes("AKR-LIST-090"),
+    reply
+  );
+  check("receive-only browse excludes listings asking for NGN", !reply.includes("AKR-LIST-088"), reply);
+  check(
+    "receive-only browse does not repeat the receive-currency question",
+    !reply.includes("Tell me what currency you want to receive") && !reply.includes("What currency do you need"),
+    reply
+  );
+
+  reply = await send(ALICE, "please I also need Kenyan shillings", {
+    interpret: { action: "greeting", answer: "Sure." },
+  });
+  check("empty receive-currency search explains the result", reply.includes("*No live offers paying KES*"), reply);
+  check("empty receive-currency search asks only what the user will give", reply.includes("What currency will you give in exchange for KES?"), reply);
+  check(
+    "empty receive-currency search preserves KES and opens the have-currency tray",
+    (await getSession(ALICE))?.context_json?.want_currency === "KES"
+      && lastListPayload()?.sections?.[0]?.rows?.every((row) => row.id !== "currency:KES"),
+    JSON.stringify({ reply, session: await getSession(ALICE), list: lastListPayload() })
+  );
+  await send(ALICE, "cancel");
+
   reply = await send(ALICE, "Hello Akara, Please I need naira 30k");
   check("need-only search shows eligible NGN offers", reply.includes("AKR-LIST-089") && reply.includes("AKR-LIST-090"), reply);
   check("need-only search ranks flexible first", reply.indexOf("AKR-LIST-089") !== -1 && reply.indexOf("AKR-LIST-089") < reply.indexOf("AKR-LIST-090"), reply);
@@ -532,6 +943,10 @@ async function run() {
   check("need-only no match asks what user has", reply.includes("Tell me what currency you have"), reply);
   check("need-only no match keeps requested currency", reply.includes("9,999,999 KES"), reply);
   check("need-only no match does not ask needed currency again", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
+  reply = await send(ALICE, "I have 100k RWF");
+  check("follow-up keeps the previously requested amount", reply.includes("9,999,999 KES"), reply);
+  check("follow-up does not ask for the requested amount again", !reply.includes("How much KES do you want"), reply);
+  await send(ALICE, "no thanks");
 
   reply = await send(ALICE, "I can give 9999999 XAF");
   check("have-only no match asks what user needs", reply.includes("Tell me what currency you want in return"), reply);
@@ -541,18 +956,25 @@ async function run() {
   reply = await send(ALICE, "show me ngn offers");
   check("browse shows bob listing", reply.includes("AKR-LIST-090"), reply);
   check("browse enters search_results", (await sessionFlow(ALICE)) === "search_results");
+  reply = await send(ALICE, "show me all NGN offers", {
+    interpret: { action: "my_listings" },
+  });
+  check("explicit marketplace browse overrides mistaken my-listings interpretation", !reply.includes("*Your listings*"), reply);
+  check("marketplace browse still excludes the requesting user's listings", !reply.includes("AKR-LIST-001"), reply);
+  const fixedOfferNumber = reply.match(/(?:^|\n)\*?\s*(\d+)\.\s+\*?AKR-LIST-090\b/i)?.[1];
 
   reply = await send(ALICE, "9");
   check("invalid number is guided", reply.includes("valid offer number"), reply);
 
-  reply = await send(ALICE, "1");
-  check("number 1 opens the trade", reply.includes("Akara Trade opened ✅"), reply);
+  reply = await send(ALICE, fixedOfferNumber || "1");
+  check("displayed fixed-offer number opens the trade", reply.includes("Akara Trade opened ✅"), reply);
   check("selection enters deal room", (await sessionFlow(ALICE)) === "deal_room");
+  const openedDealCode = (await getSession(ALICE))?.context_json?.deal_code || __table("deals").at(-1)?.deal_code;
 
   // ---------- deal room actions
   scenario("deal room");
   reply = await send(ALICE, "status");
-  check("status shows summary", reply.includes("_Transaction ref_") && reply.includes("*AKR-TXN-001*"), reply);
+  check("status shows summary", reply.includes("_Transaction ref_") && reply.includes(`*${openedDealCode}*`), reply);
 
   reply = await send(ALICE, "i don pay");
   check("paid asks for receipt", reply.includes("Receipt needed"), reply);
@@ -565,28 +987,67 @@ async function run() {
   check("deal room released", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "what's next for my trade?", { interpret: { action: "trade_action" } });
-  check("trade recall reopens deal", reply.includes("AKR-TXN-001"), reply);
-  const recalledDeal = __table("deals").find((row) => row.deal_code === "AKR-TXN-001");
-  recalledDeal.taker_sent_at = new Date().toISOString();
+  check("trade recall reopens deal", reply.includes(openedDealCode), reply);
+  const recalledDeal = __table("deals").find((row) => row.deal_code === openedDealCode);
+  check("recalled deal exists", Boolean(recalledDeal), JSON.stringify({ openedDealCode, deals: __table("deals").map((row) => row.deal_code) }));
+  if (recalledDeal) recalledDeal.taker_sent_at = new Date().toISOString();
+  const aliceDisputeHoldListing = seedListing(aliceRow, {
+    code: "AKR-LIST-HOLD-A",
+    have_currency: "KES",
+    have_amount: 1000,
+    want_currency: "GHS",
+    want_amount: 80,
+  });
+  const bobDisputeHoldListing = seedListing(bobRow, {
+    code: "AKR-LIST-HOLD-B",
+    have_currency: "GHS",
+    have_amount: 90,
+    want_currency: "KES",
+    want_amount: 1100,
+  });
   reply = await send(ALICE, "cancel");
   check("active trade cancel stays deal-specific", reply.includes("Cannot close from chat"), reply);
-  check("active trade cancel points to dispute", reply.includes("dispute AKR-TXN-001"), reply);
+  check("active trade cancel points to dispute", reply.includes(`dispute ${openedDealCode}`), reply);
   check("active trade cancel does not show profile actions", !reply.includes("Manage payout details"), reply);
 
-  reply = await send(ALICE, "dispute AKR-TXN-001 because amount did not arrive");
-  check("dispute asks for proof", reply.includes("*Proof needed AKR-TXN-001*") && reply.includes("amount did not arrive"), reply);
+  reply = await send(ALICE, `dispute ${openedDealCode} because amount did not arrive`);
+  check("dispute asks for proof", reply.includes(`*Proof needed ${openedDealCode}*`) && reply.includes("amount did not arrive"), reply);
   check("dispute waits for proof", (await getSession(ALICE))?.current_step === "awaiting_dispute_proof", JSON.stringify(await getSession(ALICE)));
 
   reply = await send(ALICE, "", {
     media: { id: "proof-media-001", mimeType: "image/png", filename: "receipt.png" },
   });
   check("dispute opens after proof", reply.includes("*Dispute opened ✅*") && reply.includes("amount did not arrive"), reply);
+  check("open dispute pauses both participant accounts", aliceRow.dispute_hold === true && bobRow.dispute_hold === true, JSON.stringify({ aliceRow, bobRow }));
+  check(
+    "open dispute hides both participants' live listings",
+    aliceDisputeHoldListing.status === "paused"
+      && aliceDisputeHoldListing.dispute_paused === true
+      && bobDisputeHoldListing.status === "paused"
+      && bobDisputeHoldListing.dispute_paused === true,
+    JSON.stringify({ aliceDisputeHoldListing, bobDisputeHoldListing })
+  );
+  reply = await send(BOB, "make offer");
+  check("dispute hold blocks either participant from opening a new exchange", reply.includes("*Account temporarily paused*"), reply);
 
   reply = await send(BOB, "close dispute");
   check("non opener cannot close dispute", reply.includes("Only the person who opened this dispute"), reply);
 
   reply = await send(ALICE, "close dispute");
   check("opener can withdraw dispute", reply.includes("Dispute withdrawn"), reply);
+  check("withdrawing the last dispute releases both accounts", !aliceRow.dispute_hold && !bobRow.dispute_hold, JSON.stringify({ aliceRow, bobRow }));
+  check(
+    "dispute-paused listings return to search after resolution",
+    aliceDisputeHoldListing.status === "active"
+      && aliceDisputeHoldListing.dispute_paused === false
+      && bobDisputeHoldListing.status === "active"
+      && bobDisputeHoldListing.dispute_paused === false,
+    JSON.stringify({ aliceDisputeHoldListing, bobDisputeHoldListing })
+  );
+  for (const listing of [aliceDisputeHoldListing, bobDisputeHoldListing]) {
+    const index = __table("listings").indexOf(listing);
+    if (index >= 0) __table("listings").splice(index, 1);
+  }
 
   // ---------- negotiable listing negotiation
   scenario("negotiable listing negotiation");
@@ -647,6 +1108,40 @@ async function run() {
   const twoWayDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-092")?.id);
   check("deal keeps negotiated send side", Number(twoWayDeal?.want_amount) === 105000, JSON.stringify(twoWayDeal));
   check("deal keeps negotiated receive side", Number(twoWayDeal?.have_amount) === 98000, JSON.stringify(twoWayDeal));
+
+  // ---------- partial fill matching
+  scenario("partial fill matching");
+  seedListing(charlieRow, {
+    code: "AKR-LIST-993",
+    have_currency: "RWF",
+    have_amount: 65000,
+    want_currency: "NGN",
+    want_amount: 60000,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(ALICE, "open AKR-LIST-993");
+  check("partial fill starts negotiation", reply.includes("*Negotiable listing*"), reply);
+
+  reply = await send(ALICE, "offer 50000 ngn for 55000 rwf");
+  check("partial proposal is sent", reply.includes("50,000 NGN") && reply.includes("55,000 RWF"), reply);
+
+  reply = await send(CHARLIE, "accept");
+  check("partial acceptance opens trade", reply.includes("Akara Trade opened ✅"), reply);
+  check("partial acceptance tells owner remaining value", reply.includes("_Still listed_") && reply.includes("*10,000 RWF for 10,000 NGN*"), reply);
+  const partialSource = __table("listings").find((listing) => listing.listing_code === "AKR-LIST-993");
+  const partialResidual = __table("listings").find((listing) => (
+    listing.owner_user_id === charlieRow.id
+    && listing.id !== partialSource?.id
+    && listing.status === "active"
+    && listing.have_currency === "RWF"
+    && listing.want_currency === "NGN"
+    && Number(listing.have_amount) === 10000
+    && Number(listing.want_amount) === 10000
+  ));
+  check("partial source listing is reserved", partialSource?.status === "reserved", JSON.stringify(partialSource));
+  check("partial residual listing remains live", Boolean(partialResidual), JSON.stringify(__table("listings").filter((listing) => listing.owner_user_id === charlieRow.id)));
+  if (partialResidual) partialResidual.status = "closed";
 
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");
@@ -717,7 +1212,7 @@ async function run() {
   check("update does not start add flow", !reply.includes("Choose where incoming payments should land"), reply);
   await send(ALICE, "cancel");
 
-  seedListing(aliceRow, {
+  const managedListing = seedListing(aliceRow, {
     code: "AKR-LIST-778",
     have_currency: "NGN",
     have_amount: 5000,
@@ -725,13 +1220,126 @@ async function run() {
     want_amount: 5600,
     created_at: "2099-01-01T00:00:00.000Z",
   });
-  reply = await send(ALICE, "cancel listing 1");
-  check("single listing cancel asks to confirm", reply.includes("Close AKR-LIST-778?"), reply);
+
+  reply = await send(ALICE, "my listings");
+  check("my listings opens a listing picker", lastListPayload()?.button === "Choose listing", JSON.stringify(lastListPayload()));
+  check("listing picker maps the first listing", lastListPayload()?.sections?.[0]?.rows?.[0]?.id === "manage_listing_1", JSON.stringify(lastListPayload()));
+  check(
+    "listing status guide uses separate scannable rows",
+    lastListPayload()?.body?.includes("🟢 Live\n\n🟡 Paused")
+      && lastListPayload()?.body?.includes("🔒 In trade\n\n⚫ Closed"),
+    lastListPayload()?.body
+  );
+
+  reply = await send(ALICE, "manage_listing_1");
+  let listingButtonIds = (lastButtonPayload()?.buttons || []).map((button) => button.id);
+  check("selected live listing has action buttons", listingButtonIds.join(",") === "edit_listing_1,close_listing_1,share_listing_1", JSON.stringify(lastButtonPayload()));
+
+  reply = await send(ALICE, "help me pass this one around", {
+    interpret: {
+      action: "settings_action",
+      settings_target: "listing",
+      settings_operation: "share",
+      settings_item_number: 1,
+    },
+  });
+  check("implied share request returns the previewable WhatsApp listing link", reply.includes("/l/AKR-LIST-778") && reply.includes("opens the listing in Akara on WhatsApp"), reply);
+
+  reply = await send(ALICE, "I need to change what I am asking for on this one", {
+    interpret: {
+      action: "settings_action",
+      settings_target: "listing",
+      settings_operation: "edit",
+      settings_item_number: 1,
+    },
+  });
+  check("implied edit request opens focused choices", reply.includes("*What do you want to edit?*") && reply.includes("send amount"), reply);
+  check("implied edit request immediately hides the live listing", managedListing.status === "paused", JSON.stringify(managedListing));
+  await send(ALICE, "cancel");
+  check("cancelling edit restores the listing", managedListing.status === "active", JSON.stringify(managedListing));
+
+  reply = await send(ALICE, "abeg I no want make people see this offer again", {
+    interpret: {
+      action: "settings_action",
+      settings_target: "listing",
+      settings_operation: "close",
+      settings_item_number: 1,
+    },
+  });
+  check("implied close request asks to confirm", reply.includes("Close AKR-LIST-778?"), reply);
   check("single listing cancel prompt is scoped", !reply.includes("Manage payout details") && !reply.includes("*Payouts*"), reply);
+  listingButtonIds = (lastButtonPayload()?.buttons || []).map((button) => button.id);
+  check("single listing confirmation uses reply buttons", listingButtonIds.join(",") === "confirm,keep", JSON.stringify(lastButtonPayload()));
+  check("single listing close uses a concise confirm label", lastButtonPayload()?.buttons?.[0]?.title === "Confirm", JSON.stringify(lastButtonPayload()));
 
   reply = await send(ALICE, "confirm");
-  check("single listing cancel completes", reply.includes("*Listing closed*") && reply.includes("off search"), reply);
+  check("single listing cancel completes", reply.includes("*Listing closed") && reply.includes("off search"), reply);
   check("single listing cancel does not dump profile", !reply.includes("Manage payout details") && !reply.includes("*Payouts*") && !reply.includes("*Profile*"), reply);
+  check(
+    "single listing close ends with the native main menu",
+    lastListPayload()?.sections?.[0]?.rows?.some((row) => row.id === "find_offers")
+      && reply.includes("What would you like to do next?"),
+    JSON.stringify({ reply, list: lastListPayload() })
+  );
+
+  reply = await send(ALICE, "my listings");
+  const closedSection = (lastListPayload()?.sections || []).find((section) => section.title === "Closed history");
+  const closedListingRow = (closedSection?.rows || []).find((row) => String(row.title || "").includes("AKR-LIST-778"));
+  check("closed listing moves into a distinct history section", Boolean(closedListingRow), JSON.stringify(lastListPayload()));
+  check(
+    "closed listing is visibly marked as closed",
+    closedListingRow?.title?.startsWith("⚫") && closedListingRow?.description?.startsWith("CLOSED"),
+    JSON.stringify(lastListPayload())
+  );
+
+  reply = await send(ALICE, closedListingRow?.id || "manage_listing_1");
+  check("closed listing opens a scoped activity record", reply.includes("*⚫ Closed listing*") && reply.includes("*Activity*"), reply);
+  check("closed listing with no activity says so", reply.includes("No negotiations or exchanges were opened"), reply);
+  check("closed listing never dumps profile information", !reply.includes("Manage payout details") && !reply.includes("*Payouts*") && !reply.includes("*Profile*"), reply);
+  listingButtonIds = (lastButtonPayload()?.buttons || []).map((button) => button.id);
+  check("closed listing offers native republish action", listingButtonIds[0] === "republish_listing_1", JSON.stringify(lastButtonPayload()));
+
+  __table("negotiable_offers").push({
+    id: crypto.randomUUID(),
+    listing_id: managedListing.id,
+    offering_user_id: bobRow.id,
+    offered_amount: 5400,
+    offered_currency: "RWF",
+    status: "declined",
+    created_at: new Date().toISOString(),
+  });
+  await send(ALICE, "my listings");
+  reply = await send(ALICE, "manage_listing_1");
+  check("closed listing reports recorded activity", reply.includes("*Negotiations received:* 1"), reply);
+
+  reply = await send(ALICE, "republish_listing_1");
+  check("republish opens a fresh listing review", reply.includes("*Republish listing*") && reply.includes("*Review listing*"), reply);
+  check("republish preserves the old terms", reply.includes("5,000 NGN") && reply.includes("5,600 RWF"), reply);
+  check("republish generates a fresh reference", !reply.includes("AKR-LIST-778"), reply);
+  const listingsBeforeRepublish = new Set(__table("listings").map((listing) => listing.id));
+  const dealsBeforeRepublish = new Set(__table("deals").map((deal) => deal.id));
+  const quotesBeforeRepublish = new Set(__table("market_quotes").map((quote) => quote.id));
+  reply = await send(ALICE, "publish");
+  const republishReply = Array.isArray(reply) ? reply.join("\n") : String(reply || "");
+  check("republished listing confirms that it reopened", republishReply.includes("Listing reopened ✅") && republishReply.includes("swap card is attached"), republishReply);
+  const republishedListing = __table("listings").find((listing) => !listingsBeforeRepublish.has(listing.id));
+  check(
+    "republished listing carries the original values into a fresh live record",
+    ["active", "reserved"].includes(republishedListing?.status)
+      && Number(republishedListing?.have_amount) === 5000
+      && Number(republishedListing?.want_amount) === 5600,
+    JSON.stringify(republishedListing)
+  );
+  for (const [tableName, previousIds] of [
+    ["listings", listingsBeforeRepublish],
+    ["deals", dealsBeforeRepublish],
+    ["market_quotes", quotesBeforeRepublish],
+  ]) {
+    const rows = __table(tableName);
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      if (!previousIds.has(rows[index].id)) rows.splice(index, 1);
+    }
+  }
 
   seedListing(aliceRow, {
     code: "AKR-LIST-779",
@@ -754,11 +1362,43 @@ async function run() {
   }
 
   seedListing(aliceRow, { code: "AKR-LIST-777", have_currency: "NGN", have_amount: 10000, want_currency: "GHS", want_amount: 200 });
+  reply = await send(ALICE, "profile_pause_all_listings");
+  check("profile tray pauses all live listings", reply.includes("*Listings paused*"), reply);
+  check(
+    "bulk pause only changes live listings",
+    __table("listings").filter((row) => row.owner_user_id === aliceRow.id && row.status === "active").length === 0
+      && __table("listings").some((row) => row.owner_user_id === aliceRow.id && row.status === "paused"),
+    JSON.stringify(__table("listings").filter((row) => row.owner_user_id === aliceRow.id))
+  );
+
+  reply = await send(ALICE, "reopen every listing I paused");
+  check("natural language reopens all paused listings", reply.includes("*Listings reopened*"), reply);
+  check(
+    "bulk reopen returns paused listings to search",
+    __table("listings").some((row) => row.listing_code === "AKR-LIST-777" && row.status === "active"),
+    JSON.stringify(__table("listings").filter((row) => row.owner_user_id === aliceRow.id))
+  );
+
   reply = await send(ALICE, "cancel all my listings");
-  check("bulk cancel asks to confirm", reply.includes("Cancel all listings?"), reply);
+  check("bulk close alias asks to confirm with canonical wording", reply.includes("Close all listings?"), reply);
 
   reply = await send(ALICE, "confirm");
-  check("bulk cancel completes", reply.includes("Listings cancelled"), reply);
+  check("bulk cancel completes", reply.includes("Listings closed"), reply);
+  check(
+    "bulk close ends with the native main menu",
+    lastListPayload()?.sections?.[0]?.rows?.some((row) => row.id === "my_listings")
+      && reply.includes("off search"),
+    JSON.stringify({ reply, list: lastListPayload() })
+  );
+
+  reply = await send(ALICE, "my listings");
+  const bulkClosedRows = (lastListPayload()?.sections || [])
+    .find((section) => section.title === "Closed history")?.rows || [];
+  check(
+    "bulk-closed listings move into closed history",
+    bulkClosedRows.some((row) => String(row.title || "").includes("AKR-LIST-777")),
+    JSON.stringify(lastListPayload())
+  );
 
   reply = await send(ALICE, "delete all my payouts");
   check("bulk payout delete asks", reply.includes("Delete all payout details?"), reply);
@@ -786,14 +1426,51 @@ async function run() {
   scenario("small talk");
   reply = await send(ALICE, "make offer");
   reply = await send(ALICE, "thanks");
-  check("thanks mid-flow is warm", reply.includes("You're welcome"), reply);
+  check("thanks mid-flow is warm", reply.includes("You are welcome"), reply);
   check("thanks keeps the flow", (await sessionFlow(ALICE)) === "create_listing");
   reply = await send(ALICE, "hi");
-  check("greeting mid-flow restarts with the menu list", reply.includes("Choose what you want to do next on Akara"), JSON.stringify({ reply, body: lastListBody() }));
-  check("greeting releases flow", (await sessionFlow(ALICE)) === null);
+  check("greeting mid-flow sounds natural", reply.includes("Hi Test") && reply.includes("listing draft is still open"), reply);
+  check("greeting preserves the active flow", (await sessionFlow(ALICE)) === "create_listing");
 
   reply = await send(ALICE, "how far");
-  check("wellbeing reply", reply.includes("I dey alright"), JSON.stringify({ reply, body: lastListBody() }));
+  check("wellbeing reply uses natural Pidgin", reply.includes("I dey good"), reply);
+  check("wellbeing keeps the active flow", (await sessionFlow(ALICE)) === "create_listing");
+
+  reply = await send(ALICE, "what's good?", {
+    interpret: { action: "greeting", answer: "Hi there! I am here and ready." },
+  });
+  check("model small talk is personalized locally", reply.includes("Hi Test!"), reply);
+  check("model small talk gets a contextual nudge", reply.includes("listing draft is still open"), reply);
+
+  reply = await send(ALICE, "why is the sky blue?", {
+    interpret: {
+      action: "question",
+      answer: "Sunlight scatters in the atmosphere, and blue light scatters more strongly than most visible colours.",
+    },
+  });
+  check("simple general question is answered directly", reply.includes("blue light scatters"), reply);
+  check("general answer preserves the listing flow", (await sessionFlow(ALICE)) === "create_listing");
+
+  reply = await send(ALICE, "what is the NGN to RWF rate?", {
+    interpret: { action: "question", answer: "The live rate is 1 NGN to 999 RWF." },
+  });
+  check("model cannot invent a live exchange rate", !reply.includes("999 RWF"), reply);
+  check("rate question uses Akara market data", reply.includes("Akara") && (reply.includes("peer-set") || reply.includes("Market Rate")), reply);
+  await send(ALICE, "cancel");
+
+  reply = await send(ALICE, "write me a full university thesis", {
+    interpret: {
+      action: "unknown",
+      answer: "I cannot write a full thesis here, but I can help you shape a focused outline.",
+    },
+  });
+  check("out-of-scope request gets a useful answer", reply.includes("focused outline"), reply);
+  check("out-of-scope answer returns gently to Akara", reply.includes("What would you like to do next?"), reply);
+  check(
+    "out-of-scope answer carries the native Akara menu",
+    lastListPayload()?.sections?.[0]?.rows?.some((row) => row.id === "find_offers"),
+    JSON.stringify(lastListPayload())
+  );
 
   // ---------- reserve without context
   scenario("reserve guidance");
@@ -806,7 +1483,7 @@ async function run() {
     interpret: { action: "find_offer", have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 54000 },
   });
   check("demand question searches instead of listing", !reply.includes("*Review listing*"), reply);
-  check("no-match search offers to list", reply.includes("*No current offer*"), reply);
+  check("no-match search offers to list", reply.includes("*No matching offer yet*"), reply);
   check("offer prompt carries both sides", reply.includes("50,000 NGN") && reply.includes("54,000 RWF"), reply);
   check("offer prompt awaits confirmation", (await sessionFlow(ALICE)) === "find_offer");
 
@@ -822,7 +1499,7 @@ async function run() {
   reply = await send(ALICE, "who needs naira? 50k for 54k rwf?", {
     interpret: { action: "create_listing", have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 54000 },
   });
-  check("create_listing misfire still searches first", reply.includes("*No current offer*") && !reply.includes("*Review listing*"), reply);
+  check("create_listing misfire still searches first", reply.includes("*No matching offer yet*") && !reply.includes("*Review listing*"), reply);
 
   reply = await send(ALICE, "no thanks", { interpret: { action: "flow_reply" } });
   check("decline closes the search", reply.includes("No problem"), reply);
@@ -842,14 +1519,21 @@ async function run() {
   const editListing = seedListing(aliceRow, { code: "AKR-LIST-888", have_currency: "NGN", have_amount: 20000, want_currency: "RWF", want_amount: 22000 });
   reply = await send(ALICE, "i want to edit my listing", { interpret: { action: "settings_action" } });
   check("fresh edit skips review screen", !reply.includes("*Review listing*"), reply);
-  check("fresh edit opens the edit handler", reply.includes("*Edit listing*") && reply.includes("What currency do you have?"), reply);
+  check("fresh edit opens focused edit choices", reply.includes("*What do you want to edit?*") && reply.includes("send amount"), reply);
   check("fresh edit pauses the listing", __table("listings").find((row) => row.id === editListing.id)?.status === "paused", reply);
   check("fresh edit enters create flow", (await sessionFlow(ALICE)) === "create_listing");
 
-  reply = await send(ALICE, "ngn");
-  reply = await send(ALICE, "rwf");
+  reply = await send(ALICE, "1");
   reply = await send(ALICE, "25000");
+  check("send amount edit keeps the other listing details", reply.includes("*Review listing*") && reply.includes("25,000 NGN") && reply.includes("22,000 RWF"), reply);
+
+  reply = await send(ALICE, "edit");
+  reply = await send(ALICE, "2");
   reply = await send(ALICE, "70000");
+  check("receive amount edit keeps the updated send amount", reply.includes("*Review listing*") && reply.includes("25,000 NGN") && reply.includes("70,000 RWF"), reply);
+
+  reply = await send(ALICE, "edit");
+  reply = await send(ALICE, "3");
   reply = await send(ALICE, "fixed");
   check("edited draft re-previews", reply.includes("*Review listing*") && reply.includes("25,000 NGN"), reply);
 
@@ -863,6 +1547,26 @@ async function run() {
   const CHIDI = "250700000003";
   const chidiRow = seedVerifiedUser(CHIDI, "Chidi Payout Okoro");
   seedPayout(chidiRow, "NGN");
+  const originalChidiPayout = __table("payment_profiles")
+    .find((row) => row.user_id === chidiRow.id && row.currency === "NGN");
+  const originalChidiAccountNumber = originalChidiPayout.account_number_encrypted;
+
+  check(
+    "bank ownership accepts a verified two-name subset",
+    verifiedBankNameMatch("Steven Promise Uchenna", "Promise Steven")
+  );
+  check(
+    "bank ownership accepts provider text around two verified names",
+    verifiedBankNameMatch("Stephen Promise Uchenna", "GIYD-Uchenna Stephen")
+  );
+  check(
+    "bank ownership still rejects an unrelated account holder",
+    !verifiedBankNameMatch("Stephen Promise Uchenna", "Musa Ibrahim")
+  );
+  check(
+    "bank ownership rejects a single matching name",
+    !verifiedBankNameMatch("Stephen Promise Uchenna", "Uchenna")
+  );
 
   const resolveCalls = [];
   const realFetch = global.fetch;
@@ -884,6 +1588,14 @@ async function run() {
           { Name: "Guaranty Trust Bank", Code: "058" },
           { Name: "Paycom", Code: "305" },
           { Name: "Opay", Code: "999" },
+          { Name: "Access Bank", Code: "044" },
+          { Name: "Zenith Bank", Code: "057" },
+          { Name: "United Bank for Africa", Code: "033" },
+          { Name: "Kuda Microfinance Bank", Code: "50211" },
+          { Name: "First Bank of Nigeria", Code: "011" },
+          { Name: "First City Monument Bank", Code: "214" },
+          { Name: "Stanbic IBTC Bank", Code: "221" },
+          { Name: "Wema Bank", Code: "035" },
         ],
       });
     }
@@ -893,7 +1605,9 @@ async function run() {
       return respond({
         success: true,
         data: {
-          accountName: "OKORO CHIDI PAYOUT",
+          accountName: requestBody.accountNumber === "0000000999"
+            ? "MUSA IBRAHIM"
+            : "OKORO CHIDI PAYOUT",
           data: { name: requestBody.bankCode === "305" ? "Paycom" : "Guaranty Trust Bank", code: requestBody.bankCode },
         },
       });
@@ -906,6 +1620,42 @@ async function run() {
     check("opay bank matches CoinProfile's Paycom entry", opayMatches.length === 1 && opayMatches[0].code === "305", JSON.stringify(opayMatches));
     check("opay match displays as Opay", opayMatches[0]?.name === "Opay", JSON.stringify(opayMatches));
 
+    reply = await send(CHIDI, "add NGN payout");
+    const bankRows = lastListPayload()?.sections?.[0]?.rows || [];
+    check("NGN payout setup opens the native bank tray", lastListPayload()?.button === "Choose bank", JSON.stringify(lastListPayload()));
+    check(
+      "popular Nigerian banks rank before the remaining directory",
+      bankRows.slice(0, 3).map((row) => row.title).join(",") === "Kuda Microfinance Bank,Opay,Guaranty Trust Bank",
+      JSON.stringify(bankRows)
+    );
+    check(
+      "bank tray provides supported banks and a search action",
+      bankRows.some((row) => row.id === "payout_bank:058")
+        && bankRows.some((row) => row.title === "Opay")
+        && bankRows.some((row) => row.id === "payout_bank_search")
+        && bankRows.some((row) => row.id === "payout_bank_page:1"),
+      JSON.stringify(bankRows)
+    );
+
+    reply = await send(CHIDI, "payout_bank_page:1");
+    check(
+      "bank tray paginates through the full supported list",
+      lastListPayload()?.body?.includes("Page 2 of 2")
+        && lastListPayload()?.sections?.[0]?.rows?.some((row) => row.id === "payout_bank_page:0"),
+      JSON.stringify(lastListPayload())
+    );
+
+    reply = await send(CHIDI, "payout_bank_search");
+    check("bank search action asks for a typed bank name", reply.includes("*Search Nigerian banks*"), reply);
+    reply = await send(CHIDI, "opay");
+    check("typed bank search selects the bank", reply.includes("*Bank:* Opay") && reply.includes("account number"), reply);
+    check(
+      "account-number step provides a native change-bank action",
+      lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "edit_account_bank",
+      JSON.stringify(lastButtonPayload())
+    );
+    await send(CHIDI, "cancel");
+
     reply = await send(CHIDI, "bank details");
     reply = await send(CHIDI, "edit payout 1");
     check("payout edit menu opens", reply.includes("Edit NGN payout"), reply);
@@ -913,9 +1663,40 @@ async function run() {
     reply = await send(CHIDI, "bank");
     reply = await send(CHIDI, "opay");
     check("opay resolves against paycom's bank code", resolveCalls.length === 1 && resolveCalls[0]?.bankCode === "305", JSON.stringify(resolveCalls));
-    check("review bank line shows Opay, never Paycom", reply.includes("*Bank:* Opay") && !reply.includes("Paycom"), reply);
-    check("review name line shows the resolved holder", reply.includes("*Name:* OKORO CHIDI PAYOUT"), reply);
-    // check("review confirms the bank check", reply.includes("Account name confirmed by the bank"), reply);
+    check("resolved bank account gets a dedicated ownership check", reply.includes("*Bank account found*"), reply);
+    check("ownership check shows Opay, never Paycom", reply.includes("*Bank:* Opay") && !reply.includes("Paycom"), reply);
+    check("ownership check shows the bank-returned name", reply.includes("*Account name:* OKORO CHIDI PAYOUT"), reply);
+    check(
+      "ownership check uses native confirmation buttons",
+      lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "confirm_account_owner,wrong_account",
+      JSON.stringify(lastButtonPayload())
+    );
+
+    reply = await send(CHIDI, "wrong_account");
+    check("wrong-account action immediately asks for a corrected number", reply.includes("*Change account number*"), reply);
+
+    reply = await send(CHIDI, "0000000999");
+    check("mismatched bank name is blocked before payout review", reply.includes("*Account name does not match*"), reply);
+    check("mismatch message compares returned and verified names", reply.includes("MUSA IBRAHIM") && reply.includes("Chidi Payout Okoro"), reply);
+    check("mismatch cannot expose the save action", !reply.includes("Save payout"), reply);
+    check(
+      "mismatch provides correction buttons",
+      lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "edit_account_number,edit_account_bank,cancel",
+      JSON.stringify(lastButtonPayload())
+    );
+    check("mismatch does not change the saved payout", originalChidiPayout.account_number_encrypted === originalChidiAccountNumber, JSON.stringify(originalChidiPayout));
+
+    reply = await send(CHIDI, "save payout");
+    check("save cannot bypass a bank-name mismatch", reply.includes("*Account name does not match*"), reply);
+
+    reply = await send(CHIDI, "edit_account_number");
+    check("mismatch correction returns to account-number entry", reply.includes("*Change account number*"), reply);
+    reply = await send(CHIDI, originalChidiAccountNumber);
+    check("corrected account is revalidated", reply.includes("*Bank account found*") && reply.includes("OKORO CHIDI PAYOUT"), reply);
+
+    reply = await send(CHIDI, "confirm_account_owner");
+    check("ownership confirmation opens the final payout review", reply.includes("*Review payout detail*"), reply);
+    check("final review confirms the bank check", reply.includes("Account name confirmed by the bank"), reply);
 
     reply = await send(CHIDI, "save payout");
     check("resolved payout saves", reply.includes("Payout detail saved ✅"), reply);

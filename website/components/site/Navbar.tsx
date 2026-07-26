@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import { List, X, WhatsappLogo } from "@phosphor-icons/react";
+import { ArrowRight, List, X } from "@phosphor-icons/react";
 import { SITE } from "@/lib/site";
 import { cn } from "@/lib/cn";
 
@@ -70,15 +70,13 @@ export function Navbar() {
           </ul>
 
           <div className="flex items-center gap-2">
-            <a
-              href={SITE.whatsappHref}
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              href={SITE.waitlistHref}
               className="hidden items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-black transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(157,255,30,0.35)] md:inline-flex"
             >
-              <WhatsappLogo size={18} weight="fill" aria-hidden="true" />
-              Try Akara now
-            </a>
+              Join waitlist
+              <ArrowRight size={17} aria-hidden="true" />
+            </Link>
 
             <button
               type="button"
@@ -122,16 +120,14 @@ export function Navbar() {
                   </li>
                 ))}
                 <li className="mt-1">
-                  <a
-                    href={SITE.whatsappHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <Link
+                    href={SITE.waitlistHref}
                     className="flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-3 text-base font-semibold text-black"
                     onClick={() => setOpen(false)}
                   >
-                    <WhatsappLogo size={20} weight="fill" aria-hidden="true" />
-                    Try Akara now
-                  </a>
+                    Join waitlist
+                    <ArrowRight size={18} aria-hidden="true" />
+                  </Link>
                 </li>
               </ul>
             </motion.div>

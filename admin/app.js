@@ -11,6 +11,8 @@ const titles = {
   listings: ["Offers", ""],
   deals: ["Deals", ""],
   disputes: ["Reports", ""],
+  support: ["Support", ""],
+  integrity: ["Integrity", ""],
 };
 
 const statusTone = {
@@ -59,9 +61,15 @@ const statusLabels = {
   watch: "Watch",
   limited: "Limited",
   open: "Open",
+  in_review: "In review",
   flagged_user: "Flagged user",
   verification: "Verification",
   dispute: "Dispute",
+  anchored: "Anchored",
+  batched: "Batched",
+  pending: "Pending",
+  failed: "Failed",
+  confirmed: "Confirmed",
 };
 
 const disputeOutcomes = {
@@ -176,6 +184,7 @@ function renderOverview(data) {
   renderNavBadge("#nav-users-badge", data.totals.flaggedUsers);
   $("#metric-disputes").textContent = data.totals.openDisputes;
   renderNavBadge("#nav-disputes-badge", data.totals.openDisputes);
+  renderNavBadge("#nav-support-badge", data.totals.openSupportRequests);
   renderLineChart("#activity-chart", data.charts?.activity || [], "deals");
   renderDonutChart("#offer-status-chart", data.charts?.offerStatus || {});
   renderVerticalBarChart("#deal-status-chart", data.charts?.dealStatus || {});
@@ -201,6 +210,12 @@ function renderOverview(data) {
     if (item.queue_type === "dispute") {
       return {
         title: "Open dispute",
+        meta: `${statusLabels[item.status] || item.status} · ${date(item.created_at)}`,
+      };
+    }
+    if (item.queue_type === "support") {
+      return {
+        title: item.reference || "Support request",
         meta: `${statusLabels[item.status] || item.status} · ${date(item.created_at)}`,
       };
     }
@@ -433,11 +448,57 @@ function payoutSummary(profiles) {
   `;
 }
 
+function formatPercent(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return escapeHtml(String(value));
+  return `${Math.round(numeric * 100)}%`;
+}
+
+function reviewCheck(value) {
+  if (value === true) return `<span class="check-pass">Pass</span>`;
+  if (value === false) return `<span class="check-fail">Review</span>`;
+  return `<span class="row-meta">Pending</span>`;
+}
+
+function renderVerificationOcr(row) {
+  const reasons = Array.isArray(row.document_ocr_reasons)
+    ? row.document_ocr_reasons
+    : (row.document_ocr_reasons ? [row.document_ocr_reasons] : []);
+  const flags = Array.isArray(row.risk_flags)
+    ? row.risk_flags
+    : (row.risk_flags ? [row.risk_flags] : []);
+  const rawText = row.document_ocr_text
+    || (row.document_ocr_raw && typeof row.document_ocr_raw === "object" ? row.document_ocr_raw.text : "")
+    || "";
+
+  return `
+    <div class="stacked-cell ocr-cell">
+      <div><strong>${escapeHtml(row.document_ocr_status || "not checked")}</strong>${row.document_ocr_engine ? ` <span class="row-meta">${escapeHtml(row.document_ocr_engine)}</span>` : ""}</div>
+      <div class="row-meta">Confidence: ${formatPercent(row.document_ocr_confidence)}</div>
+      <div>Name: <strong>${escapeHtml(row.document_ocr_name || "-")}</strong></div>
+      <div>Country: ${escapeHtml(row.document_ocr_country || "-")} · Type: ${escapeHtml(row.document_ocr_type || "-")}</div>
+      <div class="ocr-checks">
+        <span>Name ${reviewCheck(row.document_name_match)}</span>
+        <span>Country ${reviewCheck(row.document_country_match)}</span>
+        <span>ID ${reviewCheck(row.document_type_match)}</span>
+        <span>Face ${reviewCheck(row.document_face_match)}</span>
+        <span>Payout ${reviewCheck(row.payout_name_match)}</span>
+      </div>
+      ${flags.length ? `<div class="row-meta">Flags: ${escapeHtml(flags.join(", "))}</div>` : ""}
+      ${reasons.length ? `<div class="row-meta">Notes: ${escapeHtml(reasons.join("; "))}</div>` : ""}
+      ${rawText ? `<details><summary>OCR text</summary><pre>${escapeHtml(rawText)}</pre></details>` : ""}
+    </div>
+  `;
+}
+
 function renderVerifications(rows) {
   attachTable("verifications-table", [
     { label: "User", render: (row) => escapeHtml(row.users?.legal_name || row.users?.display_name || row.users?.whatsapp_phone || "-") },
     { label: "Phone", render: (row) => escapeHtml(row.users?.whatsapp_phone || "-") },
     { label: "Status", render: (row) => chip(row.status) },
+    { label: "Review", render: (row) => renderVerificationOcr(row) },
+    { label: "Priority", render: (row) => chip(row.review_priority || "normal") },
     { label: "ID Type", render: (row) => escapeHtml(row.id_type || "-") },
     { label: "Country", render: (row) => escapeHtml(row.id_country || "-") },
     {
@@ -536,6 +597,126 @@ function renderDisputes(rows) {
   ], rows);
 }
 
+function renderSupport(rows) {
+  attachTable("support-table", [
+    { label: "Reference", render: (row) => `<code>${escapeHtml(row.reference || "-")}</code>` },
+    { label: "User", render: (row) => escapeHtml(row.user?.legal_name || row.user?.display_name || row.whatsapp_phone || "-") },
+    { label: "Phone", render: (row) => escapeHtml(row.user?.whatsapp_phone || row.whatsapp_phone || "-") },
+    { label: "Category", render: (row) => escapeHtml(row.category || "general") },
+    { label: "Status", render: (row) => chip(row.status || "open") },
+    { label: "Message", render: (row) => escapeHtml(row.description || "-") },
+    { label: "Trade", render: (row) => escapeHtml(row.deal_code || "-") },
+    { label: "Created", render: (row) => escapeHtml(date(row.created_at)) },
+    {
+      label: "Action",
+      render: (row) => `
+        <div class="dispute-actions" data-support-id="${escapeHtml(row.id)}">
+          ${select("status", row.id, row.status || "open", ["open", "in_review", "resolved"], "support-draft")}
+          <textarea data-support-note="${escapeHtml(row.id)}" placeholder="Reply or resolution note">${escapeHtml(row.admin_note || "")}</textarea>
+          <button class="mini-button" data-support-apply="${escapeHtml(row.id)}">Update</button>
+        </div>
+      `,
+    },
+  ], rows);
+}
+
+function shortHash(value) {
+  const text = String(value || "");
+  if (!text) return "-";
+  return `${text.slice(0, 8)}...${text.slice(-8)}`;
+}
+
+function integrityAction(row) {
+  if (row.status !== "anchored" || !row.batch?.transaction_hash) return "-";
+  return `
+    <div class="integrity-actions">
+      <button class="mini-button" data-integrity-verify="${escapeHtml(row.id)}">Verify</button>
+      <a class="mini-link" href="${escapeHtml(row.batch.explorer_url || "#")}" target="_blank" rel="noopener">Ledger</a>
+    </div>
+  `;
+}
+
+function renderIntegrity(data) {
+  const summary = $("#integrity-summary");
+  if (!data.schemaReady) {
+    summary.innerHTML = `<div class="notice is-error">${escapeHtml(data.warning || "Integrity migration is required.")}</div>`;
+    attachTable("integrity-table", [], []);
+    attachTable("trust-liquidity-table", [], []);
+    return;
+  }
+
+  summary.innerHTML = `
+    <div class="status-strip">
+      <div><span>Network</span><strong>${escapeHtml(data.network)}</strong></div>
+      <div><span>Anchoring</span><strong>${data.enabled ? "On" : "Off"}</strong></div>
+      <div><span>Anchored</span><strong>${escapeHtml(data.totals.anchored)}</strong></div>
+      <div><span>Pending</span><strong>${escapeHtml(data.totals.pending)}</strong></div>
+      <div><span>Failed batches</span><strong>${escapeHtml(data.totals.failedBatches)}</strong></div>
+    </div>
+    <div class="status-strip trust-primitives">
+      <div><span>Rate snapshots</span><strong>${escapeHtml(data.totals.rateSnapshots || 0)}</strong></div>
+      <div><span>Locked quotes</span><strong>${escapeHtml(data.totals.lockedQuotes || 0)}</strong></div>
+      <div><span>Trust records</span><strong>${escapeHtml(data.totals.activeCredentials || 0)}</strong></div>
+      <div><span>Split routes</span><strong>${escapeHtml(data.totals.routePlans || 0)}</strong></div>
+    </div>
+  `;
+
+  attachTable("integrity-table", [
+    { label: "Record", render: (row) => escapeHtml(row.record_type.replaceAll("_", " ")) },
+    { label: "Subject", render: (row) => `<code title="${escapeHtml(row.subject_ref)}">${escapeHtml(shortHash(row.subject_ref))}</code>` },
+    {
+      label: "Reputation",
+      render: (row) => row.reputation
+        ? escapeHtml(`${row.reputation.reputation_band} · ${row.reputation.completed_trades} completed · ${row.reputation.completion_rate}%`)
+        : "-",
+    },
+    { label: "Commitment", render: (row) => `<code title="${escapeHtml(row.commitment_hash)}">${escapeHtml(shortHash(row.commitment_hash))}</code>` },
+    { label: "Status", render: (row) => chip(row.status) },
+    { label: "Network", render: (row) => escapeHtml(row.batch?.network || "-") },
+    { label: "Anchored", render: (row) => escapeHtml(date(row.anchored_at)) },
+    { label: "Action", render: integrityAction },
+  ], data.records || []);
+
+  const activity = [
+    ...(data.marketRates || []).map((row) => ({
+      kind: "Market rate",
+      reference: row.corridor_key,
+      detail: `1 ${row.send_currency} = ${Number(row.weighted_rate).toFixed(4)} ${row.receive_currency}`,
+      status: `${row.active_listing_count} live · ${row.completed_trade_count} completed`,
+      created_at: row.created_at,
+    })),
+    ...(data.lockedQuotes || []).map((row) => ({
+      kind: "Locked quote",
+      reference: row.quote_code,
+      detail: `${money(row.send_amount, row.send_currency)} → ${money(row.receive_amount, row.receive_currency)}`,
+      status: row.status,
+      created_at: row.created_at,
+    })),
+    ...(data.credentials || []).map((row) => ({
+      kind: "Trust record",
+      reference: row.credential_code,
+      detail: `${row.reputation_band} · ${row.claims?.completed_trades || 0} completed`,
+      status: row.status,
+      created_at: row.created_at,
+    })),
+    ...(data.routes || []).map((row) => ({
+      kind: "Split route",
+      reference: row.route_code,
+      detail: `${money(row.planned_send_amount, row.send_currency)} → ${money(row.planned_receive_amount, row.receive_currency)}`,
+      status: `${row.coverage_percent}% · ${row.leg_count} legs · ${row.status}`,
+      created_at: row.created_at,
+    })),
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  attachTable("trust-liquidity-table", [
+    { label: "Type", render: (row) => escapeHtml(row.kind) },
+    { label: "Reference", render: (row) => `<code>${escapeHtml(row.reference)}</code>` },
+    { label: "Details", render: (row) => escapeHtml(row.detail) },
+    { label: "Status", render: (row) => escapeHtml(row.status) },
+    { label: "Created", render: (row) => escapeHtml(date(row.created_at)) },
+  ], activity);
+}
+
 function disputeControls(row) {
   return `
     <div class="dispute-actions" data-dispute-id="${escapeHtml(row.id)}">
@@ -573,6 +754,8 @@ async function loadView(view = state.view) {
   if (view === "listings") renderListings(data);
   if (view === "deals") renderDeals(data);
   if (view === "disputes") renderDisputes(data);
+  if (view === "support") renderSupport(data);
+  if (view === "integrity") renderIntegrity(data);
 }
 
 function setView(view) {
@@ -646,6 +829,28 @@ async function applyDisputeUpdate(button) {
   await loadView(state.view);
 }
 
+async function applySupportUpdate(button) {
+  const id = button.dataset.supportApply;
+  const container = button.closest(".dispute-actions");
+  const status = container.querySelector("select[data-type='support-draft']").value;
+  const adminNote = container.querySelector("textarea[data-support-note]").value.trim();
+
+  if (status === "resolved" && !adminNote) {
+    throw new Error("Add a short resolution note before resolving this support request.");
+  }
+
+  await api(`/admin/api/support/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status,
+      admin_note: adminNote,
+    }),
+  });
+
+  showNotice("Support request updated and the user was notified.");
+  await loadView(state.view);
+}
+
 async function openVerificationDocument(button) {
   const signed = await api("/admin/api/storage-signed-url", {
     method: "POST",
@@ -670,6 +875,14 @@ async function decideVerification(button) {
   });
   showNotice(`Verification ${decision === "approve" ? "approved" : "rejected"}.`);
   await loadView(state.view);
+}
+
+async function verifyIntegrity(button) {
+  const id = button.dataset.integrityVerify;
+  const result = await api(`/admin/api/integrity/${id}/verify`, {
+    method: "POST",
+  });
+  showNotice(`Verified on Stellar${result.ledgerSequence ? ` at ledger ${result.ledgerSequence}` : ""}.`);
 }
 
 async function suspendUser(button) {
@@ -723,8 +936,16 @@ function bindEvents() {
       applyDisputeUpdate(event.target).catch((error) => showNotice(error.message, true));
     }
 
+    if (event.target.matches("button[data-support-apply]")) {
+      applySupportUpdate(event.target).catch((error) => showNotice(error.message, true));
+    }
+
     if (event.target.matches("button[data-user-suspend]")) {
       suspendUser(event.target).catch((error) => showNotice(error.message, true));
+    }
+
+    if (event.target.matches("button[data-integrity-verify]")) {
+      verifyIntegrity(event.target).catch((error) => showNotice(error.message, true));
     }
   });
 }

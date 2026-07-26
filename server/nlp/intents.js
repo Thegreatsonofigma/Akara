@@ -47,6 +47,12 @@ function isPayoutsCommand(text) {
   return /^(?:show |see |view |check |open )*(?:my |me my )?(payouts?|payout details?|payout info(?:rmation)?|bank|banks|bank details?|bank info(?:rmation)?|bank accounts?|payment details?|payment info(?:rmation)?|account number|momo|momo details?|mobile money|mobile money details?|wallet|wallets?)$/.test(value);
 }
 
+function isTrustRecordCommand(text) {
+  const value = compactText(text);
+  return /^(?:show |see |view |check |open )*(?:my )?(trust record|trust profile|reputation|reputation record|reputation passport|trust credential)$/.test(value)
+    || /\b(show|see|view|check|open)\b.*\b(my )?(trust|reputation)\b/.test(value);
+}
+
 function isMyListingsCommand(text) {
   const value = compactText(text);
   return /^(?:show |see |view |check |open )*(?:my |me my )(listings?|offers?|ads?|posts?|deals? i posted)$/.test(value)
@@ -188,13 +194,13 @@ function isStatusIntent(text) {
 function isSearchAgainIntent(text) {
   const value = compactText(text);
   if (!value) return false;
-  return /\b(search again|try again|try another|find another|find more|new search|change search|look again|not this|not these|no thanks|no|nah|don'?t list|do not list)\b/.test(value);
+  return /\b(search again|search another|try again|try another|find another|find more|new search|change search|look again|another pair|different pair|other pair|show me something else|show another|see another|look for something else|make i find another|find another one|not this|not these)\b/.test(value);
 }
 
 function isDeclineIntent(text) {
   const value = compactText(text);
   if (!value) return false;
-  return /\b(not interested|i'?m not interested|no interest|not for me|skip|pass|leave it|ignore it|no thanks|nah|not now|don'?t want|do not want|don'?t list|do not list|not listing|not list mine|don'?t create|do not create|don'?t publish|do not publish|later)\b/.test(value);
+  return /\b(not interested|i'?m not interested|no interest|not for me|skip|pass|i'?ll pass|leave it|leave am|ignore it|no thanks|nah|not now|no be now|don'?t want|do not want|don'?t list|do not list|not listing|not list mine|don'?t create|do not create|don'?t publish|do not publish|later)\b/.test(value);
 }
 
 function isEditIntent(text) {
@@ -224,7 +230,7 @@ function isListingPublishIntent(text) {
   if (/\d/.test(value) || /\b(flex\w*|nego\w*|fixed|firm)\b/.test(value)) return false;
 
   if (/^(yes|yeah|yep|sure|ok|okay|alright|continue|proceed)$/.test(value)) return true;
-  if (/\b(go ahead|do it|run it|looks good|that works|this works|this is fine|use this|make it live|put it up|take it live)\b/.test(value)) return true;
+  if (/\b(go ahead|do it|run it|looks good|that works|this works|this is fine|use this|make it live|put it up|take it live|open the listing|create the listing|prepare the listing|make the listing|oya run am|oya list am)\b/.test(value)) return true;
   if (/\b(publish|post|list|create|make)\b.*\b(it|this|that|am|list|listing|offer|live)\b/.test(value)) return true;
   if (/\b(i want|i need|please|can you|help me)\b.*\b(publish|post|list|create)\b/.test(value)) return true;
   if (/\b(listed|published|posted)\b/.test(value) && /\b(this|it|offer|listing|list)\b/.test(value)) return true;
@@ -248,6 +254,7 @@ module.exports = {
   isHistoryCommand,
   isProfileCommand,
   isPayoutsCommand,
+  isTrustRecordCommand,
   isMyListingsCommand,
   inferIntent,
   isBulkListingCancelIntent,

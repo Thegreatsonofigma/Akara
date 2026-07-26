@@ -3,7 +3,7 @@ const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const opentype = require("opentype.js");
-const { rootDir, config, getPublicUrl } = require("../config");
+const { rootDir, config, getShareUrl } = require("../config");
 const { supabaseRequest, filterValue } = require("./supabase");
 const { uploadWhatsAppMedia, sendWhatsAppMedia } = require("./whatsapp");
 const { displayReference, listingWaOpenUrl } = require("../db/listings");
@@ -484,7 +484,7 @@ function listingCardSvg(listing) {
   const haveAmount = numberText(listing.have_amount);
   const wantAmount = numberText(listing.want_amount);
   const openCode = `OPEN ${code}`;
-  const base = assetDataUri("listing-card-base.webp");
+  const base = assetDataUri("listing-card-base.png") || assetDataUri("listing-card-base.webp");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -912,38 +912,54 @@ async function exchangeCompletionPng(deal, role) {
 
 function listingSharePage(listing) {
   const code = displayReference(listing.listing_code, "listing");
-  const publicUrl = getPublicUrl();
+  const publicUrl = String(getShareUrl() || "").replace(/\/+$/, "");
   const version = listingCardVersion(listing);
   const versionQuery = version ? `?v=${encodeURIComponent(version)}` : "";
-  const imageUrl = publicUrl ? `${publicUrl}/l/${encodeURIComponent(code)}.png${versionQuery}` : `/l/${encodeURIComponent(code)}.svg${versionQuery}`;
-  const svgUrl = publicUrl ? `${publicUrl}/l/${encodeURIComponent(code)}.svg${versionQuery}` : `/l/${encodeURIComponent(code)}.svg${versionQuery}`;
+  const imageUrl = publicUrl ? `${publicUrl}/l/${encodeURIComponent(code)}/card${versionQuery}` : `/l/${encodeURIComponent(code)}.png${versionQuery}`;
+  const shareUrl = publicUrl
+    ? `${publicUrl}/l/${encodeURIComponent(code)}${versionQuery}`
+    : `/l/${encodeURIComponent(code)}${versionQuery}`;
   const openUrl = listingWaOpenUrl(code) || `https://wa.me/${String(config.akaraWhatsappNumber || "").replace(/[^\d]/g, "")}?text=${encodeURIComponent(`open ${code}`)}`;
   const title = `${numberText(listing.have_amount)} ${listing.have_currency} for ${numberText(listing.want_amount)} ${listing.want_currency} on Akara`;
+  const description = `Review ${code} and open this peer exchange in your Akara WhatsApp chat.`;
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeXml(title)}</title>
+  <meta name="description" content="${escapeXml(description)}">
   <meta property="og:title" content="${escapeXml(title)}">
-  <meta property="og:description" content="Paste ${escapeXml(`open ${code}`)} on Akara to start this swap.">
+  <meta property="og:description" content="${escapeXml(description)}">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="${escapeXml(shareUrl)}">
   <meta property="og:image" content="${escapeXml(imageUrl)}">
+  <meta property="og:image:secure_url" content="${escapeXml(imageUrl)}">
+  <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="${CARD_WIDTH}">
   <meta property="og:image:height" content="${CARD_HEIGHT}">
+  <meta property="og:image:alt" content="${escapeXml(title)}">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${escapeXml(title)}">
+  <meta name="twitter:description" content="${escapeXml(description)}">
   <meta name="twitter:image" content="${escapeXml(imageUrl)}">
   <style>
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #030303; color: white; font-family: Arial, sans-serif; }
     main { width: min(100%, 1120px); padding: 24px; }
     img { width: 100%; height: auto; display: block; border-radius: 18px; }
     a { display: inline-block; margin-top: 18px; padding: 14px 18px; background: #9DFF1E; color: #000; border-radius: 10px; font-weight: 800; text-decoration: none; }
+    p { color: #b8b8b8; line-height: 1.5; }
   </style>
 </head>
 <body>
   <main>
-    <img src="${escapeXml(svgUrl)}" alt="${escapeXml(title)}">
+    <img src="${escapeXml(imageUrl)}" alt="${escapeXml(title)}">
+    <p>Opening ${escapeXml(code)} in your Akara WhatsApp chat.</p>
     <a href="${escapeXml(openUrl)}">Open this listing on Akara</a>
   </main>
+  <script>
+    window.location.replace(${JSON.stringify(openUrl)});
+  </script>
 </body>
 </html>`;
 }
@@ -1042,6 +1058,7 @@ module.exports = {
   verificationSuccessPng,
   upgradeSuccessSvg,
   upgradeSuccessPng,
+  listingSharePage,
   handleListingCardRoute,
   sendListingCard,
   sendExchangeCompletionCard,

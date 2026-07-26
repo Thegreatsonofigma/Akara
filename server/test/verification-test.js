@@ -19,6 +19,8 @@ process.env.COIN_PROFILE_USERNAME = "replace_with_disabled";
 process.env.AKARA_TYPING_INDICATOR = "false";
 process.env.AKARA_SECURITY_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
+process.env.AKARA_RECEIPT_OCR = "off";
+process.env.AKARA_ID_OCR = "off";
 
 const path = require("node:path");
 
@@ -61,12 +63,23 @@ listingCard.sendVerificationSuccessCard = async (to) => {
 
 // Menu list after tier-1 success: capture payloads instead of sending.
 const listSends = [];
+const buttonSends = [];
 whatsapp.sendWhatsAppList = async (to, payload) => {
   listSends.push({ to, payload });
   return null;
 };
+whatsapp.sendWhatsAppButtons = async (to, payload) => {
+  buttonSends.push({ to, payload });
+  return null;
+};
 function lastListBody() {
   return listSends.length ? String(listSends[listSends.length - 1].payload?.body || "") : "";
+}
+function lastListPayloadText() {
+  return listSends.length ? JSON.stringify(listSends[listSends.length - 1].payload || {}) : "";
+}
+function lastButtonBody() {
+  return buttonSends.length ? String(buttonSends[buttonSends.length - 1].payload?.body || "") : "";
 }
 
 const { buildReply } = require("../router");
@@ -127,12 +140,17 @@ async function send(phone, text, { interpret, media } = {}) {
   const session = await getSession(phone);
   const incoming = { from: phone, text, media: media || null, quotedText: "" };
   const beforeLists = listSends.length;
+  const beforeButtons = buttonSends.length;
   const reply = await buildReply(text, user, session, incoming);
   if (reply === null && listSends.length > beforeLists) return lastListBody();
+  if (reply === null && buttonSends.length > beforeButtons) return lastButtonBody();
   if (reply && typeof reply === "object") {
     if (typeof reply.reply === "string") return reply.reply;
     if (typeof reply.body === "string") return reply.body;
-    if (reply.type === "whatsapp_list") return reply.fallbackText || reply.list?.body || "";
+    if (reply.type === "whatsapp_list") {
+      listSends.push({ to: phone, payload: reply.list });
+      return reply.list?.body || reply.fallbackText || "";
+    }
     if (reply.type === "whatsapp_flow") return reply.fallbackText || reply.flow?.body || "";
     if (reply.type === "media") return reply.caption || reply.fallbackText || "";
   }
@@ -175,7 +193,7 @@ async function completeIdentitySteps(phone, { name, nationality, residence, city
 async function run() {
   __reset();
 
-  const U1 = "250711000001"; // happy path, matched payout name → tier 1
+  const U1 = "250711000001"; // matched payout name, OCR/face unavailable → manual review
   const U2 = "250711000002"; // mismatched payout name → manual review
   const U3 = "250711000003"; // decline paths at the payout review
   const U4 = "250711000004"; // cancel mid-flow, then resume
@@ -244,10 +262,10 @@ async function run() {
   check("residence advances to city", reply.toLowerCase().includes("city"), reply);
 
   reply = await send(U1, "Kigali");
-  check("city advances to ID type", reply.includes("passport"), reply);
+  check("city advances to ID type", reply.includes("Choose the ID"), reply);
 
   reply = await send(U1, "library card");
-  check("unknown ID type re-asks", reply.includes("passport") && reply.includes("student id"), reply);
+  check("unknown ID type re-asks", reply.includes("not on the list"), reply);
 
   reply = await send(U1, "2");
   check("numbered ID pick works", reply.toLowerCase().includes("issued"), reply);
@@ -282,10 +300,10 @@ async function run() {
   reply = await send(U1, "", { media: { id: "selfie-1" } });
   check("selfie accepted", reply.includes("Selfie received"), reply);
   check("selfie stored", String(u1Request.selfie_path || "").includes("selfie"), u1Request.selfie_path);
-  check("selfie moves to payout choice", reply.includes("Payout details"), reply);
+  check("selfie moves to payout choice", reply.includes("payout account"), reply);
   check("payment step begins", (await sessionState(U1)).step === "payment_currency");
 
-  // ---------- payout collection, matched name → tier 1
+  // ---------- payout collection, matched name still requires ID/face evidence
   scenario("payout matched name");
   reply = await send(U1, "ngn");
   check("NGN opens bank collection", reply.includes("bank"), reply);
@@ -298,7 +316,7 @@ async function run() {
   check("quick option uses the KYC name", reply.toLowerCase().includes("account number"), reply);
 
   reply = await send(U1, "12345");
-  check("short account number rejected", reply.toLowerCase().includes("too short"), reply);
+  check("short account number rejected", reply.toLowerCase().includes("shorter than a nigerian bank account number"), reply);
 
   reply = await send(U1, "0123456789");
   check("account number advances to review", reply.includes("Review payout detail"), reply);
@@ -316,8 +334,7 @@ async function run() {
   reply = await send(U1, "save payout");
   check("payout saved", reply.includes("Payout detail saved"), reply);
   check("saved payout asks another or submit", reply.includes("another") && reply.includes("submit"), reply);
-  check("matched name auto-verifies tier 1", userRow(U1).verification_status === "verified_auto", userRow(U1).verification_status);
-  check("matched name sets score 65+", Number(userRow(U1).verification_score) >= 65, userRow(U1).verification_score);
+  check("payout-name match alone does not auto-verify", userRow(U1).verification_status !== "verified_auto", userRow(U1).verification_status);
 
   reply = await send(U1, "edit payout");
   check("saved payout locked until verification completes", reply.includes("Payout already saved") && reply.includes("profile is approved"), reply);
@@ -325,20 +342,19 @@ async function run() {
   reply = await send(U1, "what now");
   check("gibberish at payment_more re-prompts", reply.includes("another") && reply.includes("submit"), reply);
 
-  const listSendsBeforeSubmit = listSends.length;
   reply = await send(U1, "no more");
   check("'no more' opens verification review", reply.includes("Review verification") && reply.includes("John Doe"), reply);
   check("review waits for final submit", (await sessionState(U1)).step === "review_submission");
 
   reply = await send(U1, "submit");
-  check("review submit sends with the menu list", listSends.length === listSendsBeforeSubmit + 1, JSON.stringify({ reply, listSends: listSends.length }));
-  check("tier 1 submission opens menu", lastListBody().includes("Choose your next move") && lastListBody().includes("make offer") && lastListBody().includes("find offers"), lastListBody());
-  check("request finalized as tier 1", requestsFor(U1)[0].automated_decision === "tier_1_approved", requestsFor(U1)[0].automated_decision);
+  check("review submit sends for admin review", reply.includes("Verification submitted"), reply);
+  check("matched payout still waits for OCR and face review", userRow(U1).verification_status === "pending_review", userRow(U1).verification_status);
+  check("request finalized for manual review", requestsFor(U1)[0].automated_decision === "manual_review", requestsFor(U1)[0].automated_decision);
   check("session cleared after submission", (await sessionState(U1)).flow === null);
-  check("success card sent once", cardSends.length === 1, JSON.stringify(cardSends));
+  check("success card is not sent before identity evidence passes", cardSends.length === 0, JSON.stringify(cardSends));
 
   reply = await send(U1, "menu");
-  check("tier 1 user reaches the menu", reply.includes("choose your next move") || lastListBody().includes("Find offers and trade with more confidence"), JSON.stringify({ reply, body: lastListBody() }));
+  check("pending user stays behind the review gate", reply.includes("in review"), JSON.stringify({ reply, body: lastListBody() }));
 
   // ---------- mismatched payout name → manual review
   scenario("payout mismatched name");
@@ -352,10 +368,10 @@ async function run() {
     docId: "doc-2",
     selfieId: "selfie-2",
   });
-  check("second user reaches payout choice", reply.includes("Payout details"), reply);
+  check("second user reaches payout choice", reply.includes("payout account"), reply);
 
   reply = await send(U2, "rwf");
-  check("RWF opens mobile money", reply.includes("MTN"), reply);
+  check("RWF opens mobile money", reply.includes("RWF mobile network") && lastListPayloadText().includes("MTN"), JSON.stringify({ reply, list: lastListPayloadText() }));
 
   reply = await send(U2, "mtn");
   reply = await send(U2, "Blessing Okafor");
@@ -376,7 +392,7 @@ async function run() {
   check("manual review copy shown", reply.toLowerCase().includes("admin review"), reply);
   check("user parked at pending_review", userRow(U2).verification_status === "pending_review", userRow(U2).verification_status);
   check("request marked manual_review", requestsFor(U2)[0].automated_decision === "manual_review", requestsFor(U2)[0].automated_decision);
-  check("no success card for manual review", cardSends.length === 1, JSON.stringify(cardSends));
+  check("no success card for manual review", cardSends.length === 0, JSON.stringify(cardSends));
 
   reply = await send(U2, "hi");
   check("pending_review gate shows in-review copy", reply.includes("in review"), reply);
@@ -393,7 +409,7 @@ async function run() {
     docId: "doc-3",
     selfieId: "selfie-3",
   });
-  check("third user reaches payout choice", reply.includes("Payout details"), reply);
+  check("third user reaches payout choice", reply.includes("payout account"), reply);
 
   await send(U3, "ngn");
   await send(U3, "GTBank");
@@ -403,7 +419,7 @@ async function run() {
 
   reply = await send(U3, "no thanks");
   check("decline with zero payouts explains the requirement", reply.toLowerCase().includes("at least one payout"), reply);
-  check("decline with zero payouts re-offers the choice", reply.includes("Payout details"), reply);
+  check("decline with zero payouts re-offers the choice", reply.includes("Payout not saved"), reply);
   check("decline returns to currency step", (await sessionState(U3)).step === "payment_currency");
 
   await send(U3, "ngn");
@@ -431,7 +447,7 @@ async function run() {
   check("submit after decline opens review", reply.includes("Review verification") && reply.includes("GTBank"), reply);
 
   reply = await send(U3, "submit");
-  check("review submit after decline completes verification", reply.includes("Choose your next move") || lastListBody().includes("Choose your next move"), JSON.stringify({ reply, body: lastListBody() }));
+  check("review submit after decline enters manual review", reply.includes("Verification submitted") && reply.includes("admin review"), JSON.stringify({ reply, body: lastListBody() }));
 
   // ---------- documents AND payout are both required to complete
   scenario("incomplete verification cannot complete");
@@ -472,15 +488,15 @@ async function run() {
 
   await send(U5, "", { media: { id: "doc-5" } });
   reply = await send(U5, "", { media: { id: "selfie-5" } });
-  check("selfie after redirect returns to payout menu", reply.includes("Payout details"), reply);
+  check("selfie after redirect returns to payout menu", reply.includes("payout account"), reply);
 
   reply = await send(U5, "submit");
   check("complete verification opens final review", reply.includes("Review verification") && reply.includes("Received"), reply);
 
   reply = await send(U5, "submit");
-  check("complete verification now submits", reply.includes("Choose your next move") || lastListBody().includes("Choose your next move"), JSON.stringify({ reply, body: lastListBody() }));
-  check("late documents still earn tier 1", userRow(U5).verification_status === "verified_auto", userRow(U5).verification_status);
-  check("user verified only after documents and payout", userRow(U5).verification_status === "verified_auto", userRow(U5).verification_status);
+  check("complete verification now submits", reply.includes("Verification submitted"), JSON.stringify({ reply, body: lastListBody() }));
+  check("late documents still require OCR and face review", userRow(U5).verification_status === "pending_review", userRow(U5).verification_status);
+  check("documents and payout are present before review", Boolean(requestsFor(U5)[0].document_front_path && requestsFor(U5)[0].selfie_path), JSON.stringify(requestsFor(U5)[0]));
 
   // ---------- cancel then resume without duplicates
   scenario("cancel and resume");
@@ -512,7 +528,7 @@ async function run() {
   reply = await send(U7, "Kenya");
   check("Kenya residence gives Kenyan city examples", reply.includes("Nairobi") && reply.includes("Mombasa"), reply);
   reply = await send(U7, "Nairobi");
-  check("Kenya ID list includes driver's licence", reply.toLowerCase().includes("driver"), reply);
+  check("Kenya ID list includes driver's licence", lastListPayloadText().toLowerCase().includes("driver"), lastListPayloadText());
   reply = await send(U7, "driving licence");
   check("driving licence maps for Kenya", reply.toLowerCase().includes("issued"), reply);
   check("driver licence saved", requestsFor(U7)[0]?.id_type === "driver_license", requestsFor(U7)[0]?.id_type);

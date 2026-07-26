@@ -20,6 +20,7 @@ https://jwjrktkhwovadtjhtltu.supabase.co
 3. Create a new query.
 4. Paste the contents of `akara/supabase/migrations/001_initial_schema.sql`.
 5. Run it.
+6. Apply migrations `002` through `008` in numerical order.
 
 Important: make sure no small part of the SQL is highlighted/selected when you click Run. Supabase runs the selected text if anything is selected.
 
@@ -27,6 +28,7 @@ If a partial run failed midway:
 
 1. Run `akara/supabase/migrations/000_reset_akara_schema.sql`.
 2. Then run the full `akara/supabase/migrations/001_initial_schema.sql` again from the top.
+3. Reapply migrations `002` through `008` in numerical order.
 
 The reset script does not delete storage buckets because Supabase blocks direct deletes from storage system tables. This is fine: the main schema safely creates buckets with `on conflict do nothing`.
 

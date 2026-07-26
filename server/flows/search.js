@@ -1,12 +1,13 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { title, caption, action, labeled, formatMoney, moneyNumber } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
-const { normalizeCurrency, parseAmount, parseCurrencyAmountPairs, browseOfferCurrency, currencyHelpLine } = require("../nlp/currency");
+const { normalizeCurrency, parseAmount, parseCurrencyAmountPairs, browseOfferCurrency } = require("../nlp/currency");
 const {
   parseSearchDetails,
   missingListingFields,
   nextSearchStep,
   hasDirectionalExchangeText,
+  mentionedCurrencyRole,
   mergePresentDetails,
   listingDraftFromSearch,
 } = require("../nlp/exchange");
@@ -19,19 +20,57 @@ const {
   isMoreResultsIntent,
 } = require("../nlp/intents");
 const { isVerified } = require("../db/users");
+const { getLatestUserReputations } = require("../db/integrity");
+const { getMarketRate, classifyListingRate } = require("../db/market");
+const { planLiquidityRoute, createLiquidityRoutePlan } = require("../db/liquidity");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { displayReference, listingShareUrl, listingTypeLabel } = require("../db/listings");
-const { explainMissingListing, mainMenu } = require("../messages/copy");
+const { explainMissingListing, mainMenu, currencyListReply } = require("../messages/copy");
 const { prepareListingPreview, reserveListing } = require("./listing");
 
 const LISTING_SEARCH_SELECT = "listings?select=id,listing_code,owner_user_id,have_currency,want_currency,have_amount,want_amount,rate,listing_type,created_at,users!listings_owner_user_id_fkey(completed_deals_count,verification_status)";
 
+function whatsappButtonsReply(body, buttons, fallbackText = body) {
+  return {
+    type: "whatsapp_buttons",
+    body,
+    buttons,
+    fallbackText,
+  };
+}
+
+async function attachOwnerReputations(listings) {
+  const reputations = await getLatestUserReputations(
+    listings.map((listing) => listing.owner_user_id)
+  );
+  return listings.map((listing) => ({
+    ...listing,
+    owner_reputation: reputations[listing.owner_user_id] || null,
+  }));
+}
+
+function ownerRecordLabel(listing) {
+  const owner = listing.users || {};
+  const reputation = listing.owner_reputation;
+  if (!reputation) return `${owner.completed_deals_count || 0} completed`;
+
+  const band = `${reputation.reputation_band[0].toUpperCase()}${reputation.reputation_band.slice(1)}`;
+  const integrity = reputation.integrity_status === "verified"
+    ? "integrity checked"
+    : "record updating";
+  return `${band} · ${reputation.completed_trades} completed · ${integrity}`;
+}
+
 function searchPromptForStep(step, details = {}) {
   if (step === "have_currency") {
-    return [title("What currency do you have?"), currencyHelpLine()].join("\n\n");
+    return currencyListReply({ mode: "have", body: "What currency do you have?" });
   }
   if (step === "want_currency") {
-    return [title("What currency do you need?"), currencyHelpLine(details.have_currency)].join("\n\n");
+    return currencyListReply({
+      mode: "want",
+      body: "What currency do you need?",
+      excludeCurrency: details.have_currency || null,
+    });
   }
   if (step === "have_amount") {
     return [
@@ -52,14 +91,18 @@ function searchPromptForStep(step, details = {}) {
 }
 
 function hasActionableSearchDetails(details = {}) {
-  return Boolean(
-    (details.have_currency && details.want_currency)
-    || (details.want_currency && (details.want_amount || details.amount))
-    || (details.have_currency && (details.have_amount || details.amount)),
-  );
+  return Boolean(details.have_currency || details.want_currency);
 }
 
 async function continueSearchOrShowMatches(user, details) {
+  if (details.want_currency && !details.have_currency && !details.want_amount && !details.amount) {
+    return showDirectionalCurrencyOffers(user, details.want_currency, "receive");
+  }
+
+  if (details.have_currency && !details.want_currency && !details.have_amount && !details.amount) {
+    return showDirectionalCurrencyOffers(user, details.have_currency, "send");
+  }
+
   if (details.want_currency && (details.want_amount || details.amount) && !details.have_currency) {
     return showNeedOnlyOfferMatches(user, details);
   }
@@ -69,6 +112,10 @@ async function continueSearchOrShowMatches(user, details) {
   }
 
   if (details.have_currency && details.want_currency && details.max_want_amount) {
+    return showOfferMatches(user, details);
+  }
+
+  if (details.have_currency && details.want_currency && !details.have_amount && !details.want_amount) {
     return showOfferMatches(user, details);
   }
 
@@ -111,10 +158,10 @@ async function showNeedOnlyOfferMatches(user, context) {
     "limit=20",
   ].filter(Boolean).join("&");
 
-  const listings = sortNeedOnlyListings(
+  const listings = await attachOwnerReputations(sortNeedOnlyListings(
     (await supabaseRequest(query)).filter((listing) => listing.owner_user_id !== user.id),
     requestedAmount,
-  ).slice(0, 5);
+  ).slice(0, 5));
 
   if (!listings.length) {
     await upsertSession(user, user.whatsapp_phone, "find_offer", "have_currency", {
@@ -124,17 +171,19 @@ async function showNeedOnlyOfferMatches(user, context) {
       amount: requestedAmount,
     });
 
-    return [
-      title(`No ${wantedCurrency} offer found`),
-      caption(`I checked live listings that can send ${formatMoney(requestedAmount, wantedCurrency)}.`),
-      "",
-      "Nothing currently covers that amount.",
-      "",
-      title("Next step"),
-      "Tell me what currency you have, and I can prepare your own listing for people to find.",
-      "",
-      currencyHelpLine(wantedCurrency),
-    ].join("\n");
+    return currencyListReply({
+      mode: "have",
+      body: [
+        title(`No ${wantedCurrency} offer found`),
+        caption(`I checked live listings that can send ${formatMoney(requestedAmount, wantedCurrency)}.`),
+        "",
+        "Nothing currently covers that amount.",
+        "",
+        title("Next step"),
+        "Tell me what currency you have. I can use it to prepare your own listing for people to find.",
+      ].join("\n"),
+      excludeCurrency: wantedCurrency,
+    });
   }
 
   const resultMap = {};
@@ -155,15 +204,14 @@ async function showNeedOnlyOfferMatches(user, context) {
     caption("Negotiable offers appear first when they can cover what you need."),
     "",
     listings.map((listing, index) => {
-      const owner = listing.users || {};
-      const shareUrl = listingShareUrl(listing.listing_code);
+      const shareUrl = listingShareUrl(listing);
       return [
         title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
         labeled("They offer", formatMoney(listing.have_amount, listing.have_currency)),
         labeled("They want", formatMoney(listing.want_amount, listing.want_currency)),
         labeled("Rate", `1 ${listing.want_currency} gets ${(Number(listing.have_amount) / Number(listing.want_amount)).toFixed(4)} ${listing.have_currency}`),
         labeled("Terms", listingTypeLabel(listing.listing_type)),
-        labeled("Owner record", `${owner.completed_deals_count || 0} completed`),
+        labeled("Owner record", ownerRecordLabel(listing)),
         shareUrl ? labeled("Link", shareUrl) : "",
       ].filter(Boolean).join("\n");
     }).join("\n\n"),
@@ -207,10 +255,10 @@ async function showHaveOnlyOfferMatches(user, context) {
     "limit=20",
   ].filter(Boolean).join("&");
 
-  const listings = sortHaveOnlyListings(
+  const listings = await attachOwnerReputations(sortHaveOnlyListings(
     (await supabaseRequest(query)).filter((listing) => listing.owner_user_id !== user.id),
     offeredAmount,
-  ).slice(0, 5);
+  ).slice(0, 5));
 
   if (!listings.length) {
     await upsertSession(user, user.whatsapp_phone, "find_offer", "want_currency", {
@@ -220,17 +268,19 @@ async function showHaveOnlyOfferMatches(user, context) {
       amount: offeredAmount,
     });
 
-    return [
-      title(`No ${offeredCurrency} request found`),
-      caption(`I checked live listings that can receive up to ${formatMoney(offeredAmount, offeredCurrency)}.`),
-      "",
-      "No current listing fits that side of the exchange.",
-      "",
-      title("Next step"),
-      "Tell me what currency you want in return, and I can prepare your own listing.",
-      "",
-      currencyHelpLine(offeredCurrency),
-    ].join("\n");
+    return currencyListReply({
+      mode: "want",
+      body: [
+        title(`No ${offeredCurrency} request found`),
+        caption(`I checked live listings that can receive up to ${formatMoney(offeredAmount, offeredCurrency)}.`),
+        "",
+        "No current listing fits that side of the exchange.",
+        "",
+        title("Next step"),
+        "Tell me what currency you want in return. I can use it to prepare your own listing.",
+      ].join("\n"),
+      excludeCurrency: offeredCurrency,
+    });
   }
 
   const resultMap = {};
@@ -251,15 +301,14 @@ async function showHaveOnlyOfferMatches(user, context) {
     caption("Negotiable offers appear first when your amount can cover what they need."),
     "",
     listings.map((listing, index) => {
-      const owner = listing.users || {};
-      const shareUrl = listingShareUrl(listing.listing_code);
+      const shareUrl = listingShareUrl(listing);
       return [
         title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
         labeled("They offer", formatMoney(listing.have_amount, listing.have_currency)),
         labeled("They want", formatMoney(listing.want_amount, listing.want_currency)),
         labeled("Rate", `1 ${listing.want_currency} gets ${(Number(listing.have_amount) / Number(listing.want_amount)).toFixed(4)} ${listing.have_currency}`),
         labeled("Terms", listingTypeLabel(listing.listing_type)),
-        labeled("Owner record", `${owner.completed_deals_count || 0} completed`),
+        labeled("Owner record", ownerRecordLabel(listing)),
         shareUrl ? labeled("Link", shareUrl) : "",
       ].filter(Boolean).join("\n");
     }).join("\n\n"),
@@ -281,7 +330,7 @@ async function showOfferMatches(user, context) {
     maxReceiveAmount ? `have_amount=lte.${filterValue(maxReceiveAmount)}` : "",
     `owner_user_id=neq.${filterValue(user.id)}`,
     "order=created_at.desc",
-    "limit=5",
+    "limit=30",
   ].filter(Boolean).join("&");
 
   let listings = (await supabaseRequest(exactQuery)).filter((listing) => listing.owner_user_id !== user.id);
@@ -296,6 +345,74 @@ async function showOfferMatches(user, context) {
   if (exactAutoOpen) {
     return reserveListing(user, exactAutoOpen);
   }
+
+  const singleListingCovers = draft && listings.some((listing) => {
+    const exactFixed = listing.listing_type === "fixed"
+      && moneyNumber(listing.have_amount) === moneyNumber(draft.want_amount)
+      && moneyNumber(listing.want_amount) === moneyNumber(draft.have_amount);
+    const negotiableCovers = listing.listing_type === "negotiable"
+      && moneyNumber(listing.have_amount) >= moneyNumber(draft.want_amount)
+      && moneyNumber(listing.want_amount) >= moneyNumber(draft.have_amount);
+    return exactFixed || negotiableCovers;
+  });
+
+  if (draft && !singleListingCovers) {
+    const planned = planLiquidityRoute(listings, {
+      user_id: user.id,
+      have_currency: draft.have_currency,
+      want_currency: draft.want_currency,
+      have_amount: draft.have_amount,
+      want_amount: draft.want_amount,
+    });
+    if (planned) {
+      const route = await createLiquidityRoutePlan(user.id, planned);
+      const routeListings = Object.fromEntries(listings.map((listing) => [listing.id, listing]));
+      const resultMap = {};
+      const routeLegMap = {};
+      planned.legs.forEach((leg, index) => {
+        resultMap[String(index + 1)] = leg.listing_id;
+        routeLegMap[String(index + 1)] = {
+          route_plan_id: route.id || null,
+          route_leg_index: index + 1,
+          have_amount: leg.receive_amount,
+          want_amount: leg.send_amount,
+        };
+      });
+      await upsertSession(user, user.whatsapp_phone, "search_results", "select", {
+        ...context,
+        route_plan_id: route.id || null,
+        route_code: route.route_code,
+        result_map: resultMap,
+        route_leg_map: routeLegMap,
+      });
+
+      return [
+        title("Split route found"),
+        caption("No single offer covers the full request. These listings can work together."),
+        "",
+        labeled("Route", route.route_code),
+        labeled("You send", formatMoney(planned.planned_send_amount, planned.send_currency)),
+        labeled("You receive", formatMoney(planned.planned_receive_amount, planned.receive_currency)),
+        labeled("Coverage", `${planned.coverage_percent.toFixed(0)}%`),
+        "",
+        planned.legs.map((leg, index) => {
+          const listing = routeListings[leg.listing_id] || {};
+          return [
+            title(`${index + 1}. ${displayReference(leg.listing_code, "listing")}`),
+            labeled("You send", formatMoney(leg.send_amount, planned.send_currency)),
+            labeled("You receive", formatMoney(leg.receive_amount, planned.receive_currency)),
+            labeled("Terms", listingTypeLabel(leg.listing_type)),
+          ].join("\n");
+        }).join("\n\n"),
+        "",
+        title("Choose a leg"),
+        `${action("open 1")} to start with the first offer`,
+        caption("Each leg opens separately, so you approve every payment obligation before sending money."),
+      ].join("\n");
+    }
+  }
+
+  listings = listings.slice(0, 5);
 
   const heading = listings.length
     ? title("Available offers")
@@ -327,19 +444,31 @@ async function showOfferMatches(user, context) {
         ...context,
         suggested_listing: draft,
       });
-      return [
-        title("No current offer"),
-        caption("I checked the live marketplace for that exact exchange."),
+      const body = [
+        title("No matching offer yet"),
+        caption("I checked every live listing for this exchange."),
         "",
-        "No one is asking for it yet.",
+        "Nothing currently matches your request.",
         "",
-        title("List yours instead?"),
-        `I can prepare ${formatMoney(draft.have_amount, draft.have_currency)} for ${formatMoney(draft.want_amount, draft.want_currency)} so interested traders can find you.`,
-        "",
-        `${action("yes")} to open the listing`,
-        `${action("search again")} to try another pair`,
-        `${action("no thanks")} to leave it`,
+        title("List yours?"),
+        `I can prepare ${formatMoney(draft.have_amount, draft.have_currency)} for ${formatMoney(draft.want_amount, draft.want_currency)} so people looking for this exchange can find it.`,
       ].join("\n");
+
+      return whatsappButtonsReply(
+        body,
+        [
+          { id: "yes", title: "Create listing" },
+          { id: "search again", title: "Search again" },
+          { id: "no thanks", title: "No thanks" },
+        ],
+        [
+          body,
+          "",
+          `${action("yes")} to review the listing`,
+          `${action("search again")} to try another pair`,
+          `${action("no thanks")} to leave it`,
+        ].join("\n")
+      );
     }
 
     const partialDraft = {
@@ -376,6 +505,10 @@ async function showOfferMatches(user, context) {
     ].join("\n");
   }
 
+  const market = context.have_currency && context.want_currency
+    ? await getMarketRate(context.have_currency, context.want_currency)
+    : null;
+  listings = await attachOwnerReputations(listings);
   const resultMap = {};
   listings.forEach((listing, index) => {
     resultMap[String(index + 1)] = listing.id;
@@ -391,15 +524,15 @@ async function showOfferMatches(user, context) {
     subheading,
     "",
     listings.map((listing, index) => {
-      const owner = listing.users || {};
-      const shareUrl = listingShareUrl(listing.listing_code);
+      const shareUrl = listingShareUrl(listing);
       return [
         title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
         labeled("You receive", formatMoney(listing.have_amount, listing.have_currency)),
         labeled("You send", formatMoney(listing.want_amount, listing.want_currency)),
         labeled("Rate", `1 ${listing.want_currency} gets ${(Number(listing.have_amount) / Number(listing.want_amount)).toFixed(4)} ${listing.have_currency}`),
+        market ? labeled("Market position", classifyListingRate(listing, market)) : "",
         labeled("Terms", listingTypeLabel(listing.listing_type)),
-        labeled("Owner record", `${owner.completed_deals_count || 0} completed`),
+        labeled("Owner record", ownerRecordLabel(listing)),
         shareUrl ? labeled("Link", shareUrl) : "",
       ].filter(Boolean).join("\n");
     }).join("\n\n"),
@@ -425,7 +558,7 @@ async function showBrowseOffers(user, currency = null, page = 0) {
 
   const fetched = (await supabaseRequest(query)).filter((listing) => listing.owner_user_id !== user.id);
   const hasMore = fetched.length > pageSize;
-  const listings = fetched.slice(0, pageSize);
+  const listings = await attachOwnerReputations(fetched.slice(0, pageSize));
   if (!listings.length) {
     return [
       title(page ? "No more offers" : currency ? `No ${currency} offers yet` : "No live offers yet"),
@@ -459,16 +592,109 @@ async function showBrowseOffers(user, currency = null, page = 0) {
     caption(page ? `Page ${page + 1}. Choose a number if one works for you.` : "Choose a number if one works for you."),
     "",
     listings.map((listing, index) => {
-      const owner = listing.users || {};
       return [
         title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
         labeled("They offer", formatMoney(listing.have_amount, listing.have_currency)),
         labeled("They want", formatMoney(listing.want_amount, listing.want_currency)),
         labeled("Rate", `1 ${listing.want_currency} gets ${(Number(listing.have_amount) / Number(listing.want_amount)).toFixed(4)} ${listing.have_currency}`),
         labeled("Terms", listingTypeLabel(listing.listing_type)),
-        labeled("Owner record", `${owner.completed_deals_count || 0} completed`),
+        labeled("Owner record", ownerRecordLabel(listing)),
       ].join("\n");
     }).join("\n\n"),
+    "",
+    title("Actions"),
+    `${action("1")} or ${action("open 1")} to start an Akara Trade`,
+    hasMore ? `${action("view more")} to see more offers` : "",
+    `${action("search again")} to narrow it down`,
+  ].filter(Boolean).join("\n\n");
+}
+
+async function showDirectionalCurrencyOffers(user, currency, direction = "receive", page = 0) {
+  const receiving = direction === "receive";
+  const pageSize = 10;
+  const offset = Math.max(0, Number(page || 0)) * pageSize;
+  const currencyColumn = receiving ? "have_currency" : "want_currency";
+  const query = [
+    LISTING_SEARCH_SELECT,
+    "status=eq.active",
+    `${currencyColumn}=eq.${filterValue(currency)}`,
+    `owner_user_id=neq.${filterValue(user.id)}`,
+    "order=listing_type.desc,created_at.desc",
+    `limit=${pageSize + 1}`,
+    `offset=${offset}`,
+  ].join("&");
+
+  const fetched = (await supabaseRequest(query)).filter((listing) => listing.owner_user_id !== user.id);
+  const ordered = fetched.slice().sort((a, b) => {
+    const aPriority = a.listing_type === "negotiable" ? 0 : 1;
+    const bPriority = b.listing_type === "negotiable" ? 0 : 1;
+    if (aPriority !== bPriority) return aPriority - bPriority;
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  });
+  const hasMore = ordered.length > pageSize;
+  const listings = await attachOwnerReputations(ordered.slice(0, pageSize));
+
+  if (!listings.length) {
+    if (page) {
+      return [
+        title("No more offers"),
+        "",
+        "You have reached the end of the current list.",
+      ].join("\n");
+    }
+
+    const nextStep = receiving ? "have_currency" : "want_currency";
+    const context = receiving
+      ? { want_currency: currency }
+      : { have_currency: currency };
+    await upsertSession(user, user.whatsapp_phone, "find_offer", nextStep, context);
+
+    return currencyListReply({
+      mode: receiving ? "have" : "want",
+      body: [
+        title(`No live offers ${receiving ? "paying" : "accepting"} ${currency}`),
+        "",
+        receiving
+          ? `No current listing is offering ${currency}.`
+          : `No current listing is requesting ${currency}.`,
+        "",
+        title("Create your own listing"),
+        receiving
+          ? `What currency will you give in exchange for ${currency}?`
+          : `What currency would you like to receive for your ${currency}?`,
+      ].join("\n"),
+      excludeCurrency: currency,
+    });
+  }
+
+  const resultMap = {};
+  listings.forEach((listing, index) => {
+    resultMap[String(index + 1)] = listing.id;
+  });
+  await upsertSession(user, user.whatsapp_phone, "search_results", "select", {
+    browse_mode: true,
+    browse_direction: receiving ? "receive" : "send",
+    browse_currency: currency,
+    browse_page: page,
+    has_more: hasMore,
+    result_map: resultMap,
+  });
+
+  return [
+    title(receiving ? `Offers paying ${currency}` : `Offers accepting ${currency}`),
+    caption(
+      page
+        ? `Page ${page + 1}. Negotiable offers appear first.`
+        : "Negotiable offers appear first. Choose one if its terms work for you."
+    ),
+    "",
+    listings.map((listing, index) => [
+      title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
+      labeled("You receive", formatMoney(listing.have_amount, listing.have_currency)),
+      labeled("You send", formatMoney(listing.want_amount, listing.want_currency)),
+      labeled("Terms", listingTypeLabel(listing.listing_type)),
+      labeled("Owner record", ownerRecordLabel(listing)),
+    ].join("\n")).join("\n\n"),
     "",
     title("Actions"),
     `${action("1")} or ${action("open 1")} to start an Akara Trade`,
@@ -484,6 +710,13 @@ async function showBrowseOrPairMatches(user, text, fallbackCurrency = null) {
   const details = parseSearchDetails(text);
   if (details.have_currency && details.want_currency) {
     return showOfferMatches(user, details);
+  }
+  const currencyRole = mentionedCurrencyRole(text);
+  if (details.want_currency && currencyRole === "want") {
+    return showDirectionalCurrencyOffers(user, details.want_currency, "receive");
+  }
+  if (details.have_currency && currencyRole === "have") {
+    return showDirectionalCurrencyOffers(user, details.have_currency, "send");
   }
   return showBrowseOffers(user, browseOfferCurrency(text) || fallbackCurrency);
 }
@@ -549,12 +782,27 @@ async function handleFindOffer(text, user, session) {
       ].join("\n");
     }
 
-    return [
+    const body = [
       title("Choose next step"),
       "",
-      `${action("list it")} or ${action("publish this list")} to create your own listing`,
-      `${action("search again")} to try another search`,
+      "Would you like to create this listing or search again?",
     ].join("\n");
+
+    return whatsappButtonsReply(
+      body,
+      [
+        { id: "yes", title: "Create listing" },
+        { id: "search again", title: "Search again" },
+        { id: "no thanks", title: "No thanks" },
+      ],
+      [
+        body,
+        "",
+        `${action("yes")} to review the listing`,
+        `${action("search again")} to try another search`,
+        `${action("no thanks")} to leave it`,
+      ].join("\n")
+    );
   }
 
   if (step === "quick") {
@@ -574,13 +822,13 @@ async function handleFindOffer(text, user, session) {
   {
     const details = parseSearchDetails(text);
     if (hasActionableSearchDetails(details)) {
-      return continueSearchOrShowMatches(user, details);
+      return continueSearchOrShowMatches(user, mergePresentDetails(context, details));
     }
   }
 
   if (step === "have_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return [title("Choose what currency you have"), currencyHelpLine()].join("\n\n");
+    if (!currency) return currencyListReply({ mode: "have", body: "Choose what currency you have." });
 
     context.have_currency = currency;
     return continueSearchOrShowMatches(user, context);
@@ -588,7 +836,13 @@ async function handleFindOffer(text, user, session) {
 
   if (step === "want_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return [title("Choose what currency you need"), currencyHelpLine(context.have_currency)].join("\n\n");
+    if (!currency) {
+      return currencyListReply({
+        mode: "want",
+        body: "Choose what currency you need.",
+        excludeCurrency: context.have_currency || null,
+      });
+    }
     if (currency === context.have_currency) return "Choose a different currency from the one you have.";
 
     context.want_currency = currency;
@@ -626,6 +880,14 @@ async function handleSearchResults(text, user, session) {
 
   if (session.context_json?.browse_mode && isMoreResultsIntent(text)) {
     const context = session.context_json || {};
+    if (context.browse_direction) {
+      return showDirectionalCurrencyOffers(
+        user,
+        context.browse_currency,
+        context.browse_direction,
+        Number(context.browse_page || 0) + 1
+      );
+    }
     return showBrowseOffers(user, context.browse_currency || null, Number(context.browse_page || 0) + 1);
   }
 
@@ -665,6 +927,20 @@ async function handleSearchResults(text, user, session) {
     return "That offer is no longer available. Type find offers to search again.";
   }
 
+  const routeLeg = context.route_leg_map?.[selectedNumber || impliedNumber || text.trim()] || null;
+  if (routeLeg) {
+    return reserveListing(user, listing, {
+      force: true,
+      have_amount: routeLeg.have_amount,
+      want_amount: routeLeg.want_amount,
+      routePlanId: routeLeg.route_plan_id,
+      routeLegIndex: routeLeg.route_leg_index,
+      quoteType: "routed",
+      takerIntro: `You opened leg ${routeLeg.route_leg_index} of ${context.route_code || "your split route"}.`,
+      makerIntro: "A verified trader accepted part of your negotiable listing.",
+    });
+  }
+
   return reserveListing(user, listing);
 }
 
@@ -672,6 +948,7 @@ module.exports = {
   continueSearchOrShowMatches,
   showOfferMatches,
   showBrowseOffers,
+  showDirectionalCurrencyOffers,
   showBrowseOrPairMatches,
   handleFindOffer,
   handleSearchResults,

@@ -3,7 +3,7 @@ const { sendWhatsAppText } = require("../lib/whatsapp");
 const { config } = require("../config");
 const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber, formatCooldown } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
-const { normalizeCurrency, parseAmount, parseCurrencyAmountPairs, currencyHelpLine } = require("../nlp/currency");
+const { normalizeCurrency, parseAmount, parseCurrencyAmountPairs } = require("../nlp/currency");
 const {
   parseListingDetails,
   missingListingFields,
@@ -30,10 +30,64 @@ const {
   listingHasEnoughForDeal,
   createResidualListing,
 } = require("../db/listings");
-const { mainMenu, feeIncludedText, listingShareCopy, explainMissingListing } = require("../messages/copy");
+const { mainMenu, feeIncludedText, listingShareCopy, explainMissingListing, currencyListReply } = require("../messages/copy");
 const { startPaymentProfileForCurrency } = require("./payment-profile");
+const { createLockedQuote, attachQuoteToDeal } = require("../db/quotes");
 
 const NEGOTIATION_REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
+
+function promptTextPart(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function mergePromptText(...parts) {
+  return parts.map(promptTextPart).filter(Boolean).join("\n\n");
+}
+
+function prependPromptText(prompt, intro) {
+  const cleanIntro = promptTextPart(intro);
+  if (!cleanIntro) return prompt;
+  if (!prompt || typeof prompt === "string") {
+    return mergePromptText(cleanIntro, prompt || "");
+  }
+  if (Array.isArray(prompt)) {
+    return [cleanIntro, ...prompt].filter(Boolean);
+  }
+
+  if (prompt.type === "whatsapp_list" && prompt.list && typeof prompt.list === "object") {
+    const existingBody = promptTextPart(prompt.list.body);
+    const fallbackSource = promptTextPart(prompt.fallbackText) || existingBody;
+    const mergedBody = mergePromptText(cleanIntro, existingBody) || cleanIntro;
+    return {
+      ...prompt,
+      list: { ...prompt.list, body: mergedBody },
+      fallbackText: mergePromptText(cleanIntro, fallbackSource) || mergedBody,
+    };
+  }
+
+  if (prompt.type === "whatsapp_buttons") {
+    const existingBody = promptTextPart(prompt.body);
+    const fallbackSource = promptTextPart(prompt.fallbackText) || existingBody;
+    const mergedBody = mergePromptText(cleanIntro, existingBody) || cleanIntro;
+    return {
+      ...prompt,
+      body: mergedBody,
+      fallbackText: mergePromptText(cleanIntro, fallbackSource) || mergedBody,
+    };
+  }
+
+  const existingBody =
+    promptTextPart(prompt.body)
+    || promptTextPart(prompt.text)
+    || promptTextPart(prompt.message)
+    || promptTextPart(prompt.fallbackText);
+  const merged = mergePromptText(cleanIntro, existingBody) || cleanIntro;
+  if (Object.prototype.hasOwnProperty.call(prompt, "body")) return { ...prompt, body: merged };
+  if (Object.prototype.hasOwnProperty.call(prompt, "text")) return { ...prompt, text: merged };
+  if (Object.prototype.hasOwnProperty.call(prompt, "message")) return { ...prompt, message: merged };
+  if (Object.prototype.hasOwnProperty.call(prompt, "fallbackText")) return { ...prompt, fallbackText: merged };
+  return { ...prompt, fallbackText: merged };
+}
 
 function normalizeRiskText(value) {
   return compactText(value)
@@ -233,6 +287,7 @@ function tradeOpenedMessage({
   expectedProfile,
   residualLine = "",
   firstInstruction,
+  quoteCode = "",
 }) {
   return [
     title(`${heading} ${dealCode}`),
@@ -244,6 +299,7 @@ function tradeOpenedMessage({
     "",
     fieldBlock("Payment window", "15 minutes"),
     "",
+    quoteCode ? fieldBlock("Terms locked", quoteCode) : "",
     fieldBlock("Service fee", feeIncludedText()),
     residualLine ? ["", fieldBlock("Still listed", residualLine)].join("\n") : "",
     "",
@@ -290,6 +346,24 @@ function formatListingReview(context) {
   ].join("\n");
 }
 
+function whatsappButtonsReply(body, buttons, fallbackText = body) {
+  return {
+    type: "whatsapp_buttons",
+    body,
+    buttons,
+    fallbackText,
+  };
+}
+
+function listingReviewReply(context, intro = "") {
+  const body = [intro, formatListingReview(context)].filter(Boolean).join("\n\n");
+  return whatsappButtonsReply(body, [
+    { id: "publish", title: "Publish" },
+    { id: "edit", title: "Edit" },
+    { id: "cancel", title: "Cancel" },
+  ]);
+}
+
 async function findActiveDuplicateListing(user, context) {
   if (!context.have_currency || !context.want_currency || !context.have_amount || !context.want_amount) return null;
 
@@ -310,16 +384,23 @@ async function findActiveDuplicateListing(user, context) {
 }
 
 function duplicateListingReply(listing) {
-  return [
+  const body = [
     title("Listing already live"),
+    "",
     "You already have this exact offer open on Akara.",
     "",
     labeled("Reference", displayReference(listing.listing_code, "listing")),
     labeled("Status", listing.status === "active" ? "Live" : listing.status),
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "my_listings", title: "My listings" },
+    { id: "find_offers", title: "Find offers" },
+  ], [
+    body,
     "",
     `${action("my listings")} to manage it`,
-    `${action("find offers")} to browse the marketplace`,
-  ].join("\n");
+    `${action("find offers")} to browse live offers`,
+  ].join("\n"));
 }
 
 // Opens the edit conversation for a listing draft: keeps only the edit
@@ -336,13 +417,10 @@ async function startListingEdit(user, context, intro = title("Edit listing")) {
       ...(context.previous_listing_status ? { previous_listing_status: context.previous_listing_status } : {}),
     };
     await upsertSession(user, user.whatsapp_phone, "create_listing", "have_currency", editContext);
-    return [
-      intro,
-      "",
-      "What currency do you have?",
-      "",
-      currencyHelpLine(),
-    ].join("\n");
+    return currencyListReply({
+      mode: "have",
+      body: [intro, "What currency do you have?"].filter(Boolean).join("\n\n"),
+    });
   }
 
   await upsertSession(user, user.whatsapp_phone, "create_listing", "edit_choice", context);
@@ -350,7 +428,7 @@ async function startListingEdit(user, context, intro = title("Edit listing")) {
 }
 
 function listingEditMenu(context, intro = title("What do you want to edit?")) {
-  return [
+  const body = [
     intro,
     caption("Choose only the part you want to change."),
     "",
@@ -358,10 +436,16 @@ function listingEditMenu(context, intro = title("What do you want to edit?")) {
     `2. ${action("receive amount")} ${formatMoney(context.want_amount, context.want_currency)}`,
     `3. ${action("terms")} ${listingTypeLabel(context.listing_type || "negotiable")}`,
     `4. ${action("currencies")}`,
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "publish", title: "Publish" },
+    { id: "cancel", title: "Cancel" },
+  ], [
+    body,
     "",
     `${action("publish")} to continue with publication`,
     `${action("cancel")} to stop`,
-  ].join("\n");
+  ].join("\n"));
 }
 
 function listingEditChoice(text) {
@@ -377,6 +461,20 @@ function listingEditChoice(text) {
   return null;
 }
 
+function missingListingReply(fields, context = {}) {
+  if (fields.includes("have_currency")) {
+    return currencyListReply({ mode: "have", body: "Tell me what currency you have." });
+  }
+  if (fields.includes("want_currency")) {
+    return currencyListReply({
+      mode: "want",
+      body: "Tell me what currency you want in return.",
+      excludeCurrency: context.have_currency || null,
+    });
+  }
+  return explainMissingListing(fields, context);
+}
+
 async function prepareListingPreview(user, details, intro = "") {
   const context = {
     have_currency: details.have_currency,
@@ -387,6 +485,9 @@ async function prepareListingPreview(user, details, intro = "") {
     listing_code: details.listing_code || await generateReferenceCode("listing"),
     ...(details.editing_listing_id ? { editing_listing_id: details.editing_listing_id } : {}),
     ...(details.previous_listing_status ? { previous_listing_status: details.previous_listing_status } : {}),
+    ...(details.republished_from_listing_id
+      ? { republished_from_listing_id: details.republished_from_listing_id }
+      : {}),
   };
 
   const duplicate = await findActiveDuplicateListing(user, context);
@@ -401,17 +502,18 @@ async function prepareListingPreview(user, details, intro = "") {
       return_flow: "preview_listing",
       pending_listing: context,
     });
-    return [
-      intro,
-      title("Add payout detail"),
-      caption(`Before I show the final review, add where you want to receive ${context.want_currency}.`),
-      "",
+    return prependPromptText(
       prompt,
-    ].filter(Boolean).join("\n\n");
+      [
+        intro,
+        title("Add payout detail"),
+        caption(`Before I show the final review, add where you want to receive ${context.want_currency}.`),
+      ].filter(Boolean).join("\n\n")
+    );
   }
 
   await upsertSession(user, user.whatsapp_phone, "create_listing", "confirm", context);
-  return [intro, formatListingReview(context)].filter(Boolean).join("\n\n");
+  return listingReviewReply(context, intro);
 }
 
 async function publishListing(user, context) {
@@ -430,11 +532,10 @@ async function publishListing(user, context) {
       return_flow: "publish_listing",
       pending_listing: context,
     });
-    return [
-      `Before this goes live, add your ${context.want_currency} payout detail.`,
-      "",
+    return prependPromptText(
       prompt,
-    ].join("\n");
+      `Before this goes live, add your ${context.want_currency} payout detail.`
+    );
   }
 
   if (context.editing_listing_id) {
@@ -483,6 +584,17 @@ async function publishListing(user, context) {
     }),
   });
   const listing = createdListings[0];
+
+  if (context.republished_from_listing_id) {
+    const shareUrl = listingShareUrl(listing);
+    const liveMessage = listingLiveMessage("Listing reopened ✅", listingCode, listing, shareUrl);
+    const deliveryReply = await deliverListingLive(user, listing, listingCode, liveMessage);
+    const autoMatchReply = await tryAutoMatchListing(user, listing);
+    if (autoMatchReply) return deliveryReply ? [deliveryReply, autoMatchReply] : autoMatchReply;
+
+    await clearSession(user, user.whatsapp_phone);
+    return deliveryReply;
+  }
 
   const autoMatchReply = await tryAutoMatchListing(user, listing);
   if (autoMatchReply) return autoMatchReply;
@@ -533,6 +645,15 @@ async function tryAutoMatchListing(user, listing) {
 
   const dealCode = await generateReferenceCode("deal");
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const lockedQuote = await createLockedQuote({
+    listing: match,
+    makerUserId: match.owner_user_id,
+    takerUserId: user.id,
+    sendAmount: dealWantAmount,
+    receiveAmount: dealHaveAmount,
+    quoteType: "auto_match",
+    expiresAt,
+  });
   const deals = await supabaseRequest("deals", {
     method: "POST",
     body: JSON.stringify({
@@ -546,9 +667,11 @@ async function tryAutoMatchListing(user, listing) {
       want_amount: dealWantAmount,
       status: "reserved",
       reservation_expires_at: expiresAt,
+      ...(lockedQuote?.id ? { locked_quote_id: lockedQuote.id } : {}),
     }),
   });
   const deal = deals[0];
+  await attachQuoteToDeal(lockedQuote, deal.id);
 
   await supabaseRequest(`listings?id=eq.${filterValue(match.id)}`, {
     method: "PATCH",
@@ -590,6 +713,7 @@ async function tryAutoMatchListing(user, listing) {
       expectedProfile: makerReceiveProfile,
       residualLine: matchResidual ? `${formatMoney(matchResidual.have_amount, matchResidual.have_currency)} for ${formatMoney(matchResidual.want_amount, matchResidual.want_currency)}` : "",
       firstInstruction: "Check your bank or MoMo before sending your side.",
+      quoteCode: lockedQuote?.quote_code || "",
     });
 
     sendWhatsAppText(maker.whatsapp_phone, makerNotice).catch((error) => {
@@ -607,6 +731,7 @@ async function tryAutoMatchListing(user, listing) {
     expectedProfile: takerReceiveProfile,
     residualLine: listingResidual ? `${formatMoney(listingResidual.have_amount, listingResidual.have_currency)} for ${formatMoney(listingResidual.want_amount, listingResidual.want_currency)}` : "",
     firstInstruction: "Name check: the account name should match the verified person you are trading with.",
+    quoteCode: lockedQuote?.quote_code || "",
   });
 }
 
@@ -817,6 +942,19 @@ async function openListingTrade(user, listing, options = {}) {
 
   const dealHaveAmount = moneyNumber(options.have_amount || listing.have_amount);
   const dealWantAmount = moneyNumber(options.want_amount || listing.want_amount);
+  const listingHaveAmount = moneyNumber(listing.have_amount);
+  const listingWantAmount = moneyNumber(listing.want_amount);
+  const isPartialFill = dealHaveAmount < listingHaveAmount || dealWantAmount < listingWantAmount;
+
+  if (isPartialFill && listing.listing_type !== "negotiable") {
+    return "This fixed-rate listing can only open with the posted terms. Ask the owner to edit it, or choose another offer.";
+  }
+
+  if (!listingHasEnoughForDeal(listing, dealHaveAmount, dealWantAmount)) {
+    return "This offer cannot cover that value. Choose another offer or send a smaller proposal.";
+  }
+
+  const shouldCreateResidualListing = listing.listing_type === "negotiable" && isPartialFill;
   const tierBlock = tierLimitBlockForAmount(user, dealWantAmount, listing.want_currency)
     || tierLimitBlockForAmount(user, dealHaveAmount, listing.have_currency);
   if (tierBlock) return tierBlock;
@@ -839,15 +977,26 @@ async function openListingTrade(user, listing, options = {}) {
       return_flow: "reserve_listing",
       pending_listing_id: listing.id,
     });
-    return [
-      `Before this trade opens, add your ${listing.have_currency} payout detail.`,
-      "",
+    return prependPromptText(
       prompt,
-    ].join("\n");
+      `Before this trade opens, add your ${listing.have_currency} payout detail.`
+    );
   }
 
   const dealCode = await generateReferenceCode("deal");
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const quoteType = options.quoteType
+    || (options.negotiableOfferId ? "negotiated" : options.routePlanId ? "routed" : "posted");
+  const lockedQuote = await createLockedQuote({
+    listing,
+    makerUserId: listing.owner_user_id,
+    takerUserId: user.id,
+    sendAmount: dealWantAmount,
+    receiveAmount: dealHaveAmount,
+    quoteType,
+    negotiableOfferId: options.negotiableOfferId || null,
+    expiresAt,
+  });
 
   const deals = await supabaseRequest("deals", {
     method: "POST",
@@ -862,6 +1011,11 @@ async function openListingTrade(user, listing, options = {}) {
       want_amount: dealWantAmount,
       status: "reserved",
       reservation_expires_at: expiresAt,
+      ...(lockedQuote?.id ? { locked_quote_id: lockedQuote.id } : {}),
+      ...(options.routePlanId ? {
+        route_plan_id: options.routePlanId,
+        route_leg_index: options.routeLegIndex || null,
+      } : {}),
     }),
   });
 
@@ -871,6 +1025,30 @@ async function openListingTrade(user, listing, options = {}) {
   });
 
   const deal = deals[0];
+  await attachQuoteToDeal(lockedQuote, deal.id);
+  if (options.routePlanId && options.routeLegIndex) {
+    await supabaseRequest(
+      [
+        "liquidity_route_legs?",
+        `route_plan_id=eq.${filterValue(options.routePlanId)}`,
+        `&leg_index=eq.${filterValue(options.routeLegIndex)}`,
+      ].join(""),
+      {
+        method: "PATCH",
+        body: JSON.stringify({ status: "opened", deal_id: deal.id }),
+      }
+    );
+    await supabaseRequest(`liquidity_route_plans?id=eq.${filterValue(options.routePlanId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "partially_opened" }),
+    });
+  }
+  const residualListing = shouldCreateResidualListing
+    ? await createResidualListing(listing, dealHaveAmount, dealWantAmount)
+    : null;
+  const residualLine = residualListing
+    ? `${formatMoney(residualListing.have_amount, residualListing.have_currency)} for ${formatMoney(residualListing.want_amount, residualListing.want_currency)}`
+    : "";
 
   await upsertSession(user, user.whatsapp_phone, "deal_room", "reserved", {
     deal_id: deal.id,
@@ -888,6 +1066,8 @@ async function openListingTrade(user, listing, options = {}) {
     paymentProfile: takerReceiveProfile,
     expectedProfile: makerReceiveProfile,
     firstInstruction: "When their payment is marked sent, check your bank or MoMo before sending your side.",
+    residualLine,
+    quoteCode: lockedQuote?.quote_code || "",
   });
 
   const takerNotice = tradeOpenedMessage({
@@ -899,6 +1079,7 @@ async function openListingTrade(user, listing, options = {}) {
     paymentProfile: makerReceiveProfile,
     expectedProfile: takerReceiveProfile,
     firstInstruction: "Name check: the account name should match the verified person you are trading with.",
+    quoteCode: lockedQuote?.quote_code || "",
   });
 
   if (maker?.whatsapp_phone) {
@@ -1104,6 +1285,8 @@ async function handleNegotiation(text, user, session) {
         force: true,
         want_amount: offer.offered_amount,
         have_amount: offer.receive_amount,
+        negotiableOfferId: offer.id,
+        quoteType: "negotiated",
         returnRole: "maker",
         takerIntro: "Your proposal was accepted, so I opened the trade room.",
         makerIntro: "You accepted a negotiable proposal, so I opened the trade room.",
@@ -1206,6 +1389,8 @@ async function handleNegotiation(text, user, session) {
         force: true,
         want_amount: offer.offered_amount,
         have_amount: offer.receive_amount,
+        negotiableOfferId: offer.id,
+        quoteType: "negotiated",
         takerIntro: "You accepted the counter proposal.",
         makerIntro: "The trader accepted your counter proposal.",
       });
@@ -1293,15 +1478,15 @@ async function handleCreateListing(text, user, session) {
     if (bareCurrency) {
       details.have_currency = bareCurrency;
       await upsertSession(user, user.whatsapp_phone, "create_listing", "want_currency", details);
-      return [
-        "What currency do you want in return?",
-        "",
-        currencyHelpLine(bareCurrency),
-      ].join("\n");
+      return currencyListReply({
+        mode: "want",
+        body: "What currency do you want in return?",
+        excludeCurrency: bareCurrency,
+      });
     }
 
     await upsertSession(user, user.whatsapp_phone, "create_listing", missing[0], details);
-    return explainMissingListing(missing, details);
+    return missingListingReply(missing, details);
   }
 
   if (hasDirectionalExchangeText(text) && !["confirm", "listing_type"].includes(step)) {
@@ -1310,28 +1495,41 @@ async function handleCreateListing(text, user, session) {
     if (!missing.length) return prepareListingPreview(user, details);
 
     await upsertSession(user, user.whatsapp_phone, "create_listing", missing[0], details);
-    return explainMissingListing(missing, details);
+    return missingListingReply(missing, details);
   }
 
   if (step === "have_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return ["Choose what currency you have.", currencyHelpLine()].join("\n\n");
+    if (!currency) return currencyListReply({ mode: "have", body: "Choose what currency you have." });
 
     context.have_currency = currency;
     await upsertSession(user, user.whatsapp_phone, "create_listing", "want_currency", context);
-    return [
-      "What currency do you want in return?",
-      "",
-      currencyHelpLine(currency),
-    ].join("\n");
+    return currencyListReply({
+      mode: "want",
+      body: "What currency do you want in return?",
+      excludeCurrency: currency,
+    });
   }
 
   if (step === "want_currency") {
     const currency = normalizeCurrency(text);
-    if (!currency) return ["Choose what currency you want in return.", currencyHelpLine(context.have_currency)].join("\n\n");
+    if (!currency) {
+      return currencyListReply({
+        mode: "want",
+        body: "Choose what currency you want in return.",
+        excludeCurrency: context.have_currency || null,
+      });
+    }
     if (currency === context.have_currency) return "Choose a different currency from the one you have.";
 
     context.want_currency = currency;
+    if (context.have_amount && context.want_amount) {
+      return prepareListingPreview(user, context);
+    }
+    if (context.have_amount) {
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "want_amount", context);
+      return `How much ${context.want_currency} do you want for ${formatMoney(context.have_amount, context.have_currency)}?`;
+    }
     await upsertSession(user, user.whatsapp_phone, "create_listing", "have_amount", context);
     return `How much ${context.have_currency} do you have?`;
   }
@@ -1341,6 +1539,14 @@ async function handleCreateListing(text, user, session) {
     if (!amount) return "Enter a valid amount, like 50000.";
 
     context.have_amount = amount;
+    if (context.want_amount) {
+      context.listing_type = context.listing_type || "negotiable";
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "confirm", context);
+      return listingReviewReply(context, [
+        `You previously asked for ${formatMoney(context.want_amount, context.want_currency)}.`,
+        "I kept that amount below. Choose Edit if you want to change it.",
+      ].join("\n"));
+    }
     await upsertSession(user, user.whatsapp_phone, "create_listing", "want_amount", context);
     return `How much ${context.want_currency} do you want for ${formatMoney(amount, context.have_currency)}?`;
   }
@@ -1354,7 +1560,7 @@ async function handleCreateListing(text, user, session) {
     if (currency && currency !== context.have_currency) context.want_currency = currency;
     context.listing_type = context.listing_type || "negotiable";
     await upsertSession(user, user.whatsapp_phone, "create_listing", "confirm", context);
-    return formatListingReview(context);
+    return listingReviewReply(context);
   }
 
   if (step === "listing_type") {
@@ -1369,7 +1575,7 @@ async function handleCreateListing(text, user, session) {
     context.listing_type = normalizedType;
     await upsertSession(user, user.whatsapp_phone, "create_listing", "confirm", context);
 
-    return formatListingReview(context);
+    return listingReviewReply(context);
   }
 
   if (step === "confirm") {
@@ -1380,12 +1586,16 @@ async function handleCreateListing(text, user, session) {
     }
 
     if (!isListingPublishIntent(command)) {
-      return [
+      return whatsappButtonsReply([
         title("Ready to publish?"),
         "",
         `Say ${action("publish it")}, ${action("list this")}, or ${action("go ahead")} to make it live.`,
         `Say ${action("edit")} to change it, or ${action("cancel")} to stop.`,
-      ].join("\n");
+      ].join("\n"), [
+        { id: "publish", title: "Publish" },
+        { id: "edit", title: "Edit" },
+        { id: "cancel", title: "Cancel" },
+      ]);
     }
 
     return publishListing(user, context);
@@ -1421,13 +1631,10 @@ async function handleCreateListing(text, user, session) {
 
     if (choice === "currencies") {
       await upsertSession(user, user.whatsapp_phone, "create_listing", "have_currency", context);
-      return [
-        title("Edit currencies"),
-        "",
-        "What currency do you have?",
-        "",
-        currencyHelpLine(),
-      ].join("\n");
+      return currencyListReply({
+        mode: "have",
+        body: [title("Edit currencies"), "What currency do you have?"].join("\n\n"),
+      });
     }
 
     if (choice === "terms") {

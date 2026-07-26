@@ -36,6 +36,17 @@ function optionalEnv(name, fallback = "") {
   return value;
 }
 
+function booleanEnv(name, fallback = false) {
+  const value = process.env[name];
+  if (value == null || value === "") return fallback;
+  return String(value).toLowerCase() === "true";
+}
+
+function positiveIntegerEnv(name, fallback) {
+  const value = Number(process.env[name] || fallback);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
 loadEnv(path.join(rootDir, ".env"));
 
 const config = {
@@ -49,11 +60,13 @@ const config = {
   whatsappAccessToken: optionalEnv("WHATSAPP_ACCESS_TOKEN"),
   whatsappGraphVersion: process.env.WHATSAPP_GRAPH_VERSION || "v20.0",
   whatsappPhoneNumberId: optionalEnv("WHATSAPP_PHONE_NUMBER_ID"),
+  typingIndicatorEnabled: booleanEnv("AKARA_TYPING_INDICATOR", true),
   akaraWhatsappNumber: optionalEnv("AKARA_WHATSAPP_NUMBER", "15556733907"),
   adminHost: optionalEnv("AKARA_ADMIN_HOST", "admin.tryakara.com"),
   akaraSecurityFlowId: optionalEnv("AKARA_SECURITY_FLOW_ID"),
   akaraVerificationFlowId: optionalEnv("AKARA_VERIFICATION_FLOW_ID"),
   publicUrl: optionalEnv("AKARA_PUBLIC_URL"),
+  shareUrl: optionalEnv("AKARA_SHARE_URL", "https://tryakara.com"),
   openaiApiKey: optionalEnv("OPENAI_API_KEY"),
   openaiModel: optionalEnv("OPENAI_MODEL", "gpt-5-nano"),
   // "low" measured 29/29 on the live interpreter suite at ~3.5s avg; "medium"
@@ -62,6 +75,19 @@ const config = {
   coinProfileApiUrl: optionalEnv("COIN_PROFILE_API_URL"),
   coinProfileApiKey: optionalEnv("COIN_PROFILE_API_KEY"),
   coinProfileUsername: optionalEnv("COIN_PROFILE_USERNAME"),
+  stellarIntegrityEnabled: booleanEnv("AKARA_STELLAR_INTEGRITY_ENABLED", false),
+  stellarNetwork: optionalEnv("AKARA_STELLAR_NETWORK", "testnet").toLowerCase(),
+  stellarMainnetAcknowledged: booleanEnv("AKARA_STELLAR_MAINNET_ACK", false),
+  stellarHorizonUrl: optionalEnv("AKARA_STELLAR_HORIZON_URL"),
+  stellarSecretKey: optionalEnv("AKARA_STELLAR_SECRET_KEY"),
+  stellarPublicKey: optionalEnv("AKARA_STELLAR_PUBLIC_KEY"),
+  stellarMaxFeeStroops: positiveIntegerEnv("AKARA_STELLAR_MAX_FEE_STROOPS", 10000),
+  stellarBatchSize: Math.min(256, positiveIntegerEnv("AKARA_STELLAR_BATCH_SIZE", 64)),
+  stellarAnchorIntervalMs: Math.max(
+    30000,
+    positiveIntegerEnv("AKARA_STELLAR_ANCHOR_INTERVAL_MS", 60000)
+  ),
+  integrityHmacSecret: optionalEnv("AKARA_INTEGRITY_HMAC_SECRET"),
 };
 
 let runtimePublicUrl = "";
@@ -74,6 +100,10 @@ function getPublicUrl() {
   return config.publicUrl || runtimePublicUrl;
 }
 
+function getShareUrl() {
+  return config.shareUrl || getPublicUrl();
+}
+
 module.exports = {
   rootDir,
   config,
@@ -81,4 +111,5 @@ module.exports = {
   optionalEnv,
   setRuntimePublicUrl,
   getPublicUrl,
+  getShareUrl,
 };

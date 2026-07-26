@@ -28,8 +28,51 @@ async function clearSession(user, whatsappPhone) {
   return upsertSession(user, whatsappPhone, null, null, {});
 }
 
+function retryableIncoming(incoming = {}) {
+  return {
+    text: String(incoming.text || ""),
+    type: incoming.type || "text",
+    media: incoming.media || null,
+    quotedText: incoming.quotedText || "",
+  };
+}
+
+async function rememberFailedMessage(user, whatsappPhone, incoming = {}) {
+  const session = await getSession(whatsappPhone);
+  const context = session?.context_json || {};
+  return upsertSession(
+    user,
+    whatsappPhone,
+    session?.current_flow || null,
+    session?.current_step || null,
+    {
+      ...context,
+      pending_retry: {
+        incoming: retryableIncoming(incoming),
+        failed_at: new Date().toISOString(),
+      },
+    }
+  );
+}
+
+async function clearFailedMessage(user, whatsappPhone) {
+  const session = await getSession(whatsappPhone);
+  if (!session?.context_json?.pending_retry) return session;
+  const context = { ...session.context_json };
+  delete context.pending_retry;
+  return upsertSession(
+    user,
+    whatsappPhone,
+    session.current_flow || null,
+    session.current_step || null,
+    context
+  );
+}
+
 module.exports = {
   getSession,
   upsertSession,
   clearSession,
+  rememberFailedMessage,
+  clearFailedMessage,
 };

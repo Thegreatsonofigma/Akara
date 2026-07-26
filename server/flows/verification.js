@@ -8,8 +8,10 @@ const { getUserById, updateUser, latestVerificationRequest } = require("../db/us
 const { getSession, upsertSession, clearSession } = require("../db/sessions");
 const { mainMenu, mainMenuListPayload } = require("../messages/copy");
 const { sendVerificationSuccessCard } = require("../lib/listing-card");
+const { analyzeIdDocumentMedia, idOcrPatch } = require("../lib/id-document-ocr");
 const {
   paymentChoicePrompt,
+  paymentChoicePromptReply,
   paymentStepPrompt,
   formatPayoutReview,
   namesLikelyMatch,
@@ -116,6 +118,56 @@ function idTypePrompt(context = {}) {
   ].join("\n");
 }
 
+function idTypeListPayload(context = {}, body = "Choose the ID you want to use.") {
+  const options = idTypeOptions(context);
+  return {
+    body,
+    button: "Choose ID",
+    sections: [
+      {
+        title: "Accepted IDs",
+        rows: options.map((type) => ({
+          id: `verify_id_type:${type}`,
+          title: ID_TYPE_LABELS[type] || type,
+          description: type === "student_id" ? "Use your current school ID." : "Use this document type.",
+        })),
+      },
+    ],
+  };
+}
+
+function idTypePromptReply(context = {}, body = "Choose the ID you want to use.") {
+  return {
+    type: "whatsapp_list",
+    list: idTypeListPayload(context, body),
+    fallbackText: idTypePrompt(context),
+  };
+}
+
+function whatsappButtonsReply(body, buttons, fallbackText = body) {
+  return {
+    type: "whatsapp_buttons",
+    body,
+    buttons,
+    fallbackText,
+  };
+}
+
+function verificationReviewButtonsReply() {
+  return whatsappButtonsReply(verificationReviewPrompt(), [
+    { id: "submit", title: "Submit" },
+    { id: "edit", title: "Edit" },
+    { id: "cancel", title: "Cancel" },
+  ]);
+}
+
+function paymentMoreButtonsReply(body = PAYMENT_MORE_PROMPT) {
+  return whatsappButtonsReply(body, [
+    { id: "another", title: "Add another" },
+    { id: "submit", title: "Submit" },
+  ]);
+}
+
 function mediaPrompt(label) {
   return [
     `Please send ${label} now.`,
@@ -169,7 +221,9 @@ function isValidPlaceName(value) {
 }
 
 function normalizeIdType(input, context = {}) {
-  const value = compactText(input).replace(/[`'".!?]/g, "").trim().replace(/[\s-]+/g, "_");
+  const raw = String(input || "").trim();
+  const listMatch = raw.match(/^verify_id_type:(.+)$/i);
+  const value = compactText(listMatch?.[1] || raw).replace(/[`'".!?]/g, "").trim().replace(/[\s-]+/g, "_");
   const options = idTypeOptions(context);
   if (/^\d+$/.test(value)) return options[Number(value) - 1] || null;
 
@@ -341,17 +395,34 @@ async function storeVerificationMedia(user, requestId, incoming, slot) {
     const extension = mediaExtension(media.contentType, incoming.media.filename);
     const objectPath = `${user.id}/${requestId}/${slot}-${Date.now()}.${extension}`;
     await uploadSupabaseStorage("verification-documents", objectPath, media.buffer, media.contentType);
-    return { path: objectPath, failed: false };
+    return { path: objectPath, failed: false, media };
   } catch (error) {
     console.error(`[verification] media store failed for ${user.id}: ${error.message}`);
     return { path: null, failed: true };
   }
 }
 
+async function documentOcrPatchForStoredMedia(user, requestId, context = {}, stored = {}) {
+  const requestRows = await supabaseRequest(
+    `verification_requests?id=eq.${filterValue(requestId)}&select=id_type,id_country,extracted_name&limit=1`
+  );
+  const request = requestRows[0] || {};
+  const result = await analyzeIdDocumentMedia(
+    {
+      legalName: context.legal_name || user.legal_name || request.extracted_name || "",
+      idType: context.id_type || request.id_type || "",
+      idCountry: context.id_country || request.id_country || "",
+    },
+    stored.media
+  );
+  return idOcrPatch(result);
+}
+
 function idTypeLabel(idType) {
   const labels = {
     passport: "Passport",
     national_id: "National ID",
+    driver_license: "Driver's licence",
     residence_permit: "Residence permit",
     student_id: "Student ID",
   };
@@ -364,6 +435,31 @@ function presentOrMissing(value) {
 
 function mediaStatus(path) {
   return path ? "Received" : "Missing";
+}
+
+function documentOcrSummary(request = {}) {
+  if (!request.document_ocr_status) return "";
+  const reasons = Array.isArray(request.document_ocr_reasons)
+    ? request.document_ocr_reasons
+    : String(request.document_ocr_reasons || "")
+      .split(/[.;]\s*/)
+      .map((reason) => reason.trim())
+      .filter(Boolean);
+  const statusLabels = {
+    matched: "Matched",
+    mismatch: "Needs review",
+    pending_review: "Needs review",
+  };
+  const lines = [
+    labeled("ID text check", statusLabels[request.document_ocr_status] || request.document_ocr_status),
+  ];
+  if (request.document_ocr_name) lines.push(labeled("Name read", request.document_ocr_name));
+  if (request.document_ocr_country) lines.push(labeled("Country read", request.document_ocr_country));
+  if (request.document_ocr_type) lines.push(labeled("Type read", idTypeLabel(request.document_ocr_type)));
+  if (reasons.length) {
+    lines.push(labeled("Review note", reasons.slice(0, 2).join(" ")));
+  }
+  return lines.join("\n");
 }
 
 function payoutSummaryLine(payout, index) {
@@ -437,6 +533,7 @@ function formatVerificationReview(freshUser, request = {}, payouts = []) {
     title("Documents"),
     labeled("ID document", mediaStatus(request.document_front_path)),
     labeled("Selfie", mediaStatus(request.selfie_path)),
+    ...(documentOcrSummary(request) ? ["", title("ID text check"), documentOcrSummary(request)] : []),
     "",
     title("Payout details"),
     payoutLines,
@@ -454,7 +551,11 @@ async function showVerificationReview(user, requestId) {
     request_id: requestId,
     payment_count: payouts.length,
   });
-  return formatVerificationReview(freshUser, request, payouts);
+  return whatsappButtonsReply(formatVerificationReview(freshUser, request, payouts), [
+    { id: "submit", title: "Submit" },
+    { id: "edit", title: "Edit" },
+    { id: "cancel", title: "Cancel" },
+  ]);
 }
 
 function verificationReviewEditPrompt() {
@@ -560,6 +661,65 @@ async function startVerification(user) {
   ].join("\n");
 }
 
+function documentNameFromRequest(request = {}) {
+  return normalizeShortText(
+    request.document_ocr_name
+      || request.document_legal_name
+      || request.document_name
+      || request.extracted_document_name
+      || request.provider_document_name
+      || request.id_document_name
+      || request.extracted_name
+      || "",
+    120
+  );
+}
+
+function faceMatchPassed(request = {}) {
+  const value = request.face_match_status
+    ?? request.selfie_match_status
+    ?? request.provider_face_match_status
+    ?? request.face_match
+    ?? request.selfie_match
+    ?? request.liveness_status;
+  if (value === true) return true;
+  if (typeof value === "number") return value >= 0.72;
+  const text = compactText(value);
+  return ["passed", "pass", "matched", "match", "verified", "approved", "success", "successful"].includes(text);
+}
+
+function verificationMatchSignals(user = {}, request = {}, payouts = []) {
+  const legalName = normalizeShortText(user.legal_name || request.legal_name || request.submitted_legal_name || "", 120);
+  const documentName = documentNameFromRequest(request);
+  const ocrStatus = request.document_ocr_status || "";
+  const ocrMismatch = ocrStatus === "mismatch"
+    || request.document_name_match === false
+    || request.document_country_match === false
+    || request.document_type_match === false;
+  const ocrMatched = ocrStatus === "matched" && request.document_name_match === true;
+  const documentMatched = Boolean(legalName && documentName && ocrMatched && !ocrMismatch && namesLikelyMatch(legalName, documentName));
+  const payoutMatched = payouts.some((payout) => namesLikelyMatch(legalName, payout.account_name));
+  const faceMatched = faceMatchPassed(request);
+  const missing = [];
+  if (ocrMismatch) missing.push("ID document mismatch");
+  else if (!ocrMatched) missing.push("readable ID document text");
+  else if (!documentMatched) missing.push("document name match");
+  if (!faceMatched) missing.push("selfie face match");
+  if (!payoutMatched) missing.push("payout name match");
+  return {
+    legalName,
+    documentName,
+    ocrStatus,
+    ocrMatched,
+    ocrMismatch,
+    documentMatched,
+    faceMatched,
+    payoutMatched,
+    missing,
+    canAutoVerify: documentMatched && faceMatched && payoutMatched,
+  };
+}
+
 // A verification is only complete when the identity documents AND at least
 // one payout detail are all in. A missing piece routes the user back to that
 // step instead of submitting a hollow request.
@@ -590,18 +750,13 @@ async function finishVerificationSubmission(user, requestId) {
 
   if (!payouts.length) {
     await upsertSession(user, user.whatsapp_phone, "verification", "payment_currency", resumeContext);
-    return [
-      "Almost there — Akara needs at least one payout method before review.",
-      "",
-      paymentChoicePrompt(),
-    ].join("\n");
+    return paymentChoicePromptReply(null, "Almost there. Akara needs at least one payout method before review.");
   }
 
-  const kycName = freshUser.legal_name || request.extracted_name || "";
   const duplicateSignals = await duplicateVerificationSignals(freshUser, payouts);
   const hasDuplicateRisk = duplicateSignals.length > 0;
-  const isTierOneReady = !hasDuplicateRisk && (freshUser.verification_status === "verified_auto"
-    || payouts.some((payout) => namesLikelyMatch(kycName, payout.account_name)));
+  const matchSignals = verificationMatchSignals(freshUser, request, payouts);
+  const isTierOneReady = !hasDuplicateRisk && matchSignals.canAutoVerify;
 
   await supabaseRequest(`verification_requests?id=eq.${filterValue(requestId)}`, {
     method: "PATCH",
@@ -611,8 +766,8 @@ async function finishVerificationSubmission(user, requestId) {
       automated_reason: hasDuplicateRisk
         ? `Manual review needed because ${duplicateSignals.join("; ")}.`
         : isTierOneReady
-        ? "Tier 1 auto-check passed because ID document, selfie, legal name, and payout account name were collected and matched against available profile signals."
-        : "Identity documents and at least one payment profile collected, but one or more auto-check signals need admin review.",
+        ? "Tier 1 auto-check passed because the document name, selfie face match, and payout account name all match the submitted legal identity."
+        : `Manual review needed for ${matchSignals.missing.join(", ") || "identity signals"}.`,
     }),
   });
 
@@ -806,12 +961,10 @@ async function handleVerification(text, user, session, incoming = {}) {
           payment_count: Number(context.payment_count || 0),
           return_to_review: true,
         });
-        return [
+        return paymentChoicePromptReply(null, [
           title("Add corrected payout"),
           caption("Saved payout details stay locked until verification is submitted, but you can add a corrected payout now."),
-          "",
-          paymentChoicePrompt(),
-        ].join("\n");
+        ].join("\n"));
       }
 
       if (directStep) {
@@ -820,6 +973,9 @@ async function handleVerification(text, user, session, incoming = {}) {
           payment_count: Number(context.payment_count || 0),
           return_to_review: true,
         });
+        if (directStep === "review_edit_id_type") {
+          return idTypePromptReply(context, "Choose the corrected ID type.");
+        }
         return verificationReviewEditStepPrompt(directStep, context);
       }
 
@@ -842,7 +998,7 @@ async function handleVerification(text, user, session, incoming = {}) {
       ].join("\n");
     }
 
-    return verificationReviewPrompt();
+    return verificationReviewButtonsReply();
   }
 
   if (step === "review_edit_menu") {
@@ -857,12 +1013,10 @@ async function handleVerification(text, user, session, incoming = {}) {
         payment_count: Number(context.payment_count || 0),
         return_to_review: true,
       });
-      return [
+      return paymentChoicePromptReply(null, [
         title("Add corrected payout"),
         caption("Saved payout details stay locked until verification is submitted, but you can add a corrected payout now."),
-        "",
-        paymentChoicePrompt(),
-      ].join("\n");
+      ].join("\n"));
     }
 
     await upsertSession(user, user.whatsapp_phone, "verification", nextStep, {
@@ -870,6 +1024,9 @@ async function handleVerification(text, user, session, incoming = {}) {
       payment_count: Number(context.payment_count || 0),
       return_to_review: true,
     });
+    if (nextStep === "review_edit_id_type") {
+      return idTypePromptReply(context, "Choose the corrected ID type.");
+    }
     return verificationReviewEditStepPrompt(nextStep, context);
   }
 
@@ -890,21 +1047,19 @@ async function handleVerification(text, user, session, incoming = {}) {
 
       if (paymentCount > 0) {
         await upsertSession(user, user.whatsapp_phone, "verification", "payment_more", cleanContext);
-        return [
+        return paymentMoreButtonsReply([
           title("Payout not saved"),
           "",
           PAYMENT_MORE_PROMPT,
-        ].join("\n");
+        ].join("\n"));
       }
 
       await upsertSession(user, user.whatsapp_phone, "verification", "payment_currency", cleanContext);
-      return [
+      return paymentChoicePromptReply(null, [
         title("Payout not saved"),
         "",
         "Akara needs at least one payout method to finish verification.",
-        "",
-        paymentChoicePrompt(),
-      ].join("\n");
+      ].join("\n"));
     },
   });
   if (paymentStepReply) return paymentStepReply;
@@ -983,7 +1138,7 @@ async function handleVerification(text, user, session, incoming = {}) {
     context.city = city;
     await updateUser(user.id, { city });
     await upsertSession(user, user.whatsapp_phone, "verification", "id_type", context);
-    return idTypePrompt(context);
+    return idTypePromptReply(context);
   }
 
   if (step === "review_edit_city") {
@@ -997,11 +1152,7 @@ async function handleVerification(text, user, session, incoming = {}) {
   if (step === "id_type") {
     const idType = normalizeIdType(text, context);
     if (!idType) {
-      return [
-        "That ID type is not on the list.",
-        "",
-        idTypePrompt(context),
-      ].join("\n");
+      return idTypePromptReply(context, "That ID type is not on the list. Choose one from the options.");
     }
 
     context.id_type = idType;
@@ -1016,11 +1167,7 @@ async function handleVerification(text, user, session, incoming = {}) {
   if (step === "review_edit_id_type") {
     const idType = normalizeIdType(text, context);
     if (!idType) {
-      return [
-        "That ID type is not on the list.",
-        "",
-        idTypePrompt(context),
-      ].join("\n");
+      return idTypePromptReply(context, "That ID type is not on the list. Choose one from the options.");
     }
 
     await supabaseRequest(`verification_requests?id=eq.${filterValue(requestId)}`, {
@@ -1059,14 +1206,19 @@ async function handleVerification(text, user, session, incoming = {}) {
     if (stored.failed) return MEDIA_RETRY_PROMPT;
     if (!stored.path) return mediaPrompt(DOCUMENT_LABEL);
 
+    const ocrPatch = await documentOcrPatchForStoredMedia(user, requestId, context, stored);
     context.document_front_path = stored.path;
+    context.document_ocr_status = ocrPatch.document_ocr_status;
     await supabaseRequest(`verification_requests?id=eq.${filterValue(requestId)}`, {
       method: "PATCH",
-      body: JSON.stringify({ document_front_path: stored.path }),
+      body: JSON.stringify({
+        document_front_path: stored.path,
+        ...ocrPatch,
+      }),
     });
     await upsertSession(user, user.whatsapp_phone, "verification", "selfie", context);
     return [
-      "ID received.",
+      ocrPatch.document_ocr_status === "matched" ? "ID received. The document name check passed." : "ID received. Akara will review the document text before approval.",
       "",
       SELFIE_PROMPT,
     ].join("\n");
@@ -1077,9 +1229,13 @@ async function handleVerification(text, user, session, incoming = {}) {
     if (stored.failed) return MEDIA_RETRY_PROMPT;
     if (!stored.path) return mediaPrompt(DOCUMENT_LABEL);
 
+    const ocrPatch = await documentOcrPatchForStoredMedia(user, requestId, context, stored);
     await supabaseRequest(`verification_requests?id=eq.${filterValue(requestId)}`, {
       method: "PATCH",
-      body: JSON.stringify({ document_front_path: stored.path }),
+      body: JSON.stringify({
+        document_front_path: stored.path,
+        ...ocrPatch,
+      }),
     });
     return showVerificationReview(user, requestId);
   }
@@ -1102,11 +1258,11 @@ async function handleVerification(text, user, session, incoming = {}) {
       selfie_path: stored.path,
       payment_count: Number(context.payment_count || 0),
     });
-    return [
+    return paymentChoicePromptReply(null, [
       "Selfie received ✅",
       "",
-      paymentChoicePrompt(),
-    ].join("\n");
+      "Choose the payout account you want to add first.",
+    ].join("\n"));
   }
 
   if (step === "review_edit_selfie") {
@@ -1124,14 +1280,14 @@ async function handleVerification(text, user, session, incoming = {}) {
   if (step === "payment_more") {
     const command = compactText(text);
     if (/\b(edit|update|change|correct|fix)\b.*\b(payout|payment|bank|momo|mobile money|account|details?)\b/.test(command)) {
-      return [
+      return paymentMoreButtonsReply([
         title("Payout already saved"),
         "",
         "For verification, saved payout details stay locked until your profile is approved.",
         "",
         `${action("another")} to add a different payout method`,
         `${action("submit")} to finish verification`,
-      ].join("\n");
+      ].join("\n"));
     }
 
     const wantsAnother = /\b(add|another)\b/.test(command);
@@ -1145,10 +1301,10 @@ async function handleVerification(text, user, session, incoming = {}) {
         request_id: requestId,
         payment_count: Number(context.payment_count || 1),
       });
-      return paymentChoicePrompt();
+      return paymentChoicePromptReply();
     }
 
-    return PAYMENT_MORE_PROMPT;
+    return paymentMoreButtonsReply();
   }
 
   // Stale or unknown step: restart cleanly, reusing the open request.

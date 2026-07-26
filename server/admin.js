@@ -5,7 +5,13 @@ const { supabaseRequest, filterValue, createStorageSignedUrl } = require("./lib/
 const { sendWhatsAppText } = require("./lib/whatsapp");
 const { sendVerificationSuccessCard, sendUpgradeSuccessCard, sendExchangeCompletionCard } = require("./lib/listing-card");
 const { getUserById, updateUser } = require("./db/users");
-const { exchangeCompleteMessage, syncCompletedDealsCount } = require("./db/deals");
+const { exchangeCompleteMessage, getDealById, syncCompletedDealsCount } = require("./db/deals");
+const {
+  recordCompletedDealIntegrity,
+  recordDisputeOutcomeIntegrity,
+  verifyIntegrityRecord,
+} = require("./db/integrity");
+const { markLiquidityRouteDealCompleted } = require("./db/liquidity");
 const { mainMenu } = require("./messages/copy");
 const { title } = require("./lib/format");
 const { displayReference } = require("./db/listings");
@@ -23,6 +29,8 @@ const {
   updateComplianceTask,
   getComplianceDashboard,
 } = require("./db/compliance");
+const { listSupportRequests, updateSupportRequest } = require("./db/support");
+const { releaseDisputeHolds } = require("./db/dispute-holds");
 
 function requireAdmin(req) {
   const token = req.headers["x-akara-admin-token"];
@@ -61,13 +69,133 @@ function countBy(items, fieldOrGetter) {
   }, {});
 }
 
+const VERIFICATION_USER_SELECT =
+  "users!verification_requests_user_id_fkey(id,whatsapp_phone,display_name,legal_name,nationality,residence_country,city,verification_status)";
+
+const VERIFICATION_QUEUE_SELECT = [
+  "id",
+  "status",
+  "id_type",
+  "id_country",
+  "document_front_path",
+  "document_back_path",
+  "selfie_path",
+  "document_ocr_engine",
+  "document_ocr_status",
+  "document_ocr_confidence",
+  "document_ocr_name",
+  "document_ocr_country",
+  "document_ocr_type",
+  "document_name_match",
+  "document_country_match",
+  "document_type_match",
+  "document_ocr_reasons",
+  "automated_decision",
+  "automated_reason",
+  "admin_decision",
+  "admin_notes",
+  "created_at",
+  "reviewed_at",
+  VERIFICATION_USER_SELECT,
+].join(",");
+
+const VERIFICATION_QUEUE_LEGACY_SELECT = [
+  "id",
+  "status",
+  "id_type",
+  "id_country",
+  "document_front_path",
+  "document_back_path",
+  "selfie_path",
+  "automated_decision",
+  "automated_reason",
+  "admin_decision",
+  "admin_notes",
+  "created_at",
+  "reviewed_at",
+  VERIFICATION_USER_SELECT,
+].join(",");
+
+const VERIFICATION_SCHEMA_WARNING =
+  "Verification OCR columns are not in Supabase yet. Apply supabase/migrations/007_admin_ocr_review_fields.sql.";
+
+function getSupabaseErrorText(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+
+  const parts = [
+    error.message,
+    error.details,
+    error.hint,
+    error.code,
+    error.body,
+    error.responseText,
+  ];
+
+  if (error.error) {
+    parts.push(typeof error.error === "string" ? error.error : JSON.stringify(error.error));
+  }
+
+  try {
+    parts.push(JSON.stringify(error));
+  } catch (_) {
+    // Some error objects cannot be stringified.
+  }
+
+  return parts.filter(Boolean).join(" ");
+}
+
+function isMissingVerificationReviewColumn(error) {
+  const message = getSupabaseErrorText(error);
+  return /verification_requests/i.test(message)
+    && /(document_ocr_|document_name_match|document_country_match|document_type_match)/i.test(message)
+    && /(does not exist|column|42703)/i.test(message);
+}
+
+function withLegacyVerificationOcrFields(row) {
+  return {
+    document_ocr_engine: null,
+    document_ocr_status: "migration_required",
+    document_ocr_confidence: null,
+    document_ocr_name: null,
+    document_ocr_country: null,
+    document_ocr_type: null,
+    document_name_match: null,
+    document_country_match: null,
+    document_type_match: null,
+    document_ocr_reasons: [VERIFICATION_SCHEMA_WARNING],
+    ...row,
+  };
+}
+
+async function listVerificationQueue() {
+  try {
+    return {
+      data: await supabaseRequest(
+        `verification_requests?select=${VERIFICATION_QUEUE_SELECT}&order=created_at.desc&limit=100`
+      ),
+      schemaWarning: null,
+    };
+  } catch (error) {
+    if (!isMissingVerificationReviewColumn(error)) throw error;
+
+    const data = await supabaseRequest(
+      `verification_requests?select=${VERIFICATION_QUEUE_LEGACY_SELECT}&order=created_at.desc&limit=100`
+    );
+    return {
+      data: data.map(withLegacyVerificationOcrFields),
+      schemaWarning: VERIFICATION_SCHEMA_WARNING,
+    };
+  }
+}
+
 async function attachDealProofs(rows, dealIdGetter = (row) => row.id) {
   const dealIds = [...new Set(rows.map(dealIdGetter).filter(Boolean))];
   if (!dealIds.length) return rows;
 
   const proofs = await supabaseRequest(
     [
-      "deal_proofs?select=id,deal_id,user_id,proof_path,proof_type,created_at,",
+      "deal_proofs?select=id,deal_id,user_id,proof_path,proof_type,created_at,ocr_status,ocr_amount,ocr_currency,ocr_expected_amount,ocr_expected_currency,ocr_matched,ocr_mismatch_reason,",
       "users!deal_proofs_user_id_fkey(whatsapp_phone,display_name)",
       `&deal_id=in.(${dealIds.map(filterValue).join(",")})`,
       "&order=created_at.desc",
@@ -271,19 +399,25 @@ async function notifyDisputeExchangeCompleted(dispute) {
 }
 
 async function getAdminOverview() {
-  const [users, listings, deals, disputes, verifications, compliance] = await Promise.all([
-    supabaseRequest("users?select=id,verification_status,risk_status,created_at&limit=1000"),
+  const [users, listings, deals, disputes, verifications, supportRequests, compliance] = await Promise.all([
+    supabaseRequest("users?select=id,verification_status,risk_status,dispute_hold,created_at&limit=1000"),
     supabaseRequest("listings?select=id,status,have_currency,want_currency,have_amount,want_amount,created_at&limit=1000"),
     supabaseRequest("deals?select=id,status,have_currency,want_currency,have_amount,want_amount,created_at&limit=1000"),
     supabaseRequest("disputes?select=id,status,created_at&limit=1000"),
     supabaseRequest("verification_requests?select=id,status,created_at&limit=1000"),
+    listSupportRequests(100),
     getComplianceDashboard(),
   ]);
 
   const activeListings = listings.filter((item) => item.status === "active");
   const openDisputes = disputes.filter((item) => ["open", "waiting_for_user", "under_review"].includes(item.status));
   const pendingVerifications = verifications.filter((item) => ["pending_input", "pending_review"].includes(item.status));
-  const flaggedUsers = users.filter((item) => ["watch", "limited", "suspended"].includes(item.risk_status) || item.verification_status === "suspended");
+  const openSupportRequests = supportRequests.filter((item) => ["open", "in_review"].includes(item.status));
+  const flaggedUsers = users.filter((item) =>
+    item.dispute_hold
+    || ["watch", "limited", "suspended"].includes(item.risk_status)
+    || item.verification_status === "suspended"
+  );
   const completedDeals = deals.filter((item) => ["completed_pending_fee", "closed"].includes(item.status));
   const lastSevenDays = buildLastSevenDays();
 
@@ -295,6 +429,7 @@ async function getAdminOverview() {
       completedDeals: completedDeals.length,
       openDisputes: openDisputes.length,
       pendingVerifications: pendingVerifications.length,
+      openSupportRequests: openSupportRequests.length,
       flaggedUsers: flaggedUsers.length,
       privacyRequests: compliance.totals?.dataSubjectRequests || 0,
       openBreaches: compliance.totals?.openBreaches || 0,
@@ -303,6 +438,7 @@ async function getAdminOverview() {
       needsReview:
         openDisputes.length +
         pendingVerifications.length +
+        openSupportRequests.length +
         flaggedUsers.length +
         (compliance.totals?.overdueDataSubjectRequests || 0) +
         (compliance.totals?.openBreaches || 0) +
@@ -317,6 +453,7 @@ async function getAdminOverview() {
       reviewQueue: [
         ...pendingVerifications.slice(0, 5).map((item) => ({ ...item, queue_type: "verification" })),
         ...openDisputes.slice(0, 5).map((item) => ({ ...item, queue_type: "dispute" })),
+        ...openSupportRequests.slice(0, 5).map((item) => ({ ...item, queue_type: "support" })),
         ...flaggedUsers.slice(0, 5).map((item) => ({ ...item, queue_type: "flagged_user" })),
         ...(compliance.queues?.dataSubjectRequests || []).slice(0, 3).map((item) => ({ ...item, queue_type: "privacy_request" })),
         ...(compliance.queues?.breaches || []).slice(0, 3).map((item) => ({ ...item, queue_type: "breach" })),
@@ -344,6 +481,92 @@ function pickAllowed(body, allowed) {
   return Object.fromEntries(Object.entries(body || {}).filter(([key, value]) => allowed.includes(key) && value !== undefined));
 }
 
+function isMissingIntegritySchema(error) {
+  return /(integrity_records|stellar_anchor_batches|user_reputation_snapshots|market_rate_snapshots|locked_quotes|reputation_credentials|liquidity_route_plans)/i.test(String(error?.message || ""))
+    && /(does not exist|relation|42P01)/i.test(String(error?.message || ""));
+}
+
+async function getIntegrityDashboard() {
+  try {
+    const [records, batches, reputations, marketRates, lockedQuotes, credentials, routes] = await Promise.all([
+      supabaseRequest(
+        "integrity_records?select=id,event_key,record_type,entity_type,entity_id,subject_ref,commitment_hash,status,batch_id,leaf_index,anchored_at,created_at&order=created_at.desc&limit=200"
+      ),
+      supabaseRequest(
+        "stellar_anchor_batches?select=id,network,merkle_root,leaf_count,status,source_account,transaction_hash,ledger_sequence,explorer_url,attempt_count,next_retry_at,last_error,confirmed_at,created_at&order=created_at.desc&limit=100"
+      ),
+      supabaseRequest(
+        "user_reputation_snapshots?select=id,user_id,completed_trades,cancelled_trades,expired_trades,completion_rate,disputes_total,open_disputes,resolved_disputes,reputation_band,commitment_hash,integrity_record_id,created_at&order=created_at.desc&limit=200"
+      ),
+      supabaseRequest(
+        "market_rate_snapshots?select=id,corridor_key,send_currency,receive_currency,median_rate,weighted_rate,low_rate,high_rate,best_rate,active_listing_count,completed_trade_count,total_visible_liquidity,commitment_hash,integrity_record_id,expires_at,created_at&order=created_at.desc&limit=100"
+      ),
+      supabaseRequest(
+        "locked_quotes?select=id,quote_code,listing_id,deal_id,send_currency,receive_currency,send_amount,receive_amount,rate,quote_type,status,terms_commitment_hash,integrity_record_id,expires_at,created_at&order=created_at.desc&limit=100"
+      ),
+      supabaseRequest(
+        "reputation_credentials?select=id,credential_code,user_id,reputation_band,claims,status,commitment_hash,integrity_record_id,expires_at,created_at&order=created_at.desc&limit=100"
+      ),
+      supabaseRequest(
+        "liquidity_route_plans?select=id,route_code,requester_user_id,send_currency,receive_currency,planned_send_amount,planned_receive_amount,coverage_percent,leg_count,status,commitment_hash,integrity_record_id,expires_at,created_at&order=created_at.desc&limit=100"
+      ),
+    ]);
+    const batchesById = Object.fromEntries(batches.map((batch) => [batch.id, batch]));
+    const reputationByRecordId = Object.fromEntries(
+      reputations.map((snapshot) => [snapshot.integrity_record_id, snapshot])
+    );
+    return {
+      schemaReady: true,
+      enabled: config.stellarIntegrityEnabled,
+      network: config.stellarNetwork,
+      records: records.map((record) => ({
+        ...record,
+        batch: batchesById[record.batch_id] || null,
+        reputation: reputationByRecordId[record.id] || null,
+      })),
+      batches,
+      marketRates,
+      lockedQuotes,
+      credentials,
+      routes,
+      totals: {
+        records: records.length,
+        anchored: records.filter((record) => record.status === "anchored").length,
+        pending: records.filter((record) => ["pending", "batched"].includes(record.status)).length,
+        failedBatches: batches.filter((batch) => batch.status === "failed").length,
+        rateSnapshots: marketRates.length,
+        lockedQuotes: lockedQuotes.filter((quote) => ["locked", "converted_to_deal"].includes(quote.status)).length,
+        activeCredentials: credentials.filter((credential) => credential.status === "active").length,
+        routePlans: routes.length,
+      },
+    };
+  } catch (error) {
+    if (!isMissingIntegritySchema(error)) throw error;
+    return {
+      schemaReady: false,
+      enabled: config.stellarIntegrityEnabled,
+      network: config.stellarNetwork,
+      records: [],
+      batches: [],
+      marketRates: [],
+      lockedQuotes: [],
+      credentials: [],
+      routes: [],
+      totals: {
+        records: 0,
+        anchored: 0,
+        pending: 0,
+        failedBatches: 0,
+        rateSnapshots: 0,
+        lockedQuotes: 0,
+        activeCredentials: 0,
+        routePlans: 0,
+      },
+      warning: "Apply Supabase migrations 008 and 009 before enabling Stellar integrity.",
+    };
+  }
+}
+
 async function handleAdminApi(req, res, url) {
   if (!requireAdmin(req)) return forbiddenAdmin(res);
 
@@ -353,6 +576,22 @@ async function handleAdminApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/admin/api/compliance") {
     return jsonResponse(res, 200, { ok: true, data: await getComplianceDashboard() });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/integrity") {
+    return jsonResponse(res, 200, { ok: true, data: await getIntegrityDashboard() });
+  }
+
+  const integrityVerifyMatch = url.pathname.match(/^\/admin\/api\/integrity\/([^/]+)\/verify$/);
+  if (req.method === "POST" && integrityVerifyMatch) {
+    const verification = await verifyIntegrityRecord(integrityVerifyMatch[1], {
+      checkStellar: true,
+    });
+    return jsonResponse(res, verification.verified ? 200 : 409, {
+      ok: verification.verified,
+      data: verification,
+      error: verification.verified ? undefined : verification.reason,
+    });
   }
 
   if (req.method === "GET" && url.pathname === "/admin/api/compliance/dsr") {
@@ -474,18 +713,58 @@ async function handleAdminApi(req, res, url) {
     return jsonResponse(res, 200, { ok: true, data: await updateComplianceTask(complianceTaskMatch[1], patch) });
   }
 
+  if (req.method === "GET" && url.pathname === "/admin/api/support") {
+    return jsonResponse(res, 200, { ok: true, data: await listSupportRequests(100) });
+  }
+
+  const supportMatch = url.pathname.match(/^\/admin\/api\/support\/([^/]+)$/);
+  if (req.method === "PATCH" && supportMatch) {
+    const body = await readJsonBody(req);
+    if (body.status && !["open", "in_review", "resolved"].includes(body.status)) {
+      return jsonResponse(res, 400, { ok: false, error: "Invalid support status." });
+    }
+
+    const request = await updateSupportRequest(supportMatch[1], {
+      status: body.status,
+      admin_note: body.admin_note,
+    });
+    if (!request) {
+      return jsonResponse(res, 404, { ok: false, error: "Support request not found." });
+    }
+
+    const user = request.user_id ? await getUserById(request.user_id) : null;
+    if (user?.whatsapp_phone) {
+      const heading = request.status === "resolved"
+        ? "Support request resolved"
+        : "Support request updated";
+      const message = [
+        title(heading),
+        "",
+        request.reference ? `*Reference:* ${request.reference}` : "",
+        request.admin_note || (
+          request.status === "resolved"
+            ? "Akara support has completed its review."
+            : "Akara support is reviewing your request."
+        ),
+      ].filter(Boolean).join("\n");
+      await sendWhatsAppText(user.whatsapp_phone, message).catch((error) => {
+        console.error(`[admin] support update failed for ${user.whatsapp_phone}: ${error.message}`);
+      });
+    }
+
+    return jsonResponse(res, 200, { ok: true, data: request });
+  }
+
   if (req.method === "GET" && url.pathname === "/admin/api/users") {
     const users = await supabaseRequest(
-      "users?select=id,whatsapp_phone,display_name,legal_name,verification_status,verification_score,completed_deals_count,cancelled_deals_24h,total_cancelled_deals,dispute_count,risk_status,hold_until,created_at,payment_profiles(id,currency,method,account_name,bank_name,momo_network,created_at)&order=created_at.desc&limit=100"
+      "users?select=id,whatsapp_phone,display_name,legal_name,verification_status,verification_score,completed_deals_count,cancelled_deals_24h,total_cancelled_deals,dispute_count,risk_status,dispute_hold,hold_until,created_at,payment_profiles(id,currency,method,account_name,bank_name,momo_network,created_at)&order=created_at.desc&limit=100"
     );
     return jsonResponse(res, 200, { ok: true, data: users });
   }
 
   if (req.method === "GET" && url.pathname === "/admin/api/verifications") {
-    const verifications = await supabaseRequest(
-      "verification_requests?select=id,status,id_type,id_country,document_front_path,document_back_path,selfie_path,automated_decision,automated_reason,admin_decision,admin_notes,created_at,reviewed_at,users!verification_requests_user_id_fkey(id,whatsapp_phone,display_name,legal_name,nationality,residence_country,city,verification_status)&order=created_at.desc&limit=100"
-    );
-    return jsonResponse(res, 200, { ok: true, data: verifications });
+    const { data, schemaWarning } = await listVerificationQueue();
+    return jsonResponse(res, 200, { ok: true, data, schemaWarning });
   }
 
   if (req.method === "POST" && url.pathname === "/admin/api/storage-signed-url") {
@@ -622,6 +901,12 @@ async function handleAdminApi(req, res, url) {
     const allowedOutcomes = ["none", "keep_reviewing", "resume_trade", "close_refunded", "close_completed"];
     const outcome = allowedOutcomes.includes(body.deal_outcome) ? body.deal_outcome : "none";
     if (!allowed.includes(body.status)) return jsonResponse(res, 400, { ok: false, error: "Invalid dispute status." });
+    if (body.status === "resolved" && !["resume_trade", "close_refunded", "close_completed"].includes(outcome)) {
+      return jsonResponse(res, 400, {
+        ok: false,
+        error: "Choose whether the trade resumes, closes after a refund, or closes as completed.",
+      });
+    }
     const rows = await supabaseRequest(`disputes?id=eq.${filterValue(disputeStatusMatch[1])}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -634,7 +919,32 @@ async function handleAdminApi(req, res, url) {
     const dispute = await getDisputeWithDeal(disputeStatusMatch[1]);
     if (dispute) {
       await applyDisputeDealOutcome(dispute, outcome, body.status);
-      await notifyDisputeParticipants({ ...dispute, status: body.status, resolution: body.resolution || null }, outcome);
+      const updatedDispute = {
+        ...dispute,
+        status: body.status,
+        resolution: body.resolution || null,
+        resolved_at: ["resolved", "rejected"].includes(body.status)
+          ? new Date().toISOString()
+          : dispute.resolved_at,
+      };
+      if (["resolved", "rejected"].includes(body.status)) {
+        await releaseDisputeHolds(dispute.deals);
+        await recordDisputeOutcomeIntegrity(updatedDispute, outcome).catch((error) => {
+          console.error(`[stellar-integrity] dispute record failed for ${dispute.id}: ${error.message}`);
+        });
+      }
+      if (body.status === "resolved" && outcome === "close_completed") {
+        const completedDeal = await getDealById(dispute.deal_id);
+        await recordCompletedDealIntegrity(completedDeal, {
+          completionBasis: "admin_resolution",
+        }).catch((error) => {
+          console.error(`[stellar-integrity] admin completion record failed for ${dispute.deal_id}: ${error.message}`);
+        });
+        await markLiquidityRouteDealCompleted(completedDeal).catch((error) => {
+          console.error(`[liquidity-route] admin completion update failed for ${dispute.deal_id}: ${error.message}`);
+        });
+      }
+      await notifyDisputeParticipants(updatedDispute, outcome);
     }
 
     return jsonResponse(res, 200, { ok: true, data: rows[0] });

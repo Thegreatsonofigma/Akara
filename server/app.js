@@ -6,8 +6,9 @@ const {
   extractMessages,
   sendWhatsAppText,
   sendWhatsAppList,
+  sendWhatsAppButtons,
   sendWhatsAppFlow,
-  sendWhatsAppTyping,
+  startWhatsAppTyping,
   getOutboundTextByMessageId,
 } = require("./lib/whatsapp");
 const { handleReceiptRedirect } = require("./lib/receipts");
@@ -15,17 +16,19 @@ const { handleListingCardRoute } = require("./lib/listing-card");
 const { handleSecurityRoute, handleSecurityFlowResponse } = require("./lib/security");
 const { handleVerificationFlowResponse } = require("./flows/verification");
 const { findOrCreateUser, getUserById, isVerified } = require("./db/users");
-const { getSession } = require("./db/sessions");
+const { getSession, rememberFailedMessage } = require("./db/sessions");
 const { buildReply } = require("./router");
 const { handleAdminApi, adminFilePath } = require("./admin");
 const { supabaseRequest, filterValue } = require("./lib/supabase");
 const { mainMenuListPayload, mainMenu, greetingMenuBody } = require("./messages/copy");
 const { handleWebsiteRoute } = require("./website");
+const { anchorPendingRecords, integrityRecordingEnabled } = require("./db/integrity");
 
 const activeInboundMessageIds = new Set();
 const DEFAULT_IDLE_MENU_AFTER_MS = 5 * 60 * 1000;
 const DEFAULT_IDLE_MENU_SCAN_MS = 60 * 1000;
 let idleMenuTimer = null;
+let stellarIntegrityTimer = null;
 
 function isMainMenuReply(reply = "") {
   return /^\*(Find offers and trade with more confidence|Choose your next move|Hi .+, choose your next move)\*/i
@@ -44,7 +47,16 @@ function splitReplyWithMainMenu(reply = "") {
 }
 
 async function sendAkaraReply(to, reply) {
-  if (!reply) return null;
+  if (reply == null || reply === "") return null;
+
+  if (Array.isArray(reply)) {
+    let result = null;
+    for (const part of reply.filter((item) => item != null && item !== "")) {
+      result = await sendAkaraReply(to, part);
+    }
+    return result;
+  }
+
   if (typeof reply === "object" && reply.type === "whatsapp_list") {
     try {
       return await sendWhatsAppList(to, reply.list);
@@ -52,6 +64,17 @@ async function sendAkaraReply(to, reply) {
       console.error(`[webhook] WhatsApp list failed for ${to}: ${error.message}`);
       if (reply.fallbackText) return sendWhatsAppText(to, reply.fallbackText);
       if (reply.list?.body) return sendWhatsAppText(to, reply.list.body);
+      throw error;
+    }
+  }
+
+  if (typeof reply === "object" && reply.type === "whatsapp_buttons") {
+    try {
+      return await sendWhatsAppButtons(to, reply.buttonsPayload || reply);
+    } catch (error) {
+      console.error(`[webhook] WhatsApp buttons failed for ${to}: ${error.message}`);
+      if (reply.fallbackText) return sendWhatsAppText(to, reply.fallbackText);
+      if (reply.body) return sendWhatsAppText(to, reply.body);
       throw error;
     }
   }
@@ -64,6 +87,17 @@ async function sendAkaraReply(to, reply) {
       if (reply.fallbackText) return sendWhatsAppText(to, reply.fallbackText);
       throw error;
     }
+  }
+
+  if (typeof reply === "object") {
+    const fallback =
+      reply.fallbackText ||
+      reply.text ||
+      reply.body ||
+      reply.list?.body ||
+      reply.buttonsPayload?.body ||
+      JSON.stringify(reply);
+    return sendWhatsAppText(to, fallback);
   }
 
   const splitMenu = splitReplyWithMainMenu(reply);
@@ -186,6 +220,20 @@ function startIdleMenuScheduler() {
   idleMenuTimer.unref?.();
 }
 
+function startStellarIntegrityScheduler() {
+  if (stellarIntegrityTimer || !integrityRecordingEnabled()) return;
+  stellarIntegrityTimer = setInterval(() => {
+    anchorPendingRecords().catch((error) => {
+      console.error(`[stellar-integrity] scheduled anchor failed: ${error.message}`);
+    });
+  }, config.stellarAnchorIntervalMs);
+  stellarIntegrityTimer.unref?.();
+
+  anchorPendingRecords().catch((error) => {
+    console.error(`[stellar-integrity] startup anchor failed: ${error.message}`);
+  });
+}
+
 async function isInboundMessageProcessed(messageId) {
   if (!messageId) return false;
   const rows = await supabaseRequest(
@@ -230,6 +278,8 @@ async function handleWebhookPost(req, res) {
 
   let failedMessages = 0;
   for (const incoming of messages) {
+    let stopTyping = () => {};
+    let processingCompleted = false;
     try {
       console.log(`[webhook] incoming ${incoming.type} message from ${incoming.from}`);
 
@@ -245,9 +295,11 @@ async function handleWebhookPost(req, res) {
 
       if (incoming.messageId) activeInboundMessageIds.add(incoming.messageId);
 
-      if (process.env.AKARA_TYPING_INDICATOR === "true") {
-        sendWhatsAppTyping(incoming.messageId).catch((error) => {
-          console.error(`[webhook] typing indicator failed for ${incoming.from}: ${error.message}`);
+      if (config.typingIndicatorEnabled) {
+        stopTyping = startWhatsAppTyping(incoming.messageId, {
+          onError: (error) => {
+            console.error(`[webhook] typing indicator failed for ${incoming.from}: ${error.message}`);
+          },
         });
       }
 
@@ -261,6 +313,7 @@ async function handleWebhookPost(req, res) {
       const session = await getSession(incoming.from);
       const securityFlowReply = await handleSecurityFlowResponse(incoming, user);
       if (securityFlowReply !== undefined) {
+        processingCompleted = true;
         await sendAkaraReply(incoming.from, securityFlowReply);
         await markInboundMessageProcessed(incoming).catch((error) => {
           console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
@@ -270,6 +323,7 @@ async function handleWebhookPost(req, res) {
       }
       const verificationFlowReply = await handleVerificationFlowResponse(incoming, user);
       if (verificationFlowReply !== undefined) {
+        processingCompleted = true;
         await sendAkaraReply(incoming.from, verificationFlowReply);
         await markInboundMessageProcessed(incoming).catch((error) => {
           console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
@@ -278,6 +332,7 @@ async function handleWebhookPost(req, res) {
         continue;
       }
       const reply = await buildReply(incoming.text, user, session, incoming);
+      processingCompleted = true;
       // console.log({reply})
       await sendAkaraReply(incoming.from, reply);
       await markInboundMessageProcessed(incoming).catch((error) => {
@@ -290,14 +345,32 @@ async function handleWebhookPost(req, res) {
       console.error(error.stack || error);
 
       try {
-        await sendWhatsAppText(
-          incoming.from,
-          "Akara hit a temporary issue while handling that message. Please try again in a moment."
-        );
+        if (processingCompleted) {
+          await sendWhatsAppText(
+            incoming.from,
+            "Your action was recorded, but its confirmation could not be delivered. Reply status to check the latest record."
+          );
+        } else {
+          const user = await findOrCreateUser(incoming.from, incoming.displayName);
+          await rememberFailedMessage(user, incoming.from, incoming);
+          await sendAkaraReply(incoming.from, {
+            type: "whatsapp_buttons",
+            body: [
+              "That message did not finish processing.",
+              "",
+              "I saved where you stopped. Tap Try again and I will continue from the same step.",
+            ].join("\n"),
+            buttons: [
+              { id: "retry_last_message", title: "Try again" },
+            ],
+            fallbackText: "That message did not finish processing. Reply retry and I will continue from the same step.",
+          });
+        }
       } catch (sendError) {
         console.error(`[webhook] fallback reply failed for ${incoming.from}: ${sendError.message}`);
       }
     } finally {
+      stopTyping();
       if (incoming.messageId) activeInboundMessageIds.delete(incoming.messageId);
     }
   }
@@ -335,6 +408,11 @@ function requestHost(req) {
   return host.replace(/:\d+$/, "").toLowerCase();
 }
 
+function isLocalHost(req) {
+  const host = requestHost(req).replace(/^\[|\]$/g, "");
+  return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1";
+}
+
 function requestProtocol(req) {
   return headerValue(req.headers["x-forwarded-proto"]) || "https";
 }
@@ -361,6 +439,7 @@ const server = http.createServer(async (req, res) => {
     rememberPublicUrl(req);
     const url = new URL(req.url, `http://${req.headers.host}`);
     const onAdminHost = isAdminHost(req);
+    const onLocalHost = isLocalHost(req);
 
     if (req.method === "GET" && url.pathname === "/health") {
       return jsonResponse(res, 200, { ok: true, service: "akara-whatsapp-webhook" });
@@ -405,7 +484,7 @@ const server = http.createServer(async (req, res) => {
       return redirect(res, "/admin", 302);
     }
 
-    if (!onAdminHost && config.adminHost && url.pathname.startsWith("/admin")) {
+    if (!onAdminHost && !onLocalHost && config.adminHost && url.pathname.startsWith("/admin")) {
       return redirect(res, adminRedirectUrl(req, url));
     }
 
@@ -442,6 +521,7 @@ function startServer() {
     console.log(`Akara send mode: ${config.sendMode}`);
   });
   startIdleMenuScheduler();
+  startStellarIntegrityScheduler();
 }
 
 module.exports = {
