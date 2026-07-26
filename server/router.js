@@ -72,6 +72,7 @@ const {
 const {
   viewProfileReply,
   viewPayoutsReply,
+  accountOverviewQuestionReply,
   profileSettingsReply,
   requestBulkListingCancel,
   requestBulkPayoutDelete,
@@ -278,6 +279,13 @@ function isAccountMigrationAction(text) {
 function isExplicitMarketplaceBrowse(text) {
   const value = String(text || "").trim().toLowerCase();
   return /^(?:please\s+)?(?:show|see|view|browse|find|list)(?:\s+me)?\s+(?:all|available|live|current)\s+(?:(?:ngn|naira|rwf|rwandan francs?|xaf|cfa|kes|kenyan shillings?|ghs|ghanaian? cedis?)\s+)?(?:offers?|listings?|deals?)$/.test(value);
+}
+
+function isCapabilitiesQuestion(text) {
+  const value = String(text || "").trim().toLowerCase();
+  return /\bwhat can (?:i|you|akara) do(?:\s+(?:on|with)\s+akara)?\b/.test(value)
+    || /\bhow can akara help(?: me)?\b/.test(value)
+    || /\bwhat (?:are|is) (?:my|the) (?:options|things i can do)(?:\s+on akara)?\b/.test(value);
 }
 
 // Handles a numeric reply that quotes an earlier Akara message (menu, offer
@@ -550,6 +558,16 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return sendMenuList(user, mainMenu(user));
   }
 
+  if (isCapabilitiesQuestion(text)) {
+    await clearSession(user, user.whatsapp_phone);
+    return conversationalReply(
+      { ...interpreted, action: "question" },
+      text,
+      user,
+      null
+    );
+  }
+
   if ((interpretedAction === "get_support" && !bulkRequest.eligible) || isSupportCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return supportOptionsReply();
@@ -573,6 +591,12 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   if (isAccountMigrationQuestion(text)) {
     await clearSession(user, user.whatsapp_phone);
     return scopedAssistantReply(text, user);
+  }
+
+  const accountOverview = await accountOverviewQuestionReply(user, text);
+  if (accountOverview) {
+    await clearSession(user, user.whatsapp_phone);
+    return accountOverview;
   }
 
   if (interpretedAction === "view_trust_record" || isTrustRecordCommand(command)) {
@@ -1184,6 +1208,8 @@ function normalizeInteractiveCommand(command) {
     my_listings: "my listings",
     view_history: "history",
     view_profile: "profile",
+    view_payouts: "payouts",
+    main_menu: "menu",
     get_support: "get support",
     support_email: "email support",
     support_report: "report issue",

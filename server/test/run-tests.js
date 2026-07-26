@@ -572,6 +572,18 @@ async function run() {
     JSON.stringify(lastListPayload())
   );
 
+  reply = await send(ALICE, "What can I do on Akara?", {
+    interpret: { action: "question", answer: "You can use Akara for currency exchange." },
+  });
+  check("capabilities question gets a concise product answer", reply.includes("*What you can do on Akara*") && reply.includes("inside WhatsApp"), reply);
+  check(
+    "capabilities question embeds the native menu tray",
+    lastListPayload()?.sections?.[0]?.rows?.length === 6
+      && lastListPayload()?.sections?.[0]?.rows?.some((row) => row.id === "find_offers"),
+    JSON.stringify(lastListPayload())
+  );
+  check("capabilities answer does not repeat the static menu", !reply.includes("1. `make offer`"), reply);
+
   // ---------- inactivity menu nudge
   scenario("inactivity menu nudge");
   const IDLE = "250700000004";
@@ -683,13 +695,39 @@ async function run() {
   reply = await send(OVERVIEW_USER, "How many listings do I have live?", {
     interpret: { action: "question", answer: "Let me check that for you." },
   });
-  check("listing count question returns the account overview", reply.includes("*🟢 Live:* 4") && !reply.includes("Let me check"), reply);
+  check("listing count question returns the account overview", reply.includes("*🟢 Live listings:* 4") && !reply.includes("Let me check"), reply);
 
   reply = await send(OVERVIEW_USER, "How many payout details do I have set up on Akara?", {
     interpret: { action: "question", answer: "You have some payout accounts." },
   });
-  check("payout count question returns the real saved count", reply.includes("*Total saved:* 2"), reply);
-  check("payout overview includes the actual saved accounts", reply.includes("NGN bank account") && reply.includes("RWF mobile money"), reply);
+  check("payout count question returns the real saved count", reply.includes("*🏦 Saved payout details:* 2"), reply);
+  check("payout count question stays concise", !reply.includes("NGN bank account") && !reply.includes("RWF mobile money"), reply);
+
+  reply = await send(
+    OVERVIEW_USER,
+    "How many listings do I have opened and how many payout details do I have saved?",
+    { interpret: { action: "view_payouts", answer: "You have two payout details." } }
+  );
+  check(
+    "compound account question answers every requested clause",
+    reply.includes("*🟢 Live listings:* 4")
+      && reply.includes("*🏦 Saved payout details:* 2"),
+    reply
+  );
+  check(
+    "compound account answer offers both detailed views",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "my_listings,view_payouts,main_menu",
+    JSON.stringify(lastButtonPayload())
+  );
+
+  reply = await send(OVERVIEW_USER, "view_payouts");
+  check("compound overview payout button opens the saved payout records", reply.includes("*Bank & payout details*") && reply.includes("*Total saved:* 2"), reply);
+
+  reply = await send(OVERVIEW_USER, "How many closed listings do I have?", {
+    interpret: { action: "question", answer: "Let me look at your listings." },
+  });
+  check("status-specific count answers only the requested listing state", reply.includes("*⚫ Closed listings:* 3"), reply);
+  check("status-specific count avoids an unnecessary full listing dump", !reply.includes("*Total listings:*"), reply);
 
   for (const tableName of ["listings", "deals"]) {
     const rows = __table(tableName);

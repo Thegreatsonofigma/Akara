@@ -32,6 +32,18 @@ function explainAkaraReply() {
   ].join("\n");
 }
 
+function capabilitiesAssistantReply() {
+  return [
+    title("What you can do on Akara"),
+    "",
+    "Find available currency offers or publish your own rate.",
+    "",
+    "Open and track exchanges, manage payout details, share receipts, and get support, all inside WhatsApp.",
+    "",
+    caption("What would you like to do next?"),
+  ].join("\n");
+}
+
 function feeAssistantReply() {
   return [
     title("Service fee"),
@@ -357,7 +369,9 @@ async function scopedAssistantReply(text, user, options = {}) {
   if (/\b(payout|payment detail|bank detail|momo|mobile money|account detail|wallet)\b/.test(value)) return payoutAssistantReply();
   if (/\b(receipt|proof|screenshot|payment evidence)\b/.test(value)) return receiptAssistantReply();
   if (/\b(dispute|problem|issue|wrong|fake|not received|no alert)\b/.test(value)) return disputeAssistantReply();
-  if (/\b(what can you do|help|options|commands|menu)\b/.test(value)) return mainMenu();
+  if (/\b(what can (?:i|you|akara) do|how can akara help|what are my options|help|options|commands|menu)\b/.test(value)) {
+    return capabilitiesAssistantReply();
+  }
 
   let interpretedAction = options.interpretedAction || "unknown";
   if (isWellbeingQuestion(text)) interpretedAction = "wellbeing";
