@@ -523,9 +523,27 @@ async function run() {
   );
 
   await rememberFailedMessage(aliceRow, ALICE, { text: "my trust record", type: "text" });
+  await rememberFailedMessage(aliceRow, ALICE, { text: "retry_last_message", type: "text" });
+  check(
+    "a failed retry cannot replace the original saved request",
+    (await getSession(ALICE))?.context_json?.pending_retry?.incoming?.text === "my trust record",
+    JSON.stringify(await getSession(ALICE))
+  );
   reply = await send(ALICE, "retry_last_message");
   check("retry resumes the saved action from its original context", reply.includes("Trust Record") || reply.includes("trust record"), reply);
   check("successful retry clears the saved failure", !(await getSession(ALICE))?.context_json?.pending_retry, JSON.stringify(await getSession(ALICE)));
+
+  const staleRetrySession = await getSession(ALICE);
+  staleRetrySession.context_json = {
+    ...(staleRetrySession.context_json || {}),
+    pending_retry: {
+      incoming: { text: "retry_last_message", type: "text", media: null, quotedText: "" },
+      failed_at: new Date().toISOString(),
+    },
+  };
+  reply = await send(ALICE, "retry_last_message");
+  check("a stale self-referencing retry terminates safely", reply.includes("*Nothing waiting to retry*") && reply.includes("stale"), reply);
+  check("stale retry state is cleared", !(await getSession(ALICE))?.context_json?.pending_retry, JSON.stringify(await getSession(ALICE)));
 
   reply = await send(ALICE, "okay thanks");
   check("session closure is conversational", reply.includes("You are welcome, Test"), reply);

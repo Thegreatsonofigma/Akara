@@ -37,8 +37,15 @@ function retryableIncoming(incoming = {}) {
   };
 }
 
+function isRetryCommand(text) {
+  return /^(retry|try again|retry_last_message)$/i.test(String(text || "").trim());
+}
+
 async function rememberFailedMessage(user, whatsappPhone, incoming = {}) {
   const session = await getSession(whatsappPhone);
+  if (isRetryCommand(incoming.text)) {
+    return session;
+  }
   const context = session?.context_json || {};
   return upsertSession(
     user,

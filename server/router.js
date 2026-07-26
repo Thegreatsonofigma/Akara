@@ -1032,8 +1032,18 @@ function paymentProfileInterrupt(interpretedAction) {
 
 async function routeMessage(text, user, session, incoming = {}) {
   const command = normalizeInteractiveCommand(text.trim().toLowerCase());
+  const retryCommands = ["retry", "try again", "retry_last_message"];
 
-  if (["retry", "try again", "retry_last_message"].includes(command)) {
+  if (retryCommands.includes(command)) {
+    if (Number(incoming.retryDepth || 0) >= 1) {
+      await clearFailedMessage(user, user.whatsapp_phone);
+      return [
+        title("Nothing waiting to retry"),
+        "",
+        "That saved retry was stale. Send your request again and I will handle it as a new message.",
+      ].join("\n");
+    }
+
     const savedIncoming = session?.context_json?.pending_retry?.incoming;
     if (!savedIncoming) {
       return [
@@ -1043,11 +1053,32 @@ async function routeMessage(text, user, session, incoming = {}) {
       ].join("\n");
     }
 
+    const savedCommand = normalizeInteractiveCommand(
+      String(savedIncoming.text || "").trim().toLowerCase()
+    );
+    if (retryCommands.includes(savedCommand)) {
+      await clearFailedMessage(user, user.whatsapp_phone);
+      return [
+        title("Nothing waiting to retry"),
+        "",
+        "That saved retry was stale. Send your request again and I will handle it as a new message.",
+      ].join("\n");
+    }
+
+    const retryContext = { ...(session?.context_json || {}) };
+    delete retryContext.pending_retry;
+    const retrySession = session
+      ? { ...session, context_json: retryContext }
+      : session;
     const reply = await routeMessage(
       savedIncoming.text || "",
       user,
-      session,
-      { ...savedIncoming, from: user.whatsapp_phone }
+      retrySession,
+      {
+        ...savedIncoming,
+        from: user.whatsapp_phone,
+        retryDepth: Number(incoming.retryDepth || 0) + 1,
+      }
     );
     await clearFailedMessage(user, user.whatsapp_phone);
     return reply;
