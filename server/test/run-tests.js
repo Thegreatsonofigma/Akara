@@ -457,6 +457,15 @@ async function run() {
 
   reply = await send(ALICE, "my transactions");
   check("history synonym works", reply.includes("No transaction history yet"), reply);
+  check(
+    "empty history offers one-tap marketplace browsing",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "find offers",
+    JSON.stringify(lastButtonPayload())
+  );
+
+  reply = await send(ALICE, "find offers");
+  check("empty history button opens all offers", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
+  await send(ALICE, "cancel");
 
   reply = await send(ALICE, "1");
   check("typed menu 1 opens make offer", reply.includes("Tell me what currency you have"), reply);
@@ -645,13 +654,28 @@ async function run() {
   reply = await send(ALICE, "hi, I want to convert 16,728 naira for 18,500 RWF. Is there any available offer that is within around this rate?", {
     interpret: { action: "find_offer", have_currency: "NGN", have_amount: 16728, want_currency: "RWF", want_amount: 18500 },
   });
-  check("rate-shaped request offers to list when no offer fits", reply.includes("*No current offer*"), reply);
+  check("rate-shaped request offers to list when no offer fits", reply.includes("*No matching offer yet*"), reply);
   check("no-match offer keeps extracted send amount", reply.includes("16,728 NGN"), reply);
   check("no-match offer keeps extracted receive amount", reply.includes("18,500 RWF"), reply);
+  check("no-match copy addresses people inclusively", reply.includes("people looking for this exchange"), reply);
+  check("no-match copy does not call users traders", !reply.toLowerCase().includes("trader"), reply);
+  check(
+    "no-match decision uses native reply buttons",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "yes,search again,no thanks",
+    JSON.stringify(lastButtonPayload())
+  );
   check("no-match offer waits for confirmation", (await sessionFlow(ALICE)) === "find_offer");
 
-  reply = await send(ALICE, "yes", { interpret: { action: "flow_reply" } });
-  check("yes after no-match opens prefilled review", reply.includes("*Review listing*"), reply);
+  reply = await send(ALICE, "please make this one live", {
+    interpret: {
+      action: "create_listing",
+      have_currency: "NGN",
+      have_amount: 16728,
+      want_currency: "RWF",
+      want_amount: 18500,
+    },
+  });
+  check("contextual approval after no-match opens prefilled review", reply.includes("*Review listing*"), reply);
   check("prefilled review keeps send amount", reply.includes("16,728 NGN"), reply);
   check("prefilled review keeps receive amount", reply.includes("18,500 RWF"), reply);
 
@@ -1116,7 +1140,7 @@ async function run() {
     interpret: { action: "find_offer", have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 54000 },
   });
   check("demand question searches instead of listing", !reply.includes("*Review listing*"), reply);
-  check("no-match search offers to list", reply.includes("*No current offer*"), reply);
+  check("no-match search offers to list", reply.includes("*No matching offer yet*"), reply);
   check("offer prompt carries both sides", reply.includes("50,000 NGN") && reply.includes("54,000 RWF"), reply);
   check("offer prompt awaits confirmation", (await sessionFlow(ALICE)) === "find_offer");
 
@@ -1132,7 +1156,7 @@ async function run() {
   reply = await send(ALICE, "who needs naira? 50k for 54k rwf?", {
     interpret: { action: "create_listing", have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 54000 },
   });
-  check("create_listing misfire still searches first", reply.includes("*No current offer*") && !reply.includes("*Review listing*"), reply);
+  check("create_listing misfire still searches first", reply.includes("*No matching offer yet*") && !reply.includes("*Review listing*"), reply);
 
   reply = await send(ALICE, "no thanks", { interpret: { action: "flow_reply" } });
   check("decline closes the search", reply.includes("No problem"), reply);

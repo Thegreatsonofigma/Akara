@@ -80,11 +80,26 @@ async function getMyDealsReply(user) {
   );
 
   if (deals.length === 0) {
-    return [
+    const body = [
       title("No transaction history yet"),
       "",
-      `${action("find offers")} when you are ready.`,
+      caption("Your completed and active exchanges will appear here."),
+      "",
+      "Browse live offers whenever you are ready.",
     ].join("\n");
+
+    return {
+      type: "whatsapp_buttons",
+      body,
+      buttons: [
+        { id: "find offers", title: "Find offers" },
+      ],
+      fallbackText: [
+        body,
+        "",
+        `${action("find offers")} to browse the marketplace.`,
+      ].join("\n"),
+    };
   }
 
   return [

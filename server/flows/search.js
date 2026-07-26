@@ -29,6 +29,15 @@ const { prepareListingPreview, reserveListing } = require("./listing");
 
 const LISTING_SEARCH_SELECT = "listings?select=id,listing_code,owner_user_id,have_currency,want_currency,have_amount,want_amount,rate,listing_type,created_at,users!listings_owner_user_id_fkey(completed_deals_count,verification_status)";
 
+function whatsappButtonsReply(body, buttons, fallbackText = body) {
+  return {
+    type: "whatsapp_buttons",
+    body,
+    buttons,
+    fallbackText,
+  };
+}
+
 async function attachOwnerReputations(listings) {
   const reputations = await getLatestUserReputations(
     listings.map((listing) => listing.owner_user_id)
@@ -426,19 +435,31 @@ async function showOfferMatches(user, context) {
         ...context,
         suggested_listing: draft,
       });
-      return [
-        title("No current offer"),
-        caption("I checked the live marketplace for that exact exchange."),
+      const body = [
+        title("No matching offer yet"),
+        caption("I checked every live listing for this exchange."),
         "",
-        "No one is asking for it yet.",
+        "Nothing currently matches your request.",
         "",
-        title("List yours instead?"),
-        `I can prepare ${formatMoney(draft.have_amount, draft.have_currency)} for ${formatMoney(draft.want_amount, draft.want_currency)} so interested traders can find you.`,
-        "",
-        `${action("yes")} to open the listing`,
-        `${action("search again")} to try another pair`,
-        `${action("no thanks")} to leave it`,
+        title("List yours?"),
+        `I can prepare ${formatMoney(draft.have_amount, draft.have_currency)} for ${formatMoney(draft.want_amount, draft.want_currency)} so people looking for this exchange can find it.`,
       ].join("\n");
+
+      return whatsappButtonsReply(
+        body,
+        [
+          { id: "yes", title: "Create listing" },
+          { id: "search again", title: "Search again" },
+          { id: "no thanks", title: "No thanks" },
+        ],
+        [
+          body,
+          "",
+          `${action("yes")} to review the listing`,
+          `${action("search again")} to try another pair`,
+          `${action("no thanks")} to leave it`,
+        ].join("\n")
+      );
     }
 
     const partialDraft = {
@@ -651,12 +672,27 @@ async function handleFindOffer(text, user, session) {
       ].join("\n");
     }
 
-    return [
+    const body = [
       title("Choose next step"),
       "",
-      `${action("list it")} or ${action("publish this list")} to create your own listing`,
-      `${action("search again")} to try another search`,
+      "Would you like to create this listing or search again?",
     ].join("\n");
+
+    return whatsappButtonsReply(
+      body,
+      [
+        { id: "yes", title: "Create listing" },
+        { id: "search again", title: "Search again" },
+        { id: "no thanks", title: "No thanks" },
+      ],
+      [
+        body,
+        "",
+        `${action("yes")} to review the listing`,
+        `${action("search again")} to try another search`,
+        `${action("no thanks")} to leave it`,
+      ].join("\n")
+    );
   }
 
   if (step === "quick") {

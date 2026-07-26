@@ -597,6 +597,16 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return handleCreateListing(text, user, session);
   }
 
+  // A contextual approval such as "make this one live" can be classified as
+  // create_listing with amounts recovered from the transcript. Keep it in the
+  // existing no-match decision so it opens the prepared review instead of
+  // accidentally starting the same search again.
+  if (session?.current_flow === "find_offer"
+      && session.current_step === "suggest_listing"
+      && isListingPublishIntent(text)) {
+    return handleFindOffer(text, user, session);
+  }
+
   if (session?.current_flow === "find_offer" && hasFreshCompleteListing && freshDirectional) {
     if (isOnHold(user)) return accountOnHoldReply(user);
     await clearSession(user, user.whatsapp_phone);
