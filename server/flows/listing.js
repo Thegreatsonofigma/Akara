@@ -20,7 +20,7 @@ const {
 } = require("../nlp/intents");
 const { getUserById, updateUser, isVerified, isOnHold, tierLimitBlockForAmount, tierLimitBlockForListing } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
-const { getDefaultPaymentProfile, getPaymentProfiles, formatPaymentProfile, paymentDestinationTitle, paymentExpectationLine } = require("../db/payments");
+const { getDefaultPaymentProfile, getPaymentProfiles, formatPaymentProfile, paymentExpectationLine } = require("../db/payments");
 const { sendListingCard } = require("../lib/listing-card");
 const {
   displayReference,
@@ -34,7 +34,8 @@ const {
 } = require("../db/listings");
 const { mainMenu, feeIncludedText, listingShareCopy, explainMissingListing, currencyListReply } = require("../messages/copy");
 const { startPaymentProfileForCurrency } = require("./payment-profile");
-const { createLockedQuote, attachQuoteToDeal } = require("../db/quotes");
+const { createLockedQuote, attachQuoteToDeal, cancelLockedQuote } = require("../db/quotes");
+const { getBlockingOpenDealForUser } = require("../db/deals");
 const {
   buildClearingPlan,
   buildNegotiationPlan,
@@ -194,7 +195,52 @@ async function linkedAccountBlock(user, listing) {
 }
 
 function fundsDisclaimer() {
-  return "Akara records the exchange trail and keeps both sides aligned. Funds still move directly through bank or mobile money, so confirm the recipient details before sending.";
+  return "Akara locks the terms and records the exchange. Money moves directly between both accounts.";
+}
+
+function activeTradeBlockReply(deal) {
+  const body = [
+    title("Finish your open trade first"),
+    caption("Akara allows one open trade at a time so payments and payout details do not get mixed up."),
+    "",
+    labeled("Current trade", displayReference(deal.deal_code, "deal")),
+    labeled("Status", String(deal.status || "open").replace(/_/g, " ")),
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "trade_status", title: "View open trade" },
+  ], [
+    body,
+    "",
+    `${action("trade status")} to return to your open trade`,
+  ].join("\n"));
+}
+
+function peerHasOpenTradeReply() {
+  return [
+    title("This peer is completing another trade"),
+    caption("Akara keeps every person in one payment room at a time to prevent payment mix-ups."),
+    "",
+    "This listing remains live. I will check it again when the peer becomes available.",
+  ].join("\n");
+}
+
+async function tradeOpeningBlock(user, otherUserId) {
+  const yourOpenTrade = await getBlockingOpenDealForUser(user.id);
+  if (yourOpenTrade) {
+    await upsertSession(user, user.whatsapp_phone, "deal_room", "reserved", {
+      deal_id: yourOpenTrade.id,
+      deal_code: yourOpenTrade.deal_code,
+    });
+    return activeTradeBlockReply(yourOpenTrade);
+  }
+
+  const otherOpenTrade = await getBlockingOpenDealForUser(otherUserId);
+  if (otherOpenTrade) return peerHasOpenTradeReply();
+  return null;
+}
+
+function isSingleTradeConstraintError(error) {
+  return /AKARA_ACTIVE_TRADE_EXISTS/i.test(String(error?.message || ""));
 }
 
 async function holdListingForTierReview(user, context, tierBlock) {
@@ -291,6 +337,7 @@ async function deliverListingLive(user, listing, listingCode, message) {
 function tradeOpenedMessage({
   heading,
   intro,
+  valueHighlight,
   dealCode,
   youSend,
   youReceive,
@@ -298,25 +345,22 @@ function tradeOpenedMessage({
   expectedProfile,
   residualLine = "",
   firstInstruction,
-  quoteCode = "",
 }) {
   const facts = [
     labeled("You send", formatMoney(youSend.amount, youSend.currency)),
     labeled("You receive", formatMoney(youReceive.amount, youReceive.currency)),
-    labeled("Payment window", "15 minutes"),
-    quoteCode ? labeled("Terms locked", quoteCode) : "",
-    labeled("Service fee", feeIncludedText()),
+    `*Rate:* Locked · *Time:* 15 min · *Fee:* ${feeIncludedText()}`,
     residualLine ? labeled("Still listed", residualLine) : "",
   ].filter(Boolean).join("\n");
 
   const body = [
-    title(`${heading} ${dealCode}`),
+    title(`${heading} · ${dealCode}`),
+    valueHighlight ? `✨ ${title(valueHighlight)}` : "",
     intro ? caption(intro) : "",
     facts,
-    title("Send to"),
-    caption(paymentDestinationTitle(paymentProfile)),
+    title("Pay this account"),
     formatPaymentProfile(paymentProfile),
-    title("Expect in your account"),
+    title("Where yours will arrive"),
     caption(paymentExpectationLine(youReceive.amount, youReceive.currency, expectedProfile)),
     firstInstruction,
     fundsDisclaimer(),
@@ -1056,6 +1100,7 @@ async function openNegotiationListingIds() {
 
 async function findReciprocalPlan(user, listing, kind, options = {}) {
   if (isOnHold(user) || ["limited", "suspended"].includes(user.risk_status)) return null;
+  if (await getBlockingOpenDealForUser(user.id)) return null;
   const sourceRows = await supabaseRequest(
     `listings?id=eq.${filterValue(listing.id)}&status=eq.active&limit=1`
   );
@@ -1089,6 +1134,7 @@ async function findReciprocalPlan(user, listing, kind, options = {}) {
 
   for (const plan of plans) {
     if (await linkedAccountBlock(user, plan.candidate)) continue;
+    if (await getBlockingOpenDealForUser(plan.candidate.owner_user_id)) continue;
     const makerReceiveProfile = await getDefaultPaymentProfile(
       plan.candidate.owner_user_id,
       plan.candidate.want_currency
@@ -1446,6 +1492,12 @@ async function tryAutoMatchListing(user, listing, options = {}) {
   let matchResidual = null;
   let listingResidual = null;
 
+  const [sourceOpenTrade, reciprocalOpenTrade] = await Promise.all([
+    getBlockingOpenDealForUser(user.id),
+    getBlockingOpenDealForUser(match.owner_user_id),
+  ]);
+  if (sourceOpenTrade || reciprocalOpenTrade) return null;
+
   const dealCode = await generateReferenceCode("deal");
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
   const claimedMatch = await supabaseRequest(
@@ -1504,6 +1556,7 @@ async function tryAutoMatchListing(user, listing, options = {}) {
     await attachQuoteToDeal(lockedQuote, deal.id);
   } catch (error) {
     await Promise.allSettled([
+      cancelLockedQuote(lockedQuote),
       supabaseRequest(`listings?id=eq.${filterValue(match.id)}&status=eq.reserved`, {
         method: "PATCH",
         body: JSON.stringify({ status: "active" }),
@@ -1513,6 +1566,7 @@ async function tryAutoMatchListing(user, listing, options = {}) {
         body: JSON.stringify({ status: "active" }),
       }),
     ]);
+    if (isSingleTradeConstraintError(error)) return null;
     throw error;
   }
 
@@ -1563,17 +1617,17 @@ async function tryAutoMatchListing(user, listing, options = {}) {
 
     const makerNotice = tradeOpenedMessage({
       heading: "Akara Trade opened ✅",
-      intro: improvedForBoth
-        ? "Akara cleared this inside both rate limits, so you pay less than your listing allowed."
-        : "The currencies, available value and rates are compatible.",
+      intro: improvedForBoth ? "" : "A reciprocal offer matched your listing.",
+      valueHighlight: improvedForBoth
+        ? `Better rate: you keep ${formatMoney(plan.candidate_savings, match.have_currency)}`
+        : "",
       dealCode,
       youSend: { amount: dealHaveAmount, currency: match.have_currency },
       youReceive: { amount: dealWantAmount, currency: match.want_currency },
       paymentProfile: takerReceiveProfile,
       expectedProfile: makerReceiveProfile,
       residualLine: matchResidual ? `${formatMoney(matchResidual.have_amount, matchResidual.have_currency)} for ${formatMoney(matchResidual.want_amount, matchResidual.want_currency)}` : "",
-      firstInstruction: "Check your bank or MoMo before sending your side.",
-      quoteCode: lockedQuote?.quote_code || "",
+      firstInstruction: "Check your account before sending your side.",
     });
 
     sendTradeOpenedNotice(maker.whatsapp_phone, makerNotice).catch((error) => {
@@ -1583,17 +1637,17 @@ async function tryAutoMatchListing(user, listing, options = {}) {
 
   return tradeOpenedMessage({
     heading: "Akara Trade opened ✅",
-    intro: improvedForBoth
-      ? "Akara cleared this inside both rate limits, so you receive more than your minimum."
-      : "The currencies, available value and rates are compatible.",
+    intro: improvedForBoth ? "" : "A reciprocal offer matched your listing.",
+    valueHighlight: improvedForBoth
+      ? `Better rate: you get an extra ${formatMoney(plan.source_improvement, listing.want_currency)}`
+      : "",
     dealCode,
     youSend: { amount: dealWantAmount, currency: match.want_currency },
     youReceive: { amount: dealHaveAmount, currency: match.have_currency },
     paymentProfile: makerReceiveProfile,
     expectedProfile: takerReceiveProfile,
     residualLine: listingResidual ? `${formatMoney(listingResidual.have_amount, listingResidual.have_currency)} for ${formatMoney(listingResidual.want_amount, listingResidual.want_currency)}` : "",
-    firstInstruction: "Name check: the account name should match the verified person you are trading with.",
-    quoteCode: lockedQuote?.quote_code || "",
+    firstInstruction: "Confirm the account name before sending.",
   });
 }
 
@@ -1815,6 +1869,9 @@ async function openListingTrade(user, listing, options = {}) {
     return "Please verify first so your trade partner knows you are real. Use the Start verification button in Akara to continue.";
   }
 
+  const availabilityBlock = await tradeOpeningBlock(user, listing.owner_user_id);
+  if (availabilityBlock) return availabilityBlock;
+
   const dealHaveAmount = moneyNumber(options.have_amount || listing.have_amount);
   const dealWantAmount = moneyNumber(options.want_amount || listing.want_amount);
   const listingHaveAmount = moneyNumber(listing.have_amount);
@@ -1878,55 +1935,115 @@ async function openListingTrade(user, listing, options = {}) {
     );
   }
 
+  const claimedListing = await supabaseRequest(
+    `listings?id=eq.${filterValue(listing.id)}&status=eq.active`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ status: "reserved" }),
+    }
+  );
+  if (!claimedListing.length) {
+    return "That offer was just taken or changed. Choose another live offer.";
+  }
+
+  if (reciprocalSourceListing) {
+    const claimedSource = await supabaseRequest(
+      `listings?id=eq.${filterValue(reciprocalSourceListing.id)}&status=eq.active`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ status: "reserved" }),
+      }
+    );
+    if (!claimedSource.length) {
+      await supabaseRequest(`listings?id=eq.${filterValue(listing.id)}&status=eq.reserved`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "active" }),
+      });
+      return "Your reciprocal listing was just taken or changed. Review your listings before accepting these terms.";
+    }
+  }
+
   const dealCode = await generateReferenceCode("deal");
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
   const quoteType = options.quoteType
     || (options.negotiableOfferId ? "negotiated" : options.routePlanId ? "routed" : "posted");
-  const lockedQuote = await createLockedQuote({
-    listing,
-    makerUserId: listing.owner_user_id,
-    takerUserId: user.id,
-    sendAmount: dealWantAmount,
-    receiveAmount: dealHaveAmount,
-    quoteType,
-    negotiableOfferId: options.negotiableOfferId || null,
-    expiresAt,
-  });
-
-  const deals = await supabaseRequest("deals", {
-    method: "POST",
-    body: JSON.stringify({
-      deal_code: dealCode,
-      listing_id: listing.id,
-      maker_user_id: listing.owner_user_id,
-      taker_user_id: user.id,
-      have_currency: listing.have_currency,
-      want_currency: listing.want_currency,
-      have_amount: dealHaveAmount,
-      want_amount: dealWantAmount,
-      status: "reserved",
-      reservation_expires_at: expiresAt,
-      ...(lockedQuote?.id ? { locked_quote_id: lockedQuote.id } : {}),
-      ...(options.routePlanId ? {
-        route_plan_id: options.routePlanId,
-        route_leg_index: options.routeLegIndex || null,
-      } : {}),
-    }),
-  });
-
-  await supabaseRequest(`listings?id=eq.${filterValue(listing.id)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ status: "reserved" }),
-  });
-  if (reciprocalSourceListing) {
-    await supabaseRequest(`listings?id=eq.${filterValue(reciprocalSourceListing.id)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status: "reserved" }),
+  let lockedQuote = null;
+  let deal = null;
+  try {
+    lockedQuote = await createLockedQuote({
+      listing,
+      makerUserId: listing.owner_user_id,
+      takerUserId: user.id,
+      sendAmount: dealWantAmount,
+      receiveAmount: dealHaveAmount,
+      quoteType,
+      negotiableOfferId: options.negotiableOfferId || null,
+      expiresAt,
     });
-  }
 
-  const deal = deals[0];
-  await attachQuoteToDeal(lockedQuote, deal.id);
+    const deals = await supabaseRequest("deals", {
+      method: "POST",
+      body: JSON.stringify({
+        deal_code: dealCode,
+        listing_id: listing.id,
+        maker_user_id: listing.owner_user_id,
+        taker_user_id: user.id,
+        have_currency: listing.have_currency,
+        want_currency: listing.want_currency,
+        have_amount: dealHaveAmount,
+        want_amount: dealWantAmount,
+        status: "reserved",
+        reservation_expires_at: expiresAt,
+        ...(lockedQuote?.id ? { locked_quote_id: lockedQuote.id } : {}),
+        ...(options.routePlanId ? {
+          route_plan_id: options.routePlanId,
+          route_leg_index: options.routeLegIndex || null,
+        } : {}),
+      }),
+    });
+    deal = deals[0];
+    await attachQuoteToDeal(lockedQuote, deal.id);
+    if (options.negotiableOfferId) {
+      await supabaseRequest(
+        `negotiable_offers?id=eq.${filterValue(options.negotiableOfferId)}&status=in.(pending,countered)`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ status: "accepted" }),
+        }
+      );
+    }
+  } catch (error) {
+    await Promise.allSettled([
+      deal?.id
+        ? supabaseRequest(`deals?id=eq.${filterValue(deal.id)}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              status: "cancelled",
+              cancellation_reason: "Trade opening could not be completed safely.",
+            }),
+          })
+        : Promise.resolve(),
+      cancelLockedQuote(lockedQuote),
+      supabaseRequest(`listings?id=eq.${filterValue(listing.id)}&status=eq.reserved`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "active" }),
+      }),
+      reciprocalSourceListing
+        ? supabaseRequest(
+            `listings?id=eq.${filterValue(reciprocalSourceListing.id)}&status=eq.reserved`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({ status: "active" }),
+            }
+          )
+        : Promise.resolve(),
+    ]);
+    if (isSingleTradeConstraintError(error)) {
+      return await tradeOpeningBlock(user, listing.owner_user_id)
+        || "One of you already has an open trade. Finish it before opening another.";
+    }
+    throw error;
+  }
   if (options.routePlanId && options.routeLegIndex) {
     await supabaseRequest(
       [
@@ -1976,9 +2093,8 @@ async function openListingTrade(user, listing, options = {}) {
     youReceive: { amount: dealWantAmount, currency: listing.want_currency },
     paymentProfile: takerReceiveProfile,
     expectedProfile: makerReceiveProfile,
-    firstInstruction: "When their payment is marked sent, check your bank or MoMo before sending your side.",
+    firstInstruction: "Check your account before sending your side.",
     residualLine,
-    quoteCode: lockedQuote?.quote_code || "",
   });
 
   const takerNotice = tradeOpenedMessage({
@@ -1989,9 +2105,8 @@ async function openListingTrade(user, listing, options = {}) {
     youReceive: { amount: dealHaveAmount, currency: listing.have_currency },
     paymentProfile: makerReceiveProfile,
     expectedProfile: takerReceiveProfile,
-    firstInstruction: "Name check: the account name should match the verified person you are trading with.",
+    firstInstruction: "Confirm the account name before sending.",
     residualLine: reciprocalSourceListing ? reciprocalResidualLine : "",
-    quoteCode: lockedQuote?.quote_code || "",
   });
 
   if (maker?.whatsapp_phone) {
@@ -2017,6 +2132,8 @@ async function reserveListing(user, listing, options = {}) {
   if (!options.force && listing.listing_type === "negotiable") {
     if (!isVerified(user)) return "Please verify first so your trade partner knows you are real. Use the Start verification button in Akara to continue.";
     if (listing.owner_user_id === user.id) return "This is your own offer. Share the link with someone else to start an Akara Trade.";
+    const availabilityBlock = await tradeOpeningBlock(user, listing.owner_user_id);
+    if (availabilityBlock) return availabilityBlock;
     const linkedBlock = await linkedAccountBlock(user, listing);
     if (linkedBlock) return linkedBlock;
     await upsertSession(user, user.whatsapp_phone, "negotiation", "taker_review", {
@@ -2221,11 +2338,6 @@ async function handleNegotiation(text, user, session) {
     if (proposal?.error) return proposal.error;
 
     if (!proposal && /\b(accept|approve|agree|yes|deal|open)\b/.test(command)) {
-      await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: "accepted" }),
-      });
-      await clearSession(user, user.whatsapp_phone);
       return openListingTrade(taker, listing, {
         force: true,
         want_amount: offer.offered_amount,
@@ -2335,11 +2447,6 @@ async function handleNegotiation(text, user, session) {
     }
 
     if (!proposal && /\b(accept|approve|agree|yes|deal|open)\b/.test(command)) {
-      await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: "accepted" }),
-      });
-      await clearSession(user, user.whatsapp_phone);
       return reserveListing(user, listing, {
         force: true,
         want_amount: offer.offered_amount,
