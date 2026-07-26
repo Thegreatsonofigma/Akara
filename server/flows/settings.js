@@ -15,7 +15,12 @@ const {
 } = require("../nlp/intents");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { getPaymentProfiles, formatPaymentProfileCompact } = require("../db/payments");
-const { getUserListings, displayReference, listingShareUrl, listingStatusLabel } = require("../db/listings");
+const {
+  getUserListings,
+  displayReference,
+  listingShareUrl,
+  listingStatusDisplay,
+} = require("../db/listings");
 const { getCompletedTradeCount } = require("../db/deals");
 const { getLatestUserReputation } = require("../db/integrity");
 const { mainMenu, mainMenuListPayload } = require("../messages/copy");
@@ -514,7 +519,7 @@ async function listingManagementReply(listing, number) {
     "",
     labeled("Send", formatMoney(listing.have_amount, listing.have_currency)),
     labeled("Receive", formatMoney(listing.want_amount, listing.want_currency)),
-    labeled("Status", listingStatusLabel(listing.status)),
+    labeled("Status", listingStatusDisplay(listing.status)),
   ].join("\n");
 
   if (listing.status === "active") {
@@ -563,7 +568,7 @@ async function selectedListingReply(user, listing, number) {
     shareUrl,
     shareUrl
       ? caption("Share this link to open the listing in Akara.")
-      : caption(`Status: ${listingStatusLabel(listing.status)}`),
+      : caption(`Status: ${listingStatusDisplay(listing.status)}`),
   ].filter(Boolean).join("\n\n");
 
   try {

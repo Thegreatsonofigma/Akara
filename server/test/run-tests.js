@@ -666,12 +666,12 @@ async function run() {
   check(
     "listing overview reports real status counts",
     reply.includes("*Total listings:* 11")
-      && reply.includes("*Live:* 4")
-      && reply.includes("*Paused:* 2")
-      && reply.includes("*In trade:* 1")
-      && reply.includes("*Closed:* 3")
-      && reply.includes("*Completed listings:* 1")
-      && reply.includes("*Completed exchanges:* 1"),
+      && reply.includes("*🟢 Live:* 4")
+      && reply.includes("*⏸️ Paused:* 2")
+      && reply.includes("*🔒 In trade:* 1")
+      && reply.includes("*⚫ Closed:* 3")
+      && reply.includes("*✅ Completed listings:* 1")
+      && reply.includes("*✅ Completed exchanges:* 1"),
     reply
   );
   const overviewRows = (lastListPayload()?.sections || []).flatMap((section) => section.rows || []);
@@ -683,7 +683,7 @@ async function run() {
   reply = await send(OVERVIEW_USER, "How many listings do I have live?", {
     interpret: { action: "question", answer: "Let me check that for you." },
   });
-  check("listing count question returns the account overview", reply.includes("*Live:* 4") && !reply.includes("Let me check"), reply);
+  check("listing count question returns the account overview", reply.includes("*🟢 Live:* 4") && !reply.includes("Let me check"), reply);
 
   reply = await send(OVERVIEW_USER, "How many payout details do I have set up on Akara?", {
     interpret: { action: "question", answer: "You have some payout accounts." },
@@ -1562,10 +1562,10 @@ async function run() {
   check(
     "listing picker starts with a compact status overview",
     lastListPayload()?.body?.includes("*Total listings:*")
-      && lastListPayload()?.body?.includes("*Live:*")
-      && lastListPayload()?.body?.includes("*Paused:*")
-      && lastListPayload()?.body?.includes("*In trade:*")
-      && lastListPayload()?.body?.includes("*Closed:*"),
+      && lastListPayload()?.body?.includes("*🟢 Live:*")
+      && lastListPayload()?.body?.includes("*⏸️ Paused:*")
+      && lastListPayload()?.body?.includes("*🔒 In trade:*")
+      && lastListPayload()?.body?.includes("*⚫ Closed:*"),
     lastListPayload()?.body
   );
 

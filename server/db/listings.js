@@ -132,6 +132,23 @@ function listingStatusLabel(status) {
   }[status] || status;
 }
 
+function listingStatusCue(status) {
+  return {
+    active: "🟢",
+    reserved: "🔒",
+    paused: "⏸️",
+    completed: "✅",
+    cancelled: "⚫",
+    expired: "⌛",
+    flagged: "⚠️",
+    draft: "📝",
+  }[status] || "•";
+}
+
+function listingStatusDisplay(status) {
+  return `${listingStatusCue(status)} ${listingStatusLabel(status)}`;
+}
+
 async function getUserListings(userId, limit = 10, options = {}) {
   const statuses = Array.isArray(options.statuses)
     ? options.statuses.filter(Boolean)
@@ -184,6 +201,8 @@ module.exports = {
   listingWaOpenUrl,
   listingTypeLabel,
   listingStatusLabel,
+  listingStatusCue,
+  listingStatusDisplay,
   getUserListings,
   listingHasEnoughForDeal,
   createResidualListing,

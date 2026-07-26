@@ -27,6 +27,7 @@ const {
   generateReferenceCode,
   listingShareUrl,
   listingTypeLabel,
+  listingStatusDisplay,
   listingHasEnoughForDeal,
   createResidualListing,
 } = require("../db/listings");
@@ -390,7 +391,7 @@ function duplicateListingReply(listing) {
     "You already have this exact offer open on Akara.",
     "",
     labeled("Reference", displayReference(listing.listing_code, "listing")),
-    labeled("Status", listing.status === "active" ? "Live" : listing.status),
+    labeled("Status", listingStatusDisplay(listing.status)),
   ].join("\n");
   return whatsappButtonsReply(body, [
     { id: "my_listings", title: "My listings" },

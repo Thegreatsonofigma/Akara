@@ -1,26 +1,19 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { title, caption, action, labeled, formatMoney } = require("../lib/format");
-const { getUserListings, displayReference, listingStatusLabel } = require("../db/listings");
+const {
+  getUserListings,
+  displayReference,
+  listingStatusLabel,
+  listingStatusCue,
+} = require("../db/listings");
 const { userRoleInDeal, dealPartySummary, readableDealStatus, getCompletedTradeCount } = require("../db/deals");
 const { upsertSession } = require("../db/sessions");
 const { mainMenu, mainMenuListPayload } = require("../messages/copy");
 
-function listingStatusMarker(status) {
-  return {
-    active: "🟢",
-    paused: "🟡",
-    reserved: "🔒",
-    completed: "✅",
-    cancelled: "⚫",
-    expired: "⚫",
-    flagged: "🔴",
-  }[status] || "•";
-}
-
 function listingPickerRow(listing) {
   return {
     id: `manage_listing_${listing.menu_number}`,
-    title: `${listingStatusMarker(listing.status)} ${displayReference(listing.listing_code, "listing")}`.slice(0, 24),
+    title: `${listingStatusCue(listing.status)} ${displayReference(listing.listing_code, "listing")}`.slice(0, 24),
     description: [
       listing.status === "cancelled" ? "CLOSED" : listingStatusLabel(listing.status),
       `${formatMoney(listing.have_amount, listing.have_currency)} to ${formatMoney(listing.want_amount, listing.want_currency)}`,
@@ -123,12 +116,12 @@ async function getMyListingsReply(user, options = {}) {
     caption(`Showing ${offset + 1}-${offset + listings.length} of ${allListings.length}. Choose one to view or manage it.`),
     "",
     labeled("Total listings", String(allListings.length)),
-    labeled("Live", String(count("active"))),
-    labeled("Paused", String(count("paused"))),
-    labeled("In trade", String(count("reserved"))),
-    labeled("Closed", String(closedCount)),
-    labeled("Completed listings", String(count("completed"))),
-    labeled("Completed exchanges", String(completedTrades)),
+    labeled("🟢 Live", String(count("active"))),
+    labeled("⏸️ Paused", String(count("paused"))),
+    labeled("🔒 In trade", String(count("reserved"))),
+    labeled("⚫ Closed", String(closedCount)),
+    labeled("✅ Completed listings", String(count("completed"))),
+    labeled("✅ Completed exchanges", String(completedTrades)),
   ].join("\n");
 
   return listingPickerReply(listings, body, nextPage, remaining);
