@@ -1377,6 +1377,9 @@ async function run() {
   const CHIDI = "250700000003";
   const chidiRow = seedVerifiedUser(CHIDI, "Chidi Payout Okoro");
   seedPayout(chidiRow, "NGN");
+  const originalChidiPayout = __table("payment_profiles")
+    .find((row) => row.user_id === chidiRow.id && row.currency === "NGN");
+  const originalChidiAccountNumber = originalChidiPayout.account_number_encrypted;
 
   const resolveCalls = [];
   const realFetch = global.fetch;
@@ -1415,7 +1418,9 @@ async function run() {
       return respond({
         success: true,
         data: {
-          accountName: "OKORO CHIDI PAYOUT",
+          accountName: requestBody.accountNumber === "0000000999"
+            ? "MUSA IBRAHIM"
+            : "OKORO CHIDI PAYOUT",
           data: { name: requestBody.bankCode === "305" ? "Paycom" : "Guaranty Trust Bank", code: requestBody.bankCode },
         },
       });
@@ -1461,9 +1466,40 @@ async function run() {
     reply = await send(CHIDI, "bank");
     reply = await send(CHIDI, "opay");
     check("opay resolves against paycom's bank code", resolveCalls.length === 1 && resolveCalls[0]?.bankCode === "305", JSON.stringify(resolveCalls));
-    check("review bank line shows Opay, never Paycom", reply.includes("*Bank:* Opay") && !reply.includes("Paycom"), reply);
-    check("review name line shows the resolved holder", reply.includes("*Name:* OKORO CHIDI PAYOUT"), reply);
-    // check("review confirms the bank check", reply.includes("Account name confirmed by the bank"), reply);
+    check("resolved bank account gets a dedicated ownership check", reply.includes("*Bank account found*"), reply);
+    check("ownership check shows Opay, never Paycom", reply.includes("*Bank:* Opay") && !reply.includes("Paycom"), reply);
+    check("ownership check shows the bank-returned name", reply.includes("*Account name:* OKORO CHIDI PAYOUT"), reply);
+    check(
+      "ownership check uses native confirmation buttons",
+      lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "confirm_account_owner,wrong_account",
+      JSON.stringify(lastButtonPayload())
+    );
+
+    reply = await send(CHIDI, "wrong_account");
+    check("wrong-account action immediately asks for a corrected number", reply.includes("*Change account number*"), reply);
+
+    reply = await send(CHIDI, "0000000999");
+    check("mismatched bank name is blocked before payout review", reply.includes("*Account name does not match*"), reply);
+    check("mismatch message compares returned and verified names", reply.includes("MUSA IBRAHIM") && reply.includes("Chidi Payout Okoro"), reply);
+    check("mismatch cannot expose the save action", !reply.includes("Save payout"), reply);
+    check(
+      "mismatch provides correction buttons",
+      lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "edit_account_number,edit_account_bank,cancel",
+      JSON.stringify(lastButtonPayload())
+    );
+    check("mismatch does not change the saved payout", originalChidiPayout.account_number_encrypted === originalChidiAccountNumber, JSON.stringify(originalChidiPayout));
+
+    reply = await send(CHIDI, "save payout");
+    check("save cannot bypass a bank-name mismatch", reply.includes("*Account name does not match*"), reply);
+
+    reply = await send(CHIDI, "edit_account_number");
+    check("mismatch correction returns to account-number entry", reply.includes("*Change account number*"), reply);
+    reply = await send(CHIDI, originalChidiAccountNumber);
+    check("corrected account is revalidated", reply.includes("*Bank account found*") && reply.includes("OKORO CHIDI PAYOUT"), reply);
+
+    reply = await send(CHIDI, "confirm_account_owner");
+    check("ownership confirmation opens the final payout review", reply.includes("*Review payout detail*"), reply);
+    check("final review confirms the bank check", reply.includes("Account name confirmed by the bank"), reply);
 
     reply = await send(CHIDI, "save payout");
     check("resolved payout saves", reply.includes("Payout detail saved ✅"), reply);

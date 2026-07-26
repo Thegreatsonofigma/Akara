@@ -232,13 +232,13 @@ async function bankSelectionPromptReply(flow, user, context, requestedPage = 0) 
     banks = await listNigerianBanks();
   } catch (error) {
     console.error("CoinProfile bank list failed:", error.message);
-    await upsertSession(user, user.whatsapp_phone, flow, "payment_bank_name", context);
-    return paymentProfileStartPrompt("NGN");
+    await upsertSession(user, user.whatsapp_phone, flow, "payment_bank_lookup_error", context);
+    return bankLookupUnavailableReply();
   }
 
   if (!banks.length) {
-    await upsertSession(user, user.whatsapp_phone, flow, "payment_bank_name", context);
-    return paymentProfileStartPrompt("NGN");
+    await upsertSession(user, user.whatsapp_phone, flow, "payment_bank_lookup_error", context);
+    return bankLookupUnavailableReply();
   }
 
   const displayBanks = banks.map((bank) => ({
@@ -588,8 +588,97 @@ function namesLikelyMatch(kycName, payoutName) {
   return overlap >= required;
 }
 
+function verifiedBankNameMatch(verifiedName, bankName) {
+  const verifiedTokens = nameTokens(verifiedName).sort();
+  const bankTokens = nameTokens(bankName).sort();
+  if (!verifiedTokens.length || verifiedTokens.length !== bankTokens.length) return false;
+  return verifiedTokens.every((token, index) => token === bankTokens[index]);
+}
+
 function canResolveNgnAccounts(context = {}) {
   return context.payment_currency === "NGN" && isCoinProfileEnabled();
+}
+
+function clearResolvedBankAccount(context) {
+  context.payment_account_number = "";
+  context.payment_account_name = "";
+  context.payment_account_resolved = false;
+  context.payment_account_name_matched = false;
+  context.payment_account_owner_confirmed = false;
+  delete context.payment_verified_name;
+}
+
+async function restartBankAccountNumber(flow, user, context, intro = "Enter a different account number.") {
+  clearResolvedBankAccount(context);
+  await upsertSession(user, user.whatsapp_phone, flow, "payment_account_number", context);
+  return [
+    title("Change account number"),
+    "",
+    intro,
+    "",
+    bankAccountNumberPrompt(),
+  ].join("\n");
+}
+
+function resolvedBankOwnerReply(context) {
+  const body = [
+    title("Bank account found"),
+    caption("The bank returned these account details."),
+    "",
+    labeled("Bank", context.payment_bank_name),
+    labeled("Account number", context.payment_account_number),
+    labeled("Account name", context.payment_account_name),
+    "",
+    "Does this bank account belong to you?",
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "confirm_account_owner", title: "Yes, this is mine" },
+    { id: "wrong_account", title: "Wrong account" },
+  ], body);
+}
+
+function bankNameMismatchReply(context) {
+  const body = [
+    title("Account name does not match"),
+    "",
+    labeled("Bank returned", context.payment_account_name),
+    labeled("Verified name", context.payment_verified_name),
+    "",
+    "Akara can only save a bank account held in your verified legal name.",
+    "Change the account number or choose another bank to continue.",
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "edit_account_number", title: "Change number" },
+    { id: "edit_account_bank", title: "Change bank" },
+    { id: "cancel", title: "Cancel" },
+  ], body);
+}
+
+function bankVerificationUnavailableReply(context) {
+  const body = [
+    title("Bank check unavailable"),
+    "",
+    "I could not verify this account with the bank right now.",
+    "No payout detail was saved. Please retry or use another account.",
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "retry_account_check", title: "Retry check" },
+    { id: "edit_account_number", title: "Change number" },
+    { id: "cancel", title: "Cancel" },
+  ], body);
+}
+
+function bankLookupUnavailableReply() {
+  const body = [
+    title("Bank list unavailable"),
+    "",
+    "I could not load supported Nigerian banks right now.",
+    "No payout detail was saved. Please retry shortly.",
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "retry_bank_search", title: "Retry" },
+    { id: "cancel", title: "Cancel" },
+  ], body);
 }
 
 function bankPickPrompt(candidates = []) {
@@ -603,16 +692,16 @@ function bankPickPrompt(candidates = []) {
   ].join("\n");
 }
 
-// Matches the typed bank name against CoinProfile's NGN bank list so the
-// account number can be resolved later. Returns null when CoinProfile is
-// unreachable, so the caller can fall back to the manual flow.
+// Matches the typed bank name against CoinProfile's NGN bank list. Provider
+// failures pause the flow so an unverified bank name cannot be saved manually.
 async function handleBankNameWithResolution(flow, user, context, bankName) {
   let matches;
   try {
     matches = await findNigerianBanks(bankName);
   } catch (error) {
     console.error("CoinProfile bank lookup failed:", error.message);
-    return null;
+    await upsertSession(user, user.whatsapp_phone, flow, "payment_bank_lookup_error", context);
+    return bankLookupUnavailableReply();
   }
 
   if (!matches.length) {
@@ -653,8 +742,8 @@ async function proceedAfterBankChosen(flow, user, context) {
   ].join("\n");
 }
 
-// Looks up the account holder's name from the bank through CoinProfile, checks
-// it against the KYC name, and jumps straight to the save confirmation.
+// Resolves an NGN account number, enforces KYC-name ownership, and asks the user
+// to confirm that the bank-returned account belongs to them before final review.
 async function resolveAndConfirmAccount(flow, user, context) {
   let resolved = null;
   try {
@@ -677,26 +766,41 @@ async function resolveAndConfirmAccount(flow, user, context) {
       ].join("\n");
     }
 
-    // CoinProfile is down or rate limited — continue with the manual name step.
+    // A typed name is not sufficient evidence for a bank payout. Keep the
+    // account unsaved until the provider can return its registered name.
     context.payment_account_resolved = false;
-    await upsertSession(user, user.whatsapp_phone, flow, "payment_account_name", context);
-    return [
-      caption("I could not auto-check that account right now, so let's confirm the name manually."),
-      "",
-      accountNamePrompt(user, context),
-    ].join("\n");
+    context.payment_account_owner_confirmed = false;
+    await upsertSession(user, user.whatsapp_phone, flow, "payment_account_verification_error", context);
+    return bankVerificationUnavailableReply(context);
   }
 
   const accountName = normalizeShortText(resolved?.account_name || "", 120);
   if (!accountName) {
     context.payment_account_resolved = false;
-    await upsertSession(user, user.whatsapp_phone, flow, "payment_account_name", context);
-    return accountNamePrompt(user, context);
+    context.payment_account_owner_confirmed = false;
+    await upsertSession(user, user.whatsapp_phone, flow, "payment_account_verification_error", context);
+    return bankVerificationUnavailableReply(context);
   }
 
+  const freshUser = await getUserById(user.id);
+  const request = await latestVerificationRequest(user.id);
+  const verifiedName = normalizeShortText(
+    request?.extracted_name || freshUser?.legal_name || user.legal_name || "",
+    120
+  );
   context.payment_account_name = accountName;
   context.payment_account_resolved = true;
-  return promptPaymentProfileConfirmation(user, flow, context);
+  context.payment_verified_name = verifiedName;
+  context.payment_account_name_matched = verifiedBankNameMatch(verifiedName, accountName);
+  context.payment_account_owner_confirmed = false;
+
+  if (!context.payment_account_name_matched) {
+    await upsertSession(user, user.whatsapp_phone, flow, "payment_account_name_mismatch", context);
+    return bankNameMismatchReply(context);
+  }
+
+  await upsertSession(user, user.whatsapp_phone, flow, "payment_account_owner_confirm", context);
+  return resolvedBankOwnerReply(context);
 }
 
 async function assessPayoutNameTrust(user, payoutName, { notifyVerificationSuccess = true } = {}) {
@@ -828,6 +932,16 @@ async function savePaymentProfile(user, context, { notifyVerificationSuccess = t
 async function finishPaymentProfileSave(user, flow, context) {
   // Lazy requires: these flows also route back into payment profile setup, so
   // requiring them at the top would create circular imports.
+  if (paymentMethodForCurrency(context.payment_currency) === "bank"
+      && canResolveNgnAccounts(context)
+      && (
+        !context.payment_account_resolved
+        || !context.payment_account_name_matched
+        || !context.payment_account_owner_confirmed
+      )) {
+    return resolveAndConfirmAccount(flow, user, context);
+  }
+
   await savePaymentProfile(user, context, { notifyVerificationSuccess: flow !== "verification" });
 
   if (flow === "verification") {
@@ -890,6 +1004,15 @@ function paymentEditStep(text, context = {}) {
 }
 
 async function maybeHandlePaymentEdit(text, user, session, context) {
+  if ([
+    "payment_bank_lookup_error",
+    "payment_account_owner_confirm",
+    "payment_account_name_mismatch",
+    "payment_account_verification_error",
+  ].includes(session.current_step)) {
+    return null;
+  }
+
   const step = paymentEditStep(text, context);
   if (!step) return null;
 
@@ -907,6 +1030,66 @@ async function maybeHandlePaymentEdit(text, user, session, context) {
 // step. Returns a reply string, or null when the step is not a payment step.
 async function handlePaymentSteps(flow, text, user, session, context, { onDecline }) {
   const step = session.current_step;
+
+  if (step === "payment_bank_lookup_error") {
+    const command = compactText(text).replace(/_/g, " ");
+    if (/\b(retry bank search|retry|try again|load banks)\b/.test(command)) {
+      return bankSelectionPromptReply(flow, user, context, context.payment_bank_page || 0);
+    }
+    return bankLookupUnavailableReply();
+  }
+
+  if (step === "payment_account_owner_confirm") {
+    const command = compactText(text).replace(/_/g, " ");
+    if (/\b(confirm account owner|yes|mine|this is mine|correct|confirm)\b/.test(command)) {
+      if (!context.payment_account_resolved || !context.payment_account_name_matched) {
+        return resolveAndConfirmAccount(flow, user, context);
+      }
+      context.payment_account_owner_confirmed = true;
+      return promptPaymentProfileConfirmation(user, flow, context);
+    }
+
+    if (/\b(wrong account|not mine|not my account|change number|different number|incorrect)\b/.test(command)) {
+      return restartBankAccountNumber(
+        flow,
+        user,
+        context,
+        "Send the correct account number and I will verify its registered name again."
+      );
+    }
+
+    return resolvedBankOwnerReply(context);
+  }
+
+  if (step === "payment_account_name_mismatch") {
+    const command = compactText(text).replace(/_/g, " ");
+    if (/\b(edit account number|change number|different number|new number|try another|account number)\b/.test(command)) {
+      return restartBankAccountNumber(
+        flow,
+        user,
+        context,
+        "Send an account number registered in your verified legal name."
+      );
+    }
+    if (/\b(edit account bank|change bank|different bank|another bank)\b/.test(command)) {
+      clearResolvedBankAccount(context);
+      context.payment_bank_name = "";
+      context.payment_bank_code = "";
+      return bankSelectionPromptReply(flow, user, context);
+    }
+    return bankNameMismatchReply(context);
+  }
+
+  if (step === "payment_account_verification_error") {
+    const command = compactText(text).replace(/_/g, " ");
+    if (/\b(retry account check|retry|try again|check again)\b/.test(command)) {
+      return resolveAndConfirmAccount(flow, user, context);
+    }
+    if (/\b(edit account number|change number|different number|new number|account number)\b/.test(command)) {
+      return restartBankAccountNumber(flow, user, context);
+    }
+    return bankVerificationUnavailableReply(context);
+  }
 
   if (step === "payment_confirm") {
     const command = compactText(text);
