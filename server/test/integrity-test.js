@@ -239,7 +239,7 @@ async function run() {
     sendAmount: 50000,
     receiveAmount: 55000,
     quoteType: "negotiated",
-    expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
   });
   await attachQuoteToDeal(quote, deal.id);
   check(

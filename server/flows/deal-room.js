@@ -1,4 +1,5 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
+const { config } = require("../config");
 const { title, caption, action, labeled, fieldBlock, formatMoney, formatCooldown } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { parseCurrencyAmountPairs } = require("../nlp/currency");
@@ -888,7 +889,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
   }
 
   if (command === "upload receipt" || command === "retry_receipt") {
-    const receiptDueAt = context.receipt_due_at || new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    const receiptDueAt = context.receipt_due_at || new Date(Date.now() + config.tradePaymentWindowMs).toISOString();
     await upsertSession(user, user.whatsapp_phone, "deal_room", "awaiting_receipt", {
       ...context,
       deal_id: dealId,
@@ -953,7 +954,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
   }
 
   if (isSentIntent(command) && !incoming.media?.id) {
-    const receiptDueAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    const receiptDueAt = new Date(Date.now() + config.tradePaymentWindowMs).toISOString();
     const nextContext = {
       ...context,
       deal_id: dealId,

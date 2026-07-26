@@ -1,4 +1,5 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
+const { config } = require("../config");
 const { caption, labeled, fieldBlock, formatMoney, title } = require("../lib/format");
 const { displayReference } = require("./listings");
 const { getUserById } = require("./users");
@@ -135,10 +136,23 @@ function hasDealPaymentActivity(deal) {
 }
 
 function isDealWindowElapsed(deal) {
-  if (!deal?.reservation_expires_at) return false;
+  const expiresAt = dealReservationExpiresAt(deal);
+  if (!expiresAt) return false;
   if (["closed", "cancelled", "expired", "disputed"].includes(deal.status)) return false;
   if (hasDealPaymentActivity(deal)) return false;
-  return new Date(deal.reservation_expires_at).getTime() <= Date.now();
+  return expiresAt.getTime() <= Date.now();
+}
+
+function dealReservationExpiresAt(deal) {
+  if (!deal) return null;
+  const storedMs = new Date(deal.reservation_expires_at || 0).getTime();
+  const createdMs = new Date(deal.created_at || 0).getTime();
+  const configuredMs = createdMs > 0 ? createdMs + config.tradePaymentWindowMs : 0;
+  const effectiveMs = Math.max(
+    Number.isFinite(storedMs) ? storedMs : 0,
+    Number.isFinite(configuredMs) ? configuredMs : 0
+  );
+  return effectiveMs > 0 ? new Date(effectiveMs) : null;
 }
 
 async function expireDealIfElapsed(deal) {
@@ -267,6 +281,7 @@ module.exports = {
   syncCompletedDealsCount,
   userRoleInDeal,
   isCompletedDeal,
+  dealReservationExpiresAt,
   expireDealIfElapsed,
   dealPartySummary,
   dealSentField,

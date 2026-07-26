@@ -35,7 +35,7 @@ const {
 const { mainMenu, feeIncludedText, listingShareCopy, explainMissingListing, currencyListReply } = require("../messages/copy");
 const { startPaymentProfileForCurrency } = require("./payment-profile");
 const { createLockedQuote, attachQuoteToDeal, cancelLockedQuote } = require("../db/quotes");
-const { getBlockingOpenDealForUser } = require("../db/deals");
+const { getBlockingOpenDealForUser, dealReservationExpiresAt } = require("../db/deals");
 const {
   buildClearingPlan,
   buildNegotiationPlan,
@@ -350,7 +350,7 @@ function tradeOpenedMessage({
   const facts = [
     labeled("You send", formatMoney(youSend.amount, youSend.currency)),
     labeled("You receive", formatMoney(youReceive.amount, youReceive.currency)),
-    `*Rate:* Locked · *Time:* 15 min · *Fee:* ${feeIncludedText()}`,
+    `*Rate:* Locked · *Time:* ${Math.round(config.tradePaymentWindowMs / 60000)} min · *Fee:* ${feeIncludedText()}`,
     residualLine ? labeled("Still listed", residualLine) : "",
   ].filter(Boolean).join("\n");
 
@@ -1401,7 +1401,7 @@ function automaticDealReminderReply(deal, role, nowMs) {
   const youReceive = maker
     ? { amount: deal.want_amount, currency: deal.want_currency }
     : { amount: deal.have_amount, currency: deal.have_currency };
-  const remainingMs = Math.max(0, new Date(deal.reservation_expires_at || 0).getTime() - nowMs);
+  const remainingMs = Math.max(0, (dealReservationExpiresAt(deal)?.getTime() || 0) - nowMs);
   const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
   const body = [
     title("Your matched exchange is waiting"),
@@ -1484,7 +1484,7 @@ async function performPendingMatchReminderSweep(options = {}) {
 
     for (const deal of deals) {
       const createdAt = new Date(deal.created_at || 0).getTime();
-      const expiresAt = new Date(deal.reservation_expires_at || 0).getTime();
+      const expiresAt = dealReservationExpiresAt(deal)?.getTime() || 0;
       if (!createdAt || createdAt > cutoffMs || (expiresAt && expiresAt <= nowMs)) {
         result.skipped += 1;
         continue;
@@ -1777,7 +1777,7 @@ async function tryAutoMatchListing(user, listing, options = {}) {
   if (sourceOpenTrade || reciprocalOpenTrade) return null;
 
   const dealCode = await generateReferenceCode("deal");
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + config.tradePaymentWindowMs).toISOString();
   const claimedMatch = await supabaseRequest(
     `listings?id=eq.${filterValue(match.id)}&status=eq.active`,
     {
@@ -2255,7 +2255,7 @@ async function openListingTrade(user, listing, options = {}) {
   }
 
   const dealCode = await generateReferenceCode("deal");
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + config.tradePaymentWindowMs).toISOString();
   const quoteType = options.quoteType
     || (options.negotiableOfferId ? "negotiated" : options.routePlanId ? "routed" : "posted");
   let lockedQuote = null;

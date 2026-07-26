@@ -99,6 +99,10 @@ const config = {
     60000,
     positiveIntegerEnv("AKARA_MATCHING_RESPONSE_REMINDER_MS", 5 * 60 * 1000)
   ),
+  tradePaymentWindowMs: Math.max(
+    5 * 60 * 1000,
+    positiveIntegerEnv("AKARA_TRADE_PAYMENT_WINDOW_MS", 30 * 60 * 1000)
+  ),
   matchingPairCooldownMs: Math.max(
     60000,
     positiveIntegerEnv("AKARA_MATCHING_PAIR_COOLDOWN_MS", 30 * 60 * 1000)

@@ -111,6 +111,7 @@ const {
   runPendingMatchReminderSweep,
 } = require("../flows/listing");
 const { findOrCreateUser } = require("../db/users");
+const { dealReservationExpiresAt } = require("../db/deals");
 const { getSession, rememberFailedMessage } = require("../db/sessions");
 const intents = require("../nlp/intents");
 const { clearHistory } = require("../nlp/history");
@@ -1493,7 +1494,7 @@ async function run() {
     "trade opening keeps payment facts compact and inline",
     reply.includes("*You send:*")
       && reply.includes("*You receive:*")
-      && reply.includes("*Rate:* Locked · *Time:* 15 min · *Fee:* Free")
+      && reply.includes("*Rate:* Locked · *Time:* 30 min · *Fee:* Free")
       && reply.includes("*Pay this account*")
       && reply.includes("*Where yours will arrive*")
       && !reply.includes("_You send_"),
@@ -2758,6 +2759,16 @@ async function run() {
   );
 
   scenario("restart-safe automatic match reminders");
+  const legacyCreatedAt = Date.parse("2026-07-26T11:00:00.000Z");
+  const legacyEffectiveExpiry = dealReservationExpiresAt({
+    created_at: new Date(legacyCreatedAt).toISOString(),
+    reservation_expires_at: new Date(legacyCreatedAt + 15 * 60 * 1000).toISOString(),
+  });
+  check(
+    "existing 15-minute reservations inherit the new 30-minute window",
+    legacyEffectiveExpiry?.getTime() === legacyCreatedAt + 30 * 60 * 1000,
+    legacyEffectiveExpiry?.toISOString() || ""
+  );
   const reminderMaker = seedVerifiedUser("250700000093", "Reminder Maker");
   const reminderTaker = seedVerifiedUser("250700000094", "Reminder Taker");
   const reminderListing = seedListing(reminderMaker, {
@@ -2893,7 +2904,7 @@ run()
     }
     realLog("All offline tests passed ✅");
     // The deal room schedules real receipt-deadline timers; exit explicitly
-    // so a pending 15-minute setTimeout cannot keep the test process alive.
+    // so a pending payment-window setTimeout cannot keep the test process alive.
     process.exit(0);
   })
   .catch((error) => {

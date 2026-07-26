@@ -63,7 +63,7 @@ const legalPages = [
       ["Eligibility", "Users must be 18 or older. Akara supports individual users only at launch. Users outside Africa may use Akara only if they are verified and transacting within supported currency corridors."],
       ["Verification Requirement", "Users may browse basic information, but must be verified before creating listings, opening trades, adding payout accounts, or completing exchanges."],
       ["User Responsibilities", "Users must provide accurate information, use their own payout account, confirm payout details, upload true receipts, avoid bypassing Akara, and cooperate with safety reviews."],
-      ["Trade Rules", "A trade expires after 15 minutes. After payment is marked sent, the user cannot cancel and must raise a dispute if something is wrong."],
+      ["Trade Rules", "A trade expires after 30 minutes. After payment is marked sent, the user cannot cancel and must raise a dispute if something is wrong."],
       ["Fees", "Akara is free during the launch period. Fees may apply later and will be shown clearly before a user opens or completes a trade."],
       ["Safety Action", "Akara may restrict accounts, pause trades, suspend listings, require admin review, or ban users for confirmed misuse."],
     ],
@@ -149,7 +149,7 @@ const legalPages = [
     title: "Cancellation, Refund, and Reversal Policy",
     intro: "This policy explains how cancellations, refunds, and reversals work on Akara.",
     sections: [
-      ["Cancelling a Trade", "Cancellation may be possible before payment is sent, if both users agree, if a trade expires after 15 minutes, if it is abandoned, or if Akara pauses or closes it for safety."],
+      ["Cancelling a Trade", "Cancellation may be possible before payment is sent, if both users agree, if a trade expires after 30 minutes, if it is abandoned, or if Akara pauses or closes it for safety."],
       ["After Payment Is Marked Sent", "After payment is marked sent, the user cannot cancel and must raise a dispute."],
       ["Refunds", "Refunds are handled directly between users, banks, or mobile money providers."],
       ["Reversals", "Users should contact their bank or mobile money provider. Akara may help prepare evidence subject to privacy, legal, and safety checks."],
@@ -915,7 +915,7 @@ function trustPage() {
           <h2>Verified users, cleaner records, fewer blind swaps.</h2>
           <p>Akara does not hold funds. It keeps the exchange visible, timed, evidenced, and easier to review.</p>
           <div class="trust-metrics">
-            <span><b>15 min</b> trade window</span>
+            <span><b>30 min</b> trade window</span>
             <span><b>24 to 72h</b> dispute target</span>
             <span><b>0</b> custody of funds</span>
           </div>

@@ -1,4 +1,5 @@
 const { title, caption, action, applyInterpretedAnswer } = require("./lib/format");
+const { config } = require("./config");
 const { sendWhatsAppList, sendWhatsAppButtons } = require("./lib/whatsapp");
 const { normalizeCurrency, parsePaymentCurrency, parseCurrencyAmountPairs } = require("./nlp/currency");
 const {
@@ -1165,7 +1166,7 @@ async function routeMessage(text, user, session, incoming = {}) {
             deal_id: latestDeal.id,
             deal_code: latestDeal.deal_code,
             awaiting_receipt_user_id: user.id,
-            receipt_due_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+            receipt_due_at: new Date(Date.now() + config.tradePaymentWindowMs).toISOString(),
           }
         );
         return handleDealRoom(text, user, restoredSession, incoming);
