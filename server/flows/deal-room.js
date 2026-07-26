@@ -45,6 +45,7 @@ const { FEE_BILLING_THRESHOLD, feeLedgerNote, recordDealFees } = require("../db/
 const { recordCompletedDealIntegrity } = require("../db/integrity");
 const { markLiquidityRouteDealCompleted } = require("../db/liquidity");
 const { applyDisputeHolds, releaseDisputeHolds } = require("../db/dispute-holds");
+const { requeueCancelledAutoMatch } = require("./listing");
 
 const REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 const receiptDeadlineTimers = new Map();
@@ -604,15 +605,17 @@ async function handleDealRoom(text, user, session, incoming = {}) {
   }
 
   if (await expireDealIfElapsed(deal)) {
+    const requeued = await requeueCancelledAutoMatch(deal, null, "payment_window_elapsed");
     await clearSession(user, user.whatsapp_phone);
     return [
       title("Trade window elapsed"),
       "",
       "That reserved Akara Trade has expired because no payment activity was recorded within the window.",
+      requeued.length ? "The locked portions were restored, and eligible listings are being checked against the next compatible peers." : "",
       "",
       `${action("find offers")} to look again`,
       `${action("history")} to view your records`,
-    ].join("\n");
+    ].filter(Boolean).join("\n");
   }
 
   const role = userRoleInDeal(user, deal);
@@ -834,8 +837,11 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     });
 
     await clearSession(user, user.whatsapp_phone);
+    const requeued = await requeueCancelledAutoMatch(deal, user.id, "trade_cancelled_before_payment");
     if (holdUntil) return `Deal cancelled. Your account is paused until ${new Date(holdUntil).toLocaleString()} due to repeated cancellations.`;
-    return "Deal cancelled. Repeated cancellations may temporarily limit your account.";
+    return requeued.length
+      ? "Deal cancelled. The locked portions were restored, and eligible listings are being checked against the next compatible peers."
+      : "Deal cancelled. Repeated cancellations may temporarily limit your account.";
   }
 
   if (session.current_step === "awaiting_dispute_reason") {

@@ -22,6 +22,7 @@ process.env.AKARA_SECURITY_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_RECEIPT_OCR = "off";
 process.env.AKARA_ID_OCR = "off";
+process.env.AKARA_MATCHING_BATCH_WINDOW_MS = "0";
 process.env.AKARA_PUBLIC_URL = "https://akara-share.example";
 process.env.AKARA_SHARE_URL = "https://akara-share.example";
 
@@ -113,6 +114,11 @@ const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
 const { normalizeMobileMoneyNumber } = require("../lib/mobile-number");
 const { formatMessageLayout } = require("../lib/format");
 const { parseBulkListingDetails } = require("../nlp/exchange");
+const {
+  buildClearingPlan,
+  buildNegotiationPlan,
+  compareClearingPlans,
+} = require("../lib/matching-engine");
 const {
   handlePaymentProfile,
   mobileMoneyNumberPrompt,
@@ -306,6 +312,72 @@ async function run() {
   const ALICE = "250700000001";
   const BOB = "250700000002";
   const CHARLIE = "250700000003";
+
+  // ---------- smart matching math
+  scenario("smart matching math");
+  const fairSource = {
+    have_currency: "RWF",
+    want_currency: "KES",
+    have_amount: 10000,
+    want_amount: 13000,
+    listing_type: "negotiable",
+  };
+  const fairCandidate = {
+    id: "fair-candidate",
+    owner_user_id: "fair-owner",
+    have_currency: "KES",
+    want_currency: "RWF",
+    have_amount: 500000,
+    want_amount: 320000,
+    listing_type: "negotiable",
+  };
+  const fairPlan = buildClearingPlan(fairCandidate, fairSource);
+  check(
+    "geometric clearing improves both peers",
+    Number(fairPlan?.reciprocal_units) === 14252.19
+      && Number(fairPlan?.source_minimum) === 13000
+      && Number(fairPlan?.candidate_maximum) === 15625
+      && fairPlan.source_improvement > 0
+      && fairPlan.candidate_savings > 0,
+    JSON.stringify(fairPlan)
+  );
+  const fullCandidatePlan = buildClearingPlan({
+    ...fairCandidate,
+    id: "full-candidate",
+    have_amount: 13000,
+    want_amount: 10000,
+  }, fairSource);
+  check(
+    "a full mutual fill ranks before a small partial fill",
+    compareClearingPlans(fullCandidatePlan, fairPlan, {}) < 0,
+    JSON.stringify({ fullCandidatePlan, fairPlan })
+  );
+  check(
+    "near rates receive a midpoint negotiation",
+    Boolean(buildNegotiationPlan({
+      ...fairCandidate,
+      have_amount: 90000,
+      want_amount: 100000,
+    }, {
+      ...fairSource,
+      have_amount: 100000,
+      want_amount: 100000,
+      want_currency: "KES",
+    }, 20))
+  );
+  check(
+    "irrelevant rate gaps do not create noisy negotiations",
+    !buildNegotiationPlan({
+      ...fairCandidate,
+      have_amount: 50000,
+      want_amount: 100000,
+    }, {
+      ...fairSource,
+      have_amount: 100000,
+      want_amount: 100000,
+      want_currency: "KES",
+    }, 20)
+  );
 
   // ---------- intent regex units
   scenario("intent regex units");
@@ -1645,7 +1717,7 @@ async function run() {
 
   reply = await send(CHARLIE, "accept");
   check("partial acceptance opens trade", reply.includes("Akara Trade opened ✅"), reply);
-  check("partial acceptance tells owner remaining value", reply.includes("*Still listed:* 10,000 RWF for 10,000 NGN"), reply);
+  check("partial acceptance tells owner remaining value", reply.includes("*Still listed:* 10,000 RWF for 9,230.77 NGN"), reply);
   const partialSource = __table("listings").find((listing) => listing.listing_code === "AKR-LIST-993");
   const partialResidual = __table("listings").find((listing) => (
     listing.owner_user_id === charlieRow.id
@@ -1654,7 +1726,7 @@ async function run() {
     && listing.have_currency === "RWF"
     && listing.want_currency === "NGN"
     && Number(listing.have_amount) === 10000
-    && Number(listing.want_amount) === 10000
+    && Number(listing.want_amount) === 9230.77
   ));
   check("partial source listing is reserved", partialSource?.status === "reserved", JSON.stringify(partialSource));
   check("partial residual listing remains live", Boolean(partialResidual), JSON.stringify(__table("listings").filter((listing) => listing.owner_user_id === charlieRow.id)));
@@ -1972,7 +2044,24 @@ async function run() {
     reply.includes("The currencies, available value and rates are compatible."),
     reply
   );
-  await send(ALICE, "cancel trade");
+  reply = await send(ALICE, "cancel trade");
+  check(
+    "pre-payment cancellation requeues the locked auto-match portions",
+    reply.includes("locked portions were restored")
+      && __table("audit_events").some((event) => (
+        event.entity_id === autoMatchedDeal.id
+        && event.event_name === "smart_match_requeued"
+      )),
+    JSON.stringify({
+      reply,
+      events: __table("audit_events").filter((event) => event.entity_id === autoMatchedDeal.id),
+    })
+  );
+  check(
+    "cancelled peers receive a temporary pairing exclusion",
+    __table("audit_events").filter((event) => event.event_name === "match_pair_excluded").length >= 2,
+    JSON.stringify(__table("audit_events").filter((event) => event.event_name === "match_pair_excluded"))
+  );
   await send(ALICE, "cancel");
 
   scenario("auto match passes favorable rate to user");
@@ -1985,17 +2074,8 @@ async function run() {
       && ["NGN", "RWF"].includes(testListing.want_currency);
     if (isTestPair && testListing.status === "active") testListing.status = "closed";
   }
-  const exactReciprocal = seedListing(bobRow, {
-    code: "AKR-LIST-201",
-    have_currency: "NGN",
-    have_amount: 13000,
-    want_currency: "RWF",
-    want_amount: 10000,
-    listing_type: "negotiable",
-    created_at: "2025-01-01T00:00:00.000Z",
-  });
   const favorableReciprocal = seedListing(bobRow, {
-    code: "AKR-LIST-202",
+    code: "AKR-LIST-201",
     have_currency: "NGN",
     have_amount: 500000,
     want_currency: "RWF",
@@ -2010,15 +2090,14 @@ async function run() {
   check(
     "better reciprocal rate is passed through to the user",
     favorableDeal?.listing_id === favorableReciprocal.id
-      && exactReciprocal.status === "active"
       && Number(favorableDeal?.want_amount) === 10000
-      && Number(favorableDeal?.have_amount) === 15625
-      && reply.includes("15,625 NGN"),
-    JSON.stringify({ favorableDeal, exactReciprocal, favorableReciprocal, reply })
+      && Number(favorableDeal?.have_amount) === 14252.19
+      && reply.includes("14,252.19 NGN"),
+    JSON.stringify({ favorableDeal, favorableReciprocal, reply })
   );
   check(
     "price improvement is explained without asking for negotiation",
-    reply.includes("A better reciprocal rate was available")
+    reply.includes("receive more than your minimum")
       && !reply.includes("negotiation opened"),
     reply
   );
@@ -2048,7 +2127,7 @@ async function run() {
     if (isTestPair && testListing.status === "active") testListing.status = "closed";
   }
   seedListing(bobRow, {
-    code: "AKR-LIST-203",
+    code: "AKR-LIST-202",
     have_currency: "NGN",
     have_amount: 15625,
     want_currency: "RWF",
@@ -2069,7 +2148,7 @@ async function run() {
   check(
     "requester residual keeps the original minimum rate after price improvement",
     Number(requesterPartialDeal?.want_amount) === 10000
-      && Number(requesterPartialDeal?.have_amount) === 15625
+      && Number(requesterPartialDeal?.have_amount) === 14252.19
       && Boolean(requesterResidual),
     JSON.stringify({ requesterPartialDeal, requesterResidual })
   );
@@ -2086,11 +2165,11 @@ async function run() {
     if (isTestPair && listing.status === "active") listing.status = "closed";
   }
   const negotiationCandidate = seedListing(bobRow, {
-    code: "AKR-LIST-204",
+    code: "AKR-LIST-203",
     have_currency: "NGN",
-    have_amount: 100000,
+    have_amount: 90000,
     want_currency: "RWF",
-    want_amount: 200000,
+    want_amount: 100000,
     listing_type: "negotiable",
   });
   const buttonsBeforeReciprocalNegotiation = buttonSends.length;
@@ -2112,8 +2191,8 @@ async function run() {
   );
   check(
     "reciprocal negotiation proposes values both listings can cover",
-    Number(reciprocalOffer?.offered_amount) === 100000
-      && Number(reciprocalOffer?.receive_amount) === 100000,
+    Number(reciprocalOffer?.offered_amount) === 94868.33
+      && Number(reciprocalOffer?.receive_amount) === 90000,
     JSON.stringify(reciprocalOffer)
   );
   const ownerNegotiationButtons = buttonSends

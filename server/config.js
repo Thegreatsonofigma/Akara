@@ -47,6 +47,16 @@ function positiveIntegerEnv(name, fallback) {
   return Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
 
+function nonNegativeIntegerEnv(name, fallback) {
+  const value = Number(process.env[name] ?? fallback);
+  return Number.isSafeInteger(value) && value >= 0 ? value : fallback;
+}
+
+function positiveNumberEnv(name, fallback) {
+  const value = Number(process.env[name] ?? fallback);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 loadEnv(path.join(rootDir, ".env"));
 
 const config = {
@@ -72,6 +82,22 @@ const config = {
   // "low" measured 29/29 on the live interpreter suite at ~3.5s avg; "medium"
   // scored the same at ~8s avg. Raise via OPENAI_REASONING_EFFORT if needed.
   openaiReasoningEffort: optionalEnv("OPENAI_REASONING_EFFORT", "low"),
+  matchingBatchWindowMs: Math.min(
+    3000,
+    nonNegativeIntegerEnv("AKARA_MATCHING_BATCH_WINDOW_MS", 1200)
+  ),
+  matchingPairCooldownMs: Math.max(
+    60000,
+    positiveIntegerEnv("AKARA_MATCHING_PAIR_COOLDOWN_MS", 30 * 60 * 1000)
+  ),
+  negotiationWindowMs: Math.max(
+    60000,
+    positiveIntegerEnv("AKARA_NEGOTIATION_WINDOW_MS", 10 * 60 * 1000)
+  ),
+  negotiationMaxGapPercent: Math.min(
+    100,
+    positiveNumberEnv("AKARA_NEGOTIATION_MAX_GAP_PERCENT", 20)
+  ),
   coinProfileApiUrl: optionalEnv("COIN_PROFILE_API_URL"),
   coinProfileApiKey: optionalEnv("COIN_PROFILE_API_KEY"),
   coinProfileUsername: optionalEnv("COIN_PROFILE_USERNAME"),
