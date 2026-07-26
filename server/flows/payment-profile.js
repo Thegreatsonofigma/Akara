@@ -1023,6 +1023,16 @@ async function finishPaymentProfileSave(user, flow, context) {
     return prepareListingPreview(user, context.pending_listing, "Payout detail saved ✅");
   }
 
+  if (context.return_flow === "preview_bulk_listings" && context.pending_listings) {
+    const { prepareBulkListingPreview } = require("./listing");
+    return prepareBulkListingPreview(user, context.pending_listings, "Payout detail saved ✅");
+  }
+
+  if (context.return_flow === "publish_bulk_listings" && context.pending_listings) {
+    const { publishBulkListings } = require("./listing");
+    return publishBulkListings(user, context.pending_listings);
+  }
+
   if (context.return_flow === "reserve_listing" && context.pending_listing_id) {
     const { reserveListingById } = require("./listing");
     return reserveListingById(user, context.pending_listing_id);

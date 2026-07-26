@@ -96,6 +96,58 @@ function parseListingDetails(input) {
   return details;
 }
 
+// Turns one message containing several complete exchanges into independent
+// listing drafts. The amount/currency pairs stay in message order, while
+// nearby "have" and "want" language decides their direction.
+function parseBulkListingDetails(input) {
+  const text = normalizeExchangeText(input);
+  const pairs = parseCurrencyAmountPairs(text);
+  if (pairs.length < 4 || pairs.length % 2 !== 0) return [];
+
+  const appliesFixedToAll = (
+    /\b(?:all|every|both)\b.{0,24}\b(?:fixed|firm)\b/.test(text)
+    || /\b(?:fixed|firm)\b.{0,24}\b(?:all|every|both)\b/.test(text)
+  );
+  const listings = [];
+
+  for (let index = 0; index < pairs.length; index += 2) {
+    const first = pairs[index];
+    const second = pairs[index + 1];
+    const firstRole = exchangePhraseRole(text, first.index);
+    const secondRole = exchangePhraseRole(text, second.index);
+    const sectionStart = index === 0 ? 0 : first.index;
+    const sectionEnd = pairs[index + 2]?.index ?? text.length;
+    const section = text.slice(sectionStart, sectionEnd);
+    const listing = {
+      have_currency: null,
+      want_currency: null,
+      have_amount: null,
+      want_amount: null,
+      listing_type: appliesFixedToAll || /\b(?:fixed|firm)\b/.test(section)
+        ? "fixed"
+        : "negotiable",
+    };
+
+    if (firstRole === "have" && secondRole === "want") {
+      assignPair(listing, "have", first);
+      assignPair(listing, "want", second);
+    } else if (firstRole === "want" && secondRole === "have") {
+      assignPair(listing, "want", first);
+      assignPair(listing, "have", second);
+    } else {
+      assignPair(listing, "have", first);
+      assignPair(listing, "want", second);
+    }
+
+    if (missingListingFields(listing).length || listing.have_currency === listing.want_currency) {
+      return [];
+    }
+    listings.push(listing);
+  }
+
+  return listings;
+}
+
 function parseSearchDetails(input) {
   const text = normalizeExchangeText(input);
   const details = parseListingDetails(text);
@@ -253,6 +305,7 @@ module.exports = {
   exchangePhraseRole,
   mentionedCurrencyRole,
   parseListingDetails,
+  parseBulkListingDetails,
   parseSearchDetails,
   missingListingFields,
   nextSearchStep,

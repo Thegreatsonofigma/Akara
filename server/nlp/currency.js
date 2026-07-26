@@ -162,6 +162,7 @@ function parseCurrencyAmountPairs(input) {
   const currencyAlternation = anyCurrencyPattern();
   const pairs = [];
   const seen = new Set();
+  const seenAmountPositions = new Set();
 
   const amountBefore = new RegExp(`(${amountPattern})\\s*(?:worth\\s+of\\s+|in\\s+|of\\s+)?(${currencyAlternation})\\b`, "gi");
   const currencyBefore = new RegExp(`\\b(${currencyAlternation})\\s*(?:of\\s+|worth\\s+)?(${amountPattern})`, "gi");
@@ -171,12 +172,16 @@ function parseCurrencyAmountPairs(input) {
     while ((match = regex.exec(text))) {
       const first = match[1];
       const second = match[2];
-      const amount = parseAmount(/\d/.test(first[0]) ? first : second);
+      const amountText = /\d/.test(first[0]) ? first : second;
+      const amount = parseAmount(amountText);
       const currency = normalizeCurrency(/\d/.test(first[0]) ? second : first);
+      const amountOffset = match[0].indexOf(amountText);
+      const amountPosition = `${match.index + amountOffset}:${match.index + amountOffset + amountText.length}`;
       const key = `${amount}-${currency}-${match.index}`;
-      if (amount && currency && !seen.has(key)) {
+      if (amount && currency && !seen.has(key) && !seenAmountPositions.has(amountPosition)) {
         pairs.push({ amount, currency, index: match.index });
         seen.add(key);
+        seenAmountPositions.add(amountPosition);
       }
     }
   }

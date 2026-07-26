@@ -107,6 +107,7 @@ const { findNigerianBanks } = require("../lib/coinprofile");
 const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
 const { normalizeMobileMoneyNumber } = require("../lib/mobile-number");
 const { formatMessageLayout } = require("../lib/format");
+const { parseBulkListingDetails } = require("../nlp/exchange");
 const {
   handlePaymentProfile,
   mobileMoneyNumberPrompt,
@@ -716,6 +717,65 @@ async function run() {
     JSON.stringify(lastButtonPayload())
   );
 
+  // ---------- bulk listing creation
+  scenario("bulk listing creation");
+  const parsedBulkListings = parseBulkListingDetails(
+    "I have 61k NGN and want 72k RWF; I need 90k NGN and have 80k RWF"
+  );
+  check("bulk parser finds both listings", parsedBulkListings.length === 2, JSON.stringify(parsedBulkListings));
+  check(
+    "bulk parser preserves directional language",
+    parsedBulkListings[1]?.have_currency === "RWF"
+      && parsedBulkListings[1]?.have_amount === 80000
+      && parsedBulkListings[1]?.want_currency === "NGN"
+      && parsedBulkListings[1]?.want_amount === 90000,
+    JSON.stringify(parsedBulkListings)
+  );
+  check(
+    "bulk terms default to negotiable",
+    parsedBulkListings.every((listing) => listing.listing_type === "negotiable"),
+    JSON.stringify(parsedBulkListings)
+  );
+
+  const listingCountBeforeBulk = __table("listings").length;
+  reply = await send(ALICE, "Create 61k NGN for 72k RWF; I have 80k RWF and want 90k NGN");
+  check("bulk request opens one combined review", reply.includes("*Review 2 listings*"), reply);
+  check("bulk request enters its own confirmation flow", (await sessionFlow(ALICE)) === "bulk_listing");
+  check(
+    "bulk review uses publish and cancel buttons",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "publish_bulk,cancel",
+    JSON.stringify(lastButtonPayload())
+  );
+
+  reply = await send(ALICE, "publish_bulk");
+  const bulkPublishReply = Array.isArray(reply) ? reply.join("\n") : String(reply || "");
+  const bulkCreated = __table("listings").slice(listingCountBeforeBulk);
+  check("one confirmation publishes every bulk item", bulkCreated.length === 2, JSON.stringify(bulkCreated));
+  check("bulk listings receive different references", new Set(bulkCreated.map((listing) => listing.listing_code)).size === 2, JSON.stringify(bulkCreated));
+  check("bulk listings stay negotiable by default", bulkCreated.every((listing) => listing.listing_type === "negotiable"), JSON.stringify(bulkCreated));
+  check("bulk publish confirms both live listings", bulkPublishReply.includes("Listing 1 of 2") && bulkPublishReply.includes("Listing 2 of 2"), bulkPublishReply);
+  check("bulk session clears after publish", (await sessionFlow(ALICE)) === null);
+
+  const listingCountBeforeMixedBatch = __table("listings").length;
+  reply = await send(ALICE, "List 61k NGN for 72k RWF; 95k NGN for 105k RWF");
+  check("mixed bulk request keeps the distinct item", reply.includes("*Review 1 listing*"), reply);
+  check("mixed bulk request identifies the live duplicate", reply.includes("*1 duplicate skipped*"), reply);
+  check("mixed bulk request shows the existing reference", reply.includes(bulkCreated[0].listing_code), reply);
+  reply = await send(ALICE, "publish all");
+  check("mixed bulk request publishes only the distinct item", __table("listings").length === listingCountBeforeMixedBatch + 1, JSON.stringify(__table("listings").slice(listingCountBeforeMixedBatch)));
+
+  const listingCountBeforeRepeatedBatch = __table("listings").length;
+  reply = await send(ALICE, "Post 33k NGN for 44k RWF; 33k NGN for 44k RWF");
+  check("within-message duplicate is shown before publication", reply.includes("Same as item 1"), reply);
+  reply = await send(ALICE, "put them live");
+  check("natural bulk publication language is understood", String(Array.isArray(reply) ? reply.join("\n") : reply).includes("is live"), JSON.stringify(reply));
+  check("within-message duplicate is published once", __table("listings").length === listingCountBeforeRepeatedBatch + 1, JSON.stringify(__table("listings").slice(listingCountBeforeRepeatedBatch)));
+
+  const listingCountBeforeDuplicateBatch = __table("listings").length;
+  reply = await send(ALICE, "Post 61k NGN for 72k RWF; 80k RWF for 90k NGN");
+  check("all-duplicate bulk request is blocked", reply.includes("*Nothing new to publish*"), reply);
+  check("all-duplicate bulk request creates nothing", __table("listings").length === listingCountBeforeDuplicateBatch, JSON.stringify(__table("listings").slice(listingCountBeforeDuplicateBatch)));
+
   const DORA = "250700000004";
   const doraRow = seedVerifiedUser(DORA, "Promise Uchenna Steven");
   seedPayout(doraRow, "NGN");
@@ -732,6 +792,24 @@ async function run() {
   check("saving payout resumes listing review", reply.includes("Payout detail saved") && reply.includes("*Review listing*"), reply);
   const doraRwfPayout = __table("payment_profiles").find((row) => row.user_id === doraRow.id && row.currency === "RWF");
   check("saved momo number uses local digits only", doraRwfPayout?.momo_number_encrypted === "0788123456", JSON.stringify(doraRwfPayout));
+
+  const BULK_PAYOUT = "250700000014";
+  const bulkPayoutUser = seedVerifiedUser(BULK_PAYOUT, "Bulk Payout User");
+  seedPayout(bulkPayoutUser, "NGN");
+  reply = await send(BULK_PAYOUT, "Create 14k NGN for 16k RWF; 18k NGN for 2k KES");
+  check("bulk setup asks for the first missing receive payout", reply.includes("*Add payout detail*") && reply.includes("RWF"), reply);
+  reply = await send(BULK_PAYOUT, "mtn");
+  reply = await send(BULK_PAYOUT, "option 1");
+  reply = await send(BULK_PAYOUT, "+250 788 555 444");
+  reply = await send(BULK_PAYOUT, "save payout");
+  check("bulk setup continues to the next missing payout", reply.includes("*Add payout detail*") && reply.includes("KES"), reply);
+  reply = await send(BULK_PAYOUT, "m-pesa");
+  reply = await send(BULK_PAYOUT, "option 1");
+  reply = await send(BULK_PAYOUT, "+254 712 345 678");
+  reply = await send(BULK_PAYOUT, "save payout");
+  check("bulk setup returns to the original combined review", reply.includes("*Review 2 listings*"), reply);
+  reply = await send(BULK_PAYOUT, "cancel");
+  check("bulk payout draft can be cancelled cleanly", (await sessionFlow(BULK_PAYOUT)) === null);
 
   const PAYOUT_MENU = "250700000019";
   const payoutMenuUser = seedVerifiedUser(PAYOUT_MENU, "Payout Menu User");
