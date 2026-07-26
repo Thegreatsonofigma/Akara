@@ -33,6 +33,7 @@ const {
   isEditIntent,
   isDeclineIntent,
   isCancelIntent,
+  isCancelTradeIntent,
   selectedOptionNumber,
 } = require("./nlp/intents");
 const { interpretMessage, isFreshRequestAction } = require("./nlp/interpreter");
@@ -86,7 +87,11 @@ const {
   shouldLeaveDealRoomForFreshCommand,
   isExplicitTradeRecallIntent,
 } = require("./flows/deal-room");
-const { getMyListingsReply, getMyDealsReply } = require("./flows/history");
+const {
+  getMyListingsReply,
+  getMyDealsReply,
+  getLiveTradeClosePickerReply,
+} = require("./flows/history");
 const {
   supportOptionsReply,
   supportEmailReply,
@@ -628,6 +633,14 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return getMyDealsReply(user);
   }
 
+  if (
+    isCancelTradeIntent(command)
+    && /\b(deal|trade|transaction|exchange)\b/.test(command)
+    && !extractDealCode(command)
+  ) {
+    return getLiveTradeClosePickerReply(user);
+  }
+
   if (interpretedAction === "view_profile" || isProfileCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return viewProfileReply(user);
@@ -684,8 +697,8 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return reserveListingByCode(user, listingCode);
   }
 
-  const requestedDealCode = extractDealCode(text);
-  if (requestedDealCode && (interpretedAction === "trade_action" || isExplicitTradeRecallIntent(text, incoming) || isDealRoomCommand(text, incoming))) {
+  const requestedDealCode = extractDealCode(command) || extractDealCode(text);
+  if (requestedDealCode && (interpretedAction === "trade_action" || isExplicitTradeRecallIntent(command, incoming) || isDealRoomCommand(command, incoming))) {
     const requestedDeal = await getDealByCodeForUser(user, requestedDealCode);
     if (!requestedDeal) {
       return [
@@ -705,7 +718,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
       },
     };
     await upsertSession(user, user.whatsapp_phone, "deal_room", "reserved", restoredSession.context_json);
-    return handleDealRoom(text, user, restoredSession, incoming);
+    return handleDealRoom(command, user, restoredSession, incoming);
   }
 
   // The browse regex is loose ("open the offer" reads as browsing because of
@@ -1276,6 +1289,8 @@ function normalizeInteractiveCommand(command) {
   if (payoutAction) return `${payoutAction[1]} payout ${payoutAction[2]}`;
   const listingsPage = String(command || "").match(/^my_listings_page_(\d+)$/);
   if (listingsPage) return `my listings page ${listingsPage[1]}`;
+  const closeTrade = String(command || "").match(/^close_trade_(akr-txn-\d{1,5})$/i);
+  if (closeTrade) return `close trade ${closeTrade[1].toUpperCase()}`;
   return command;
 }
 

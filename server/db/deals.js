@@ -53,22 +53,28 @@ async function getLatestOpenDealForUser(userId) {
 }
 
 async function getBlockingOpenDealForUser(userId) {
+  const deals = await getOpenDealsForUser(userId);
+  return deals[0] || null;
+}
+
+async function getOpenDealsForUser(userId, limit = 10) {
   const rows = await supabaseRequest(
     [
       DEAL_SELECT,
       `or=(maker_user_id.eq.${filterValue(userId)},taker_user_id.eq.${filterValue(userId)})`,
       `status=in.(${BLOCKING_DEAL_STATUSES.join(",")})`,
       "order=created_at.desc",
-      "limit=10",
+      `limit=${Math.max(1, Math.min(50, Number(limit) || 10))}`,
     ].join("&")
   );
 
+  const openDeals = [];
   for (const deal of rows) {
     if (await expireDealIfElapsed(deal)) continue;
-    return deal;
+    openDeals.push(deal);
   }
 
-  return null;
+  return openDeals;
 }
 
 async function getCompletedTradeCount(userId) {
@@ -256,6 +262,7 @@ module.exports = {
   getDealByCodeForUser,
   getLatestOpenDealForUser,
   getBlockingOpenDealForUser,
+  getOpenDealsForUser,
   getCompletedTradeCount,
   syncCompletedDealsCount,
   userRoleInDeal,

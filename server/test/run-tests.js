@@ -387,17 +387,17 @@ async function run() {
     }, 20)
   );
   check(
-    "wide reciprocal rates can enter negotiation when discovery is open",
+    "controlled reciprocal rate gaps can enter negotiation",
     Boolean(buildNegotiationPlan({
       ...fairCandidate,
-      have_amount: 30000,
+      have_amount: 60000,
       want_amount: 100000,
     }, {
       ...fairSource,
       have_amount: 100000,
       want_amount: 100000,
       want_currency: "KES",
-    }, 100))
+    }, 40))
   );
 
   // ---------- intent regex units
@@ -1558,6 +1558,16 @@ async function run() {
       && __table("deals").length === dealsBeforeSecondAttempt,
     JSON.stringify({ peerBusyReply, peerBusyListing })
   );
+  reply = await send(ALICE, "I want to close a trade");
+  check(
+    "close-trade request shows only live trades in a native picker",
+    lastListPayload()?.sections?.length === 1
+      && lastListPayload()?.sections?.[0]?.title === "Live trades"
+      && lastListPayload()?.sections?.[0]?.rows?.length === 1
+      && lastListPayload()?.sections?.[0]?.rows?.[0]?.id === `close_trade_${openedDealCode}`
+      && !lastListPayload()?.sections?.[0]?.rows?.some((row) => /completed|cancelled|expired/i.test(row.description || "")),
+    JSON.stringify(lastListPayload())
+  );
 
   // ---------- deal room actions
   scenario("deal room");
@@ -2141,6 +2151,12 @@ async function run() {
   );
   reply = await send(ALICE, "cancel trade");
   check(
+    "auto-match cancellation first asks which live trade to close",
+    lastListPayload()?.sections?.[0]?.rows?.[0]?.id === `close_trade_${autoMatchedDeal.deal_code}`,
+    JSON.stringify(lastListPayload())
+  );
+  reply = await send(ALICE, `close_trade_${autoMatchedDeal.deal_code}`);
+  check(
     "pre-payment cancellation requeues the locked auto-match portions",
     reply.includes("locked portions were restored")
       && __table("audit_events").some((event) => (
@@ -2274,7 +2290,7 @@ async function run() {
   const negotiationCandidate = seedListing(bobRow, {
     code: "AKR-LIST-203",
     have_currency: "NGN",
-    have_amount: 30000,
+    have_amount: 60000,
     want_currency: "RWF",
     want_amount: 100000,
     listing_type: "negotiable",
@@ -2300,8 +2316,8 @@ async function run() {
   );
   check(
     "reciprocal negotiation proposes values both listings can cover",
-    Number(reciprocalOffer?.offered_amount) === 54772.26
-      && Number(reciprocalOffer?.receive_amount) === 30000,
+    Number(reciprocalOffer?.offered_amount) === 77459.67
+      && Number(reciprocalOffer?.receive_amount) === 60000,
     JSON.stringify(reciprocalOffer)
   );
   const ownerNegotiationButtons = buttonSends
