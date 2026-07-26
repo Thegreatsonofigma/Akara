@@ -206,7 +206,7 @@ function isHumanSupportRequest(text, session = null) {
 
 function bulkListingRequest(text, interpretedAction, session = null) {
   const pairs = parseCurrencyAmountPairs(text);
-  const listings = pairs.length >= 4 ? parseBulkListingDetails(text) : [];
+  const listings = parseBulkListingDetails(text);
   const looksLikeSearch = interpretedAction === "find_offer"
     || interpretedAction === "browse_offers"
     || /\b(find|search|show|browse|available|who\s+(?:has|gets?|needs?|wants?))\b/i.test(text);
@@ -216,7 +216,7 @@ function bulkListingRequest(text, interpretedAction, session = null) {
   return {
     pairs,
     listings,
-    eligible: pairs.length >= 4
+    eligible: (pairs.length >= 4 || listings.length >= 2)
       && !looksLikeSearch
       && !protectedFlow
       && !explicitSupportContext,

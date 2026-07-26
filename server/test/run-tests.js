@@ -739,15 +739,39 @@ async function run() {
     parsedBulkListings.every((listing) => listing.listing_type === "negotiable"),
     JSON.stringify(parsedBulkListings)
   );
+  const inheritedBulkListings = parseBulkListingDetails(
+    "Create 50k NGN for 55k RWF; 60k for 66k; 70k for 77k"
+  );
+  check(
+    "bulk parser inherits the first currency pair across shorthand items",
+    inheritedBulkListings.length === 3
+      && inheritedBulkListings[1]?.have_currency === "NGN"
+      && inheritedBulkListings[1]?.have_amount === 60000
+      && inheritedBulkListings[1]?.want_currency === "RWF"
+      && inheritedBulkListings[1]?.want_amount === 66000
+      && inheritedBulkListings[2]?.have_amount === 70000
+      && inheritedBulkListings[2]?.want_amount === 77000,
+    JSON.stringify(inheritedBulkListings)
+  );
+  const numberedBulkListings = parseBulkListingDetails(
+    "Create 3 offers NGN to RWF:\n1. 50k for 55k\n2. 60k for 66k\n3. 70k for 77k"
+  );
+  check(
+    "bulk parser ignores batch counts and numbered-list labels",
+    numberedBulkListings.length === 3
+      && numberedBulkListings.map((listing) => listing.have_amount).join(",") === "50000,60000,70000"
+      && numberedBulkListings.map((listing) => listing.want_amount).join(",") === "55000,66000,77000",
+    JSON.stringify(numberedBulkListings)
+  );
 
   const BULK_ROUTING = "250700000015";
   const bulkRoutingUser = seedVerifiedUser(BULK_ROUTING, "Bulk Routing User");
   seedPayout(bulkRoutingUser, "NGN");
   seedPayout(bulkRoutingUser, "RWF");
   const tenListingMessage = [
-    "Can someone help me create these listings:",
+    "Can someone help me create these NGN to RWF listings:",
     ...Array.from({ length: 10 }, (_, index) =>
-      `${11 + index}k NGN for ${21 + index}k RWF`
+      `${11 + index}k for ${21 + index}k`
     ),
   ].join("; ");
   const supportEventsBeforeBulkRouting = __table("audit_events").filter((row) => row.entity_type === "support_request").length;
@@ -763,6 +787,29 @@ async function run() {
   );
   reply = await send(BULK_ROUTING, "cancel");
   check("ten-listing review can be cancelled", (await sessionFlow(BULK_ROUTING)) === null);
+
+  const BULK_SHORTHAND = "250700000021";
+  const bulkShorthandUser = seedVerifiedUser(BULK_SHORTHAND, "Bulk Shorthand User");
+  seedPayout(bulkShorthandUser, "GHS");
+  seedPayout(bulkShorthandUser, "XAF");
+  const shorthandListingCount = __table("listings").length;
+  reply = await send(
+    BULK_SHORTHAND,
+    "Create 101k GHS for 121k XAF; 102k for 122k; 103k for 123k"
+  );
+  check("shorthand bulk request reviews all provided offers", reply.includes("*Review 3 listings*"), reply);
+  reply = await send(BULK_SHORTHAND, "publish");
+  const shorthandCreated = __table("listings").slice(shorthandListingCount);
+  check("shorthand bulk publication creates every offer", shorthandCreated.length === 3, JSON.stringify(shorthandCreated));
+  check(
+    "shorthand bulk publication preserves every amount pair",
+    shorthandCreated.map((listing) => `${listing.have_amount}:${listing.want_amount}`).join(",")
+      === "101000:121000,102000:122000,103000:123000",
+    JSON.stringify(shorthandCreated)
+  );
+  shorthandCreated.forEach((listing) => {
+    listing.status = "closed";
+  });
 
   const listingCountBeforeBulk = __table("listings").length;
   reply = await send(ALICE, "Create 61k NGN for 72k RWF; I have 80k RWF and want 90k NGN");

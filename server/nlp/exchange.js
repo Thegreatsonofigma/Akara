@@ -96,55 +96,141 @@ function parseListingDetails(input) {
   return details;
 }
 
+function parseLooseAmountMentions(text) {
+  const amountPattern = /\b\d[\d,]*(?:\.\d+)?(?:\s*(?:k|m|thousand|grand|million)\b)?/gi;
+  const amounts = [];
+  let match;
+
+  while ((match = amountPattern.exec(text))) {
+    const amount = parseAmount(match[0]);
+    if (!amount) continue;
+
+    const after = text.slice(match.index + match[0].length);
+    const isListNumber = amount <= 100 && /^[.)]\s/.test(after);
+    const isBatchCount = amount <= 100
+      && /^\s*(?:offers?|listings?|items?|entries?|rates?)\b/.test(after);
+    if (isListNumber || isBatchCount) continue;
+
+    amounts.push({
+      amount,
+      index: match.index,
+    });
+  }
+
+  return amounts;
+}
+
+function sharedBulkCurrencies(text) {
+  const mentions = currencyMentions(text);
+  const currencies = mentionedCurrencies(text);
+  if (currencies.length < 2) return null;
+
+  const classified = mentions.map((mention) => ({
+    ...mention,
+    role: exchangePhraseRole(text, mention.index),
+  }));
+  const haveMention = classified.find((mention) => mention.role === "have");
+  const wantMention = classified.find((mention) => mention.role === "want");
+  const haveCurrency = haveMention?.currency
+    || currencies.find((currency) => currency !== wantMention?.currency)
+    || currencies[0];
+  const wantCurrency = wantMention?.currency
+    || currencies.find((currency) => currency !== haveCurrency)
+    || currencies[1];
+
+  if (!haveCurrency || !wantCurrency || haveCurrency === wantCurrency) return null;
+  return { have_currency: haveCurrency, want_currency: wantCurrency };
+}
+
+function bulkAmountOrder(text, amounts, firstListing) {
+  const firstRole = exchangePhraseRole(text, amounts[0]?.index);
+  const secondRole = exchangePhraseRole(text, amounts[1]?.index);
+  if (firstRole === "want" && secondRole === "have") return "want_have";
+  if (firstRole === "have" && secondRole === "want") return "have_want";
+
+  if (firstListing?.have_amount && firstListing?.want_amount) {
+    if (
+      amounts[0]?.amount === firstListing.want_amount
+      && amounts[1]?.amount === firstListing.have_amount
+    ) {
+      return "want_have";
+    }
+  }
+  return "have_want";
+}
+
 // Turns one message containing several complete exchanges into independent
 // listing drafts. The amount/currency pairs stay in message order, while
 // nearby "have" and "want" language decides their direction.
 function parseBulkListingDetails(input) {
   const text = normalizeExchangeText(input);
   const pairs = parseCurrencyAmountPairs(text);
-  if (pairs.length < 4 || pairs.length % 2 !== 0) return [];
-
   const appliesFixedToAll = (
     /\b(?:all|every|both)\b.{0,24}\b(?:fixed|firm)\b/.test(text)
     || /\b(?:fixed|firm)\b.{0,24}\b(?:all|every|both)\b/.test(text)
   );
   const listings = [];
 
-  for (let index = 0; index < pairs.length; index += 2) {
-    const first = pairs[index];
-    const second = pairs[index + 1];
-    const firstRole = exchangePhraseRole(text, first.index);
-    const secondRole = exchangePhraseRole(text, second.index);
-    const sectionStart = index === 0 ? 0 : first.index;
-    const sectionEnd = pairs[index + 2]?.index ?? text.length;
-    const section = text.slice(sectionStart, sectionEnd);
-    const listing = {
-      have_currency: null,
-      want_currency: null,
-      have_amount: null,
-      want_amount: null,
+  if (pairs.length >= 4 && pairs.length % 2 === 0) {
+    for (let index = 0; index < pairs.length; index += 2) {
+      const first = pairs[index];
+      const second = pairs[index + 1];
+      const firstRole = exchangePhraseRole(text, first.index);
+      const secondRole = exchangePhraseRole(text, second.index);
+      const sectionStart = index === 0 ? 0 : first.index;
+      const sectionEnd = pairs[index + 2]?.index ?? text.length;
+      const section = text.slice(sectionStart, sectionEnd);
+      const listing = {
+        have_currency: null,
+        want_currency: null,
+        have_amount: null,
+        want_amount: null,
+        listing_type: appliesFixedToAll || /\b(?:fixed|firm)\b/.test(section)
+          ? "fixed"
+          : "negotiable",
+      };
+
+      if (firstRole === "have" && secondRole === "want") {
+        assignPair(listing, "have", first);
+        assignPair(listing, "want", second);
+      } else if (firstRole === "want" && secondRole === "have") {
+        assignPair(listing, "want", first);
+        assignPair(listing, "have", second);
+      } else {
+        assignPair(listing, "have", first);
+        assignPair(listing, "want", second);
+      }
+
+      if (missingListingFields(listing).length || listing.have_currency === listing.want_currency) {
+        return [];
+      }
+      listings.push(listing);
+    }
+    return listings;
+  }
+
+  const amounts = parseLooseAmountMentions(text);
+  const sharedCurrencies = sharedBulkCurrencies(text);
+  if (!sharedCurrencies || amounts.length < 4 || amounts.length % 2 !== 0) return [];
+
+  const amountOrder = bulkAmountOrder(text, amounts, parseListingDetails(text));
+  for (let index = 0; index < amounts.length; index += 2) {
+    const first = amounts[index];
+    const second = amounts[index + 1];
+    const sectionEnd = amounts[index + 2]?.index ?? text.length;
+    const section = text.slice(index === 0 ? 0 : first.index, sectionEnd);
+    const haveAmount = amountOrder === "want_have" ? second.amount : first.amount;
+    const wantAmount = amountOrder === "want_have" ? first.amount : second.amount;
+
+    listings.push({
+      ...sharedCurrencies,
+      have_amount: haveAmount,
+      want_amount: wantAmount,
       listing_type: appliesFixedToAll || /\b(?:fixed|firm)\b/.test(section)
         ? "fixed"
         : "negotiable",
-    };
-
-    if (firstRole === "have" && secondRole === "want") {
-      assignPair(listing, "have", first);
-      assignPair(listing, "want", second);
-    } else if (firstRole === "want" && secondRole === "have") {
-      assignPair(listing, "want", first);
-      assignPair(listing, "have", second);
-    } else {
-      assignPair(listing, "have", first);
-      assignPair(listing, "want", second);
-    }
-
-    if (missingListingFields(listing).length || listing.have_currency === listing.want_currency) {
-      return [];
-    }
-    listings.push(listing);
+    });
   }
-
   return listings;
 }
 
