@@ -6,7 +6,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { ArrowRight, List, X } from "@phosphor-icons/react";
-import { SITE } from "@/lib/site";
+import { WaitlistDialog } from "@/components/waitlist/WaitlistDialog";
 import { cn } from "@/lib/cn";
 
 const NAV_LINKS = [
@@ -70,13 +70,13 @@ export function Navbar() {
           </ul>
 
           <div className="flex items-center gap-2">
-            <Link
-              href={SITE.waitlistHref}
+            <WaitlistDialog
+              source="navbar_desktop"
               className="hidden items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-black transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(157,255,30,0.35)] md:inline-flex"
             >
               Join waitlist
               <ArrowRight size={17} aria-hidden="true" />
-            </Link>
+            </WaitlistDialog>
 
             <button
               type="button"
@@ -120,14 +120,13 @@ export function Navbar() {
                   </li>
                 ))}
                 <li className="mt-1">
-                  <Link
-                    href={SITE.waitlistHref}
-                    className="flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-3 text-base font-semibold text-black"
-                    onClick={() => setOpen(false)}
+                  <WaitlistDialog
+                    source="navbar_mobile"
+                    className="flex w-full items-center justify-center gap-2 rounded-full bg-brand px-5 py-3 text-base font-semibold text-black"
                   >
                     Join waitlist
                     <ArrowRight size={18} aria-hidden="true" />
-                  </Link>
+                  </WaitlistDialog>
                 </li>
               </ul>
             </motion.div>

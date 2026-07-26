@@ -403,6 +403,184 @@ function duplicateListingReply(listing) {
   ].join("\n"));
 }
 
+function listingIdentityKey(context) {
+  return [
+    context.have_currency,
+    moneyNumber(context.have_amount),
+    context.want_currency,
+    moneyNumber(context.want_amount),
+    context.listing_type || "negotiable",
+  ].join(":");
+}
+
+function nextListingCode(code, offset) {
+  const match = String(code || "").match(/^(.*-)(\d+)$/);
+  if (!match) return code;
+  const [, prefix, sequence] = match;
+  return `${prefix}${String(Number(sequence) + offset).padStart(sequence.length, "0")}`;
+}
+
+async function partitionBulkListings(user, listings) {
+  const unique = [];
+  const duplicates = [];
+  const seen = new Map();
+
+  for (let index = 0; index < listings.length; index += 1) {
+    const listing = {
+      ...listings[index],
+      listing_type: listings[index].listing_type || "negotiable",
+    };
+    const key = listingIdentityKey(listing);
+    if (seen.has(key)) {
+      duplicates.push({
+        index,
+        listing,
+        reason: "Repeated in this message",
+        duplicateOf: seen.get(key) + 1,
+      });
+      continue;
+    }
+
+    seen.set(key, index);
+    const existing = await findActiveDuplicateListing(user, listing);
+    if (existing) {
+      duplicates.push({
+        index,
+        listing,
+        reason: "Already open",
+        existing,
+      });
+      continue;
+    }
+    unique.push(listing);
+  }
+
+  return { unique, duplicates };
+}
+
+function bulkDuplicateLines(duplicates) {
+  if (!duplicates.length) return [];
+  return [
+    title(`${duplicates.length} duplicate${duplicates.length === 1 ? "" : "s"} skipped`),
+    ...duplicates.flatMap((duplicate) => [
+      "",
+      `${duplicate.index + 1}. ${formatMoney(duplicate.listing.have_amount, duplicate.listing.have_currency)} for ${formatMoney(duplicate.listing.want_amount, duplicate.listing.want_currency)}`,
+      duplicate.existing
+        ? labeled("Existing reference", displayReference(duplicate.existing.listing_code, "listing"))
+        : caption(`Same as item ${duplicate.duplicateOf} in this message.`),
+    ]),
+  ];
+}
+
+function bulkListingReviewReply(listings, duplicates = [], intro = "") {
+  const body = [
+    intro,
+    title(`Review ${listings.length} listing${listings.length === 1 ? "" : "s"}`),
+    caption("One confirmation will publish every listing shown below."),
+    ...listings.flatMap((listing, index) => [
+      "",
+      title(`${index + 1}. ${listing.have_currency} to ${listing.want_currency}`),
+      labeled("Reference", displayReference(listing.listing_code, "listing")),
+      labeled("You send", formatMoney(listing.have_amount, listing.have_currency)),
+      labeled("You receive", formatMoney(listing.want_amount, listing.want_currency)),
+      labeled("Terms", action(listingTypeLabel(listing.listing_type || "negotiable"))),
+    ]),
+    "",
+    labeled("Service fee", feeIncludedText()),
+    ...bulkDuplicateLines(duplicates),
+  ].filter(Boolean).join("\n");
+
+  return whatsappButtonsReply(body, [
+    { id: "publish_bulk", title: "Publish all" },
+    { id: "cancel", title: "Cancel" },
+  ], [
+    body,
+    "",
+    `${action("publish all")} to make these listings live`,
+    `${action("cancel")} to stop`,
+  ].join("\n"));
+}
+
+function allBulkListingsDuplicateReply(duplicates) {
+  const body = [
+    title("Nothing new to publish"),
+    "",
+    "Every listing in that message is already open or repeated.",
+    ...bulkDuplicateLines(duplicates),
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "my_listings", title: "My listings" },
+    { id: "make_offer", title: "New listings" },
+  ]);
+}
+
+async function assignBulkListingCodes(listings) {
+  const firstMissingIndex = listings.findIndex((listing) => !listing.listing_code);
+  if (firstMissingIndex < 0) return listings;
+
+  const firstCode = await generateReferenceCode("listing");
+  let offset = 0;
+  return listings.map((listing) => {
+    if (listing.listing_code) return listing;
+    const listingCode = nextListingCode(firstCode, offset);
+    offset += 1;
+    return { ...listing, listing_code: listingCode };
+  });
+}
+
+async function prepareBulkListingPreview(user, details, intro = "") {
+  if (!Array.isArray(details) || details.length < 2) {
+    return "Send at least two complete listings, with a send amount and receive amount for each one.";
+  }
+  if (details.length > 10) {
+    return "You can publish up to 10 listings in one message. Split this batch and send the rest next.";
+  }
+
+  const { unique, duplicates } = await partitionBulkListings(user, details);
+  if (!unique.length) {
+    await clearSession(user, user.whatsapp_phone);
+    return allBulkListingsDuplicateReply(duplicates);
+  }
+
+  for (let index = 0; index < unique.length; index += 1) {
+    const tierBlock = tierLimitBlockForListing(user, unique[index]);
+    if (tierBlock) {
+      await clearSession(user, user.whatsapp_phone);
+      return [
+        title(`Listing ${index + 1} needs a higher limit`),
+        "",
+        tierBlock,
+        "",
+        "Nothing in this batch was published. Reduce that value or complete the account upgrade first.",
+      ].join("\n");
+    }
+  }
+
+  for (const listing of unique) {
+    const receiveProfile = await getDefaultPaymentProfile(user.id, listing.want_currency);
+    if (!receiveProfile) {
+      const prompt = await startPaymentProfileForCurrency(user, listing.want_currency, {
+        return_flow: "preview_bulk_listings",
+        pending_listings: unique,
+      });
+      return prependPromptText(
+        prompt,
+        [
+          intro,
+          title("Add payout detail"),
+          caption(`Your bulk draft needs a ${listing.want_currency} payout detail before review.`),
+        ].filter(Boolean).join("\n\n")
+      );
+    }
+  }
+
+  const listings = await assignBulkListingCodes(unique);
+  await upsertSession(user, user.whatsapp_phone, "bulk_listing", "confirm", {
+    listings,
+  });
+  return bulkListingReviewReply(listings, duplicates, intro);
+}
+
 // Opens the edit conversation for a listing draft: keeps only the edit
 // metadata (which listing is being edited, its code, and the status to
 // restore on cancel) and asks for fresh details. Used by the review screen's
@@ -516,6 +694,24 @@ async function prepareListingPreview(user, details, intro = "") {
   return listingReviewReply(context, intro);
 }
 
+async function createListingRecord(user, context) {
+  const listingCode = context.listing_code || await generateReferenceCode("listing");
+  const createdListings = await supabaseRequest("listings", {
+    method: "POST",
+    body: JSON.stringify({
+      owner_user_id: user.id,
+      listing_code: listingCode,
+      have_currency: context.have_currency,
+      want_currency: context.want_currency,
+      have_amount: context.have_amount,
+      want_amount: context.want_amount,
+      listing_type: context.listing_type || "negotiable",
+      status: "active",
+    }),
+  });
+  return createdListings[0];
+}
+
 async function publishListing(user, context) {
   const tierBlock = tierLimitBlockForListing(user, context);
   if (tierBlock) return holdListingForTierReview(user, context, tierBlock);
@@ -569,21 +765,8 @@ async function publishListing(user, context) {
     return deliverListingLive(user, listing, listing.listing_code || context.listing_code, liveMessage);
   }
 
-  const listingCode = context.listing_code || await generateReferenceCode("listing");
-  const createdListings = await supabaseRequest("listings", {
-    method: "POST",
-    body: JSON.stringify({
-      owner_user_id: user.id,
-      listing_code: listingCode,
-      have_currency: context.have_currency,
-      want_currency: context.want_currency,
-      have_amount: context.have_amount,
-      want_amount: context.want_amount,
-      listing_type: context.listing_type || "negotiable",
-      status: "active",
-    }),
-  });
-  const listing = createdListings[0];
+  const listing = await createListingRecord(user, context);
+  const listingCode = listing.listing_code;
 
   if (context.republished_from_listing_id) {
     const shareUrl = listingShareUrl(listing);
@@ -603,6 +786,114 @@ async function publishListing(user, context) {
   const shareUrl = listingShareUrl(listing);
   const liveMessage = listingLiveMessage("Your listing is live ✅", listingCode, listing, shareUrl);
   return deliverListingLive(user, listing, listingCode, liveMessage);
+}
+
+async function publishBulkListings(user, listings) {
+  const { unique, duplicates } = await partitionBulkListings(user, listings);
+  if (!unique.length) {
+    await clearSession(user, user.whatsapp_phone);
+    return allBulkListingsDuplicateReply(duplicates);
+  }
+
+  for (let index = 0; index < unique.length; index += 1) {
+    const listing = unique[index];
+    const tierBlock = tierLimitBlockForListing(user, listing);
+    if (tierBlock) {
+      return [
+        title(`Listing ${index + 1} needs a higher limit`),
+        "",
+        tierBlock,
+        "",
+        "Nothing in this batch was published.",
+      ].join("\n");
+    }
+
+    const receiveProfile = await getDefaultPaymentProfile(user.id, listing.want_currency);
+    if (!receiveProfile) {
+      const prompt = await startPaymentProfileForCurrency(user, listing.want_currency, {
+        return_flow: "publish_bulk_listings",
+        pending_listings: unique,
+      });
+      return prependPromptText(
+        prompt,
+        `Add your ${listing.want_currency} payout detail before I publish this batch.`
+      );
+    }
+  }
+
+  const createdListings = [];
+  for (const listing of unique) {
+    createdListings.push(await createListingRecord(user, listing));
+  }
+
+  let matchedListingId = null;
+  let matchReply = null;
+  for (const listing of createdListings) {
+    matchReply = await tryAutoMatchListing(user, listing);
+    if (matchReply) {
+      matchedListingId = listing.id;
+      break;
+    }
+  }
+
+  if (!matchReply) await clearSession(user, user.whatsapp_phone);
+
+  const replies = duplicates.length
+    ? [[title(`${duplicates.length} duplicate${duplicates.length === 1 ? "" : "s"} skipped`), "The distinct listings were published."].join("\n\n")]
+    : [];
+
+  for (let index = 0; index < createdListings.length; index += 1) {
+    const listing = createdListings[index];
+    if (listing.id === matchedListingId) {
+      replies.push(matchReply);
+      continue;
+    }
+    const shareUrl = listingShareUrl(listing);
+    const liveMessage = listingLiveMessage(
+      `Listing ${index + 1} of ${createdListings.length} is live ✅`,
+      listing.listing_code,
+      listing,
+      shareUrl
+    );
+    const deliveryReply = await deliverListingLive(
+      user,
+      listing,
+      listing.listing_code,
+      liveMessage
+    );
+    if (deliveryReply) replies.push(deliveryReply);
+  }
+
+  return replies.length === 1 ? replies[0] : replies;
+}
+
+function isBulkListingPublishIntent(text) {
+  const command = compactText(text);
+  if (isListingPublishIntent(command) || command === "publish_bulk") return true;
+  return /\b(publish|post|list|make|put|take)\b.*\b(all|both|them|listings?|offers?|live)\b/.test(command)
+    || /\b(go ahead|proceed|continue|yes|oya)\b.*\b(all|both|them)\b/.test(command);
+}
+
+async function handleBulkListing(text, user, session) {
+  const context = session.context_json || {};
+  const listings = Array.isArray(context.listings) ? context.listings : [];
+
+  if (isDeclineIntent(text) || isCancelIntent(text) || isSearchAgainIntent(text)) {
+    await clearSession(user, user.whatsapp_phone);
+    return [
+      title("Bulk listing cancelled"),
+      "",
+      "Nothing was published.",
+      "",
+      mainMenu(user),
+    ].join("\n");
+  }
+
+  if (!isBulkListingPublishIntent(text)) {
+    return bulkListingReviewReply(listings);
+  }
+
+  return publishBulkListings(user, listings);
 }
 
 async function findReciprocalListing(user, listing) {
@@ -1674,10 +1965,13 @@ async function handleCreateListing(text, user, session) {
 module.exports = {
   startListingEdit,
   prepareListingPreview,
+  prepareBulkListingPreview,
   publishListing,
+  publishBulkListings,
   reserveListing,
   reserveListingByCode,
   reserveListingById,
   handleCreateListing,
+  handleBulkListing,
   handleNegotiation,
 };

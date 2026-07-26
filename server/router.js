@@ -3,6 +3,7 @@ const { sendWhatsAppList, sendWhatsAppButtons } = require("./lib/whatsapp");
 const { normalizeCurrency, parsePaymentCurrency, parseCurrencyAmountPairs } = require("./nlp/currency");
 const {
   parseListingDetails,
+  parseBulkListingDetails,
   parseSearchDetails,
   missingListingFields,
   hasDirectionalExchangeText,
@@ -52,7 +53,14 @@ const {
 const { scopedAssistantReply, reputationAssistantReply } = require("./messages/assistant");
 const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
-const { prepareListingPreview, reserveListingByCode, handleCreateListing, handleNegotiation } = require("./flows/listing");
+const {
+  prepareListingPreview,
+  prepareBulkListingPreview,
+  reserveListingByCode,
+  handleCreateListing,
+  handleBulkListing,
+  handleNegotiation,
+} = require("./flows/listing");
 const {
   continueSearchOrShowMatches,
   showOfferMatches,
@@ -263,6 +271,7 @@ const ANSWER_ACTIONS = new Set(["question", "unknown", "greeting", "thanks", "we
 // and gets served immediately — the user is never asked twice.
 const FLOW_COMPATIBLE_ACTIONS = {
   create_listing: new Set(["create_listing"]),
+  bulk_listing: new Set(["create_listing", "flow_reply"]),
   find_offer: new Set(["find_offer"]),
   search_results: new Set(["reserve_listing", "find_offer"]),
   negotiation: new Set(["flow_reply", "reserve_listing", "trade_action"]),
@@ -530,6 +539,30 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return handleNegotiation(text, user, session);
   }
 
+  const bulkPairs = parseCurrencyAmountPairs(text);
+  const bulkListings = bulkPairs.length >= 4 ? parseBulkListingDetails(text) : [];
+  const looksLikeBulkSearch = interpretedAction === "find_offer"
+    || interpretedAction === "browse_offers"
+    || /\b(find|search|show|browse|available|who\s+(?:has|gets?|needs?|wants?))\b/i.test(text);
+  const protectedFlow = ["deal_room", "negotiation"].includes(session?.current_flow);
+  if (bulkPairs.length >= 4 && !looksLikeBulkSearch && !protectedFlow) {
+    if (!bulkListings.length) {
+      return [
+        title("Check the listing pairs"),
+        "",
+        "I found several values, but I could not match every send amount with one receive amount.",
+        "",
+        "Separate each listing with a comma, semicolon, or new line.",
+        "",
+        "Example:",
+        "50k NGN for 55k RWF; 20k GHS for 990k XAF",
+      ].join("\n");
+    }
+    if (isOnHold(user)) return accountOnHoldReply(user);
+    await clearSession(user, user.whatsapp_phone);
+    return prepareBulkListingPreview(user, bulkListings);
+  }
+
   if (["post", "make offer", "create listing", "create offer", "list offer"].includes(command)) {
     if (isOnHold(user)) return accountOnHoldReply(user);
     await clearSession(user, user.whatsapp_phone);
@@ -727,6 +760,10 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   if (session?.current_flow === "create_listing") {
     return handleCreateListing(text, user, session);
+  }
+
+  if (session?.current_flow === "bulk_listing") {
+    return handleBulkListing(text, user, session);
   }
 
   if (session?.current_flow === "find_offer") {
@@ -972,6 +1009,9 @@ async function routeMessage(text, user, session, incoming = {}) {
     if (session?.current_flow === "create_listing") {
       return handleCreateListing("cancel", user, session);
     }
+    if (session?.current_flow === "bulk_listing") {
+      return handleBulkListing("cancel", user, session);
+    }
 
     await clearSession(user, user.whatsapp_phone);
     return isVerified(user)
@@ -1066,6 +1106,7 @@ function normalizeInteractiveCommand(command) {
     profile_history: "history",
     profile_trust: "my trust record",
     add_payout: "add payout",
+    publish_bulk: "publish all",
     verify: "verify",
   };
   if (map[command]) return map[command];

@@ -40,7 +40,13 @@ export async function generateMetadata({ params }: ListingPageProps): Promise<Me
       siteName: "Akara",
       title,
       description,
-      images: [{ url: image, width: 3200, height: 1600, alt: title }],
+      images: [{
+        url: image,
+        width: 3200,
+        height: 1600,
+        alt: title,
+        type: "image/png",
+      }],
     },
     twitter: {
       card: "summary_large_image",
