@@ -202,19 +202,6 @@ function currencyListReply(options = {}) {
   };
 }
 
-function supportReply() {
-  return [
-    title("Get support"),
-    "",
-    "For account, payout, listing, receipt, or dispute help, email Akara support.",
-    "",
-    "Tap to open your email app:",
-    "mailto:support@tryakara.com",
-    "",
-    "Email: support@tryakara.com",
-  ].join("\n");
-}
-
 function verificationStartListPayload(body = "Start verification to continue on Akara.") {
   return {
     body,
@@ -308,7 +295,6 @@ module.exports = {
   feeIncludedText,
   feeIncludedNote,
   listingShareCopy,
-  supportReply,
   explainMissingListing,
   mainMenuListPayload,
   currencyListPayload,

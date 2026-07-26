@@ -29,6 +29,7 @@ const {
   updateComplianceTask,
   getComplianceDashboard,
 } = require("./db/compliance");
+const { listSupportRequests, updateSupportRequest } = require("./db/support");
 
 function requireAdmin(req) {
   const token = req.headers["x-akara-admin-token"];
@@ -397,18 +398,20 @@ async function notifyDisputeExchangeCompleted(dispute) {
 }
 
 async function getAdminOverview() {
-  const [users, listings, deals, disputes, verifications, compliance] = await Promise.all([
+  const [users, listings, deals, disputes, verifications, supportRequests, compliance] = await Promise.all([
     supabaseRequest("users?select=id,verification_status,risk_status,created_at&limit=1000"),
     supabaseRequest("listings?select=id,status,have_currency,want_currency,have_amount,want_amount,created_at&limit=1000"),
     supabaseRequest("deals?select=id,status,have_currency,want_currency,have_amount,want_amount,created_at&limit=1000"),
     supabaseRequest("disputes?select=id,status,created_at&limit=1000"),
     supabaseRequest("verification_requests?select=id,status,created_at&limit=1000"),
+    listSupportRequests(100),
     getComplianceDashboard(),
   ]);
 
   const activeListings = listings.filter((item) => item.status === "active");
   const openDisputes = disputes.filter((item) => ["open", "waiting_for_user", "under_review"].includes(item.status));
   const pendingVerifications = verifications.filter((item) => ["pending_input", "pending_review"].includes(item.status));
+  const openSupportRequests = supportRequests.filter((item) => ["open", "in_review"].includes(item.status));
   const flaggedUsers = users.filter((item) => ["watch", "limited", "suspended"].includes(item.risk_status) || item.verification_status === "suspended");
   const completedDeals = deals.filter((item) => ["completed_pending_fee", "closed"].includes(item.status));
   const lastSevenDays = buildLastSevenDays();
@@ -421,6 +424,7 @@ async function getAdminOverview() {
       completedDeals: completedDeals.length,
       openDisputes: openDisputes.length,
       pendingVerifications: pendingVerifications.length,
+      openSupportRequests: openSupportRequests.length,
       flaggedUsers: flaggedUsers.length,
       privacyRequests: compliance.totals?.dataSubjectRequests || 0,
       openBreaches: compliance.totals?.openBreaches || 0,
@@ -429,6 +433,7 @@ async function getAdminOverview() {
       needsReview:
         openDisputes.length +
         pendingVerifications.length +
+        openSupportRequests.length +
         flaggedUsers.length +
         (compliance.totals?.overdueDataSubjectRequests || 0) +
         (compliance.totals?.openBreaches || 0) +
@@ -443,6 +448,7 @@ async function getAdminOverview() {
       reviewQueue: [
         ...pendingVerifications.slice(0, 5).map((item) => ({ ...item, queue_type: "verification" })),
         ...openDisputes.slice(0, 5).map((item) => ({ ...item, queue_type: "dispute" })),
+        ...openSupportRequests.slice(0, 5).map((item) => ({ ...item, queue_type: "support" })),
         ...flaggedUsers.slice(0, 5).map((item) => ({ ...item, queue_type: "flagged_user" })),
         ...(compliance.queues?.dataSubjectRequests || []).slice(0, 3).map((item) => ({ ...item, queue_type: "privacy_request" })),
         ...(compliance.queues?.breaches || []).slice(0, 3).map((item) => ({ ...item, queue_type: "breach" })),
@@ -700,6 +706,48 @@ async function handleAdminApi(req, res, url) {
       "notes",
     ]);
     return jsonResponse(res, 200, { ok: true, data: await updateComplianceTask(complianceTaskMatch[1], patch) });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/support") {
+    return jsonResponse(res, 200, { ok: true, data: await listSupportRequests(100) });
+  }
+
+  const supportMatch = url.pathname.match(/^\/admin\/api\/support\/([^/]+)$/);
+  if (req.method === "PATCH" && supportMatch) {
+    const body = await readJsonBody(req);
+    if (body.status && !["open", "in_review", "resolved"].includes(body.status)) {
+      return jsonResponse(res, 400, { ok: false, error: "Invalid support status." });
+    }
+
+    const request = await updateSupportRequest(supportMatch[1], {
+      status: body.status,
+      admin_note: body.admin_note,
+    });
+    if (!request) {
+      return jsonResponse(res, 404, { ok: false, error: "Support request not found." });
+    }
+
+    const user = request.user_id ? await getUserById(request.user_id) : null;
+    if (user?.whatsapp_phone) {
+      const heading = request.status === "resolved"
+        ? "Support request resolved"
+        : "Support request updated";
+      const message = [
+        title(heading),
+        "",
+        request.reference ? `*Reference:* ${request.reference}` : "",
+        request.admin_note || (
+          request.status === "resolved"
+            ? "Akara support has completed its review."
+            : "Akara support is reviewing your request."
+        ),
+      ].filter(Boolean).join("\n");
+      await sendWhatsAppText(user.whatsapp_phone, message).catch((error) => {
+        console.error(`[admin] support update failed for ${user.whatsapp_phone}: ${error.message}`);
+      });
+    }
+
+    return jsonResponse(res, 200, { ok: true, data: request });
   }
 
   if (req.method === "GET" && url.pathname === "/admin/api/users") {

@@ -14,6 +14,7 @@ const {
   getReputationCredential,
   credentialShareUrl,
 } = require("../db/credentials");
+const { calculateReputation } = require("../db/integrity");
 const { mainMenu } = require("./copy");
 
 function explainAkaraReply() {
@@ -295,9 +296,20 @@ async function reputationAssistantReply(text, user) {
   }
   const credential = await issueReputationCredential(user.id);
   if (!credential) {
+    const reputation = await calculateReputation(user.id);
     return [
-      title("Trust record unavailable"),
-      "Akara could not issue your Trust Record right now. Please try again shortly.",
+      title("Your trust record"),
+      caption("Your activity and reliability on Akara."),
+      "",
+      labeled(
+        "Trust level",
+        String(reputation.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())
+      ),
+      labeled("Completed trades", String(reputation.completed_trades || 0)),
+      labeled("Completion rate", `${Number(reputation.completion_rate || 0).toFixed(0)}%`),
+      labeled("Open disputes", String(reputation.open_disputes || 0)),
+      "",
+      caption("No phone number, payout detail, ID number, or transaction amount is shown."),
     ].join("\n");
   }
   return trustCredentialMessage(credential);
@@ -334,4 +346,5 @@ async function scopedAssistantReply(text, user, options = {}) {
 
 module.exports = {
   scopedAssistantReply,
+  reputationAssistantReply,
 };

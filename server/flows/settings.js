@@ -123,17 +123,68 @@ async function viewPayoutsReply(user, intro = "") {
     ? profiles.map((profile, index) => formatPaymentProfileCompact(profile, index + 1)).join("\n\n")
     : "No payout details saved yet.";
 
-  return [
+  const body = [
     intro,
     title("Bank & payout details"),
     caption("Where your trade partners send your money."),
     "",
     payoutBlock,
-    "",
-    title("Actions"),
-    action("add payout"),
-    ...(profiles.length ? [action("edit payout 1"), action("delete payout 1"), action("delete all payouts")] : []),
   ].filter(Boolean).join("\n");
+
+  const buttons = [
+    { id: "manage_payout_add", title: "Add payout" },
+    ...(profiles.length
+      ? [
+          { id: "manage_payout_edit", title: "Edit payout" },
+          { id: "manage_payout_delete", title: "Delete payout" },
+        ]
+      : []),
+  ];
+
+  return whatsappButtonsReply(body, buttons, [
+    body,
+    "",
+    action("add payout"),
+    ...(profiles.length ? [action("edit payout"), action("delete payout")] : []),
+  ].join("\n"));
+}
+
+function payoutActionPickerReply(profiles, operation) {
+  const verb = operation === "delete" ? "delete" : "edit";
+  const rows = profiles.slice(0, 10).map((profile, index) => {
+    const route = profile.method === "bank"
+      ? profile.bank_name || "Bank account"
+      : profile.momo_network || "Mobile money";
+    return {
+      id: `${verb}_payout_${index + 1}`,
+      title: `${index + 1}. ${profile.currency} ${profile.method === "bank" ? "bank" : "MoMo"}`,
+      description: `${route} • ${profile.account_name}`.slice(0, 72),
+    };
+  });
+  const body = `Choose the payout detail you want to ${verb}.`;
+
+  return {
+    type: "whatsapp_list",
+    list: {
+      body,
+      button: `Choose payout`,
+      sections: [
+        {
+          title: "Saved payout details",
+          rows,
+        },
+      ],
+    },
+    fallbackText: [
+      body,
+      "",
+      ...profiles.slice(0, 10).map((profile, index) =>
+        `${index + 1}. ${profile.currency} ${profile.method === "bank" ? "bank account" : "mobile money"}`
+      ),
+      "",
+      `Reply ${action(`${verb} payout 1`)}.`,
+    ].join("\n"),
+  };
 }
 
 async function profileSettingsReply(user, intro = "") {
@@ -512,14 +563,14 @@ async function handleSettings(text, user, session) {
         `payment_profiles?id=eq.${filterValue(context.pending_payout_id)}&user_id=eq.${filterValue(user.id)}`,
         { method: "DELETE" }
       );
-      return profileSettingsReply(user, "Payout detail deleted ✅");
+      return viewPayoutsReply(user, "Payout detail deleted ✅");
     }
 
     await upsertSession(user, user.whatsapp_phone, "settings", "menu", {
       payout_map: context.payout_map || {},
       listing_map: context.listing_map || {},
     });
-    return profileSettingsReply(user, "No changes made.");
+    return viewPayoutsReply(user, "No changes made.");
   }
 
   const normalizedCommand = command.replace(/_/g, " ");
@@ -555,6 +606,32 @@ async function handleSettings(text, user, session) {
     return startPaymentProfileFlow(user, {
       return_flow: "settings",
       ...(currency ? { payment_currency: currency } : {}),
+    });
+  }
+
+  if (/^(edit|update|change) payout$/.test(normalizedCommand)) {
+    const profiles = await getPaymentProfiles(user.id);
+    if (!profiles.length) return viewPayoutsReply(user, "You do not have a payout detail to edit.");
+    if (profiles.length > 1) return payoutActionPickerReply(profiles, "edit");
+    return handleSettings("edit payout 1", user, {
+      ...session,
+      context_json: {
+        ...context,
+        payout_map: { "1": profiles[0].id },
+      },
+    });
+  }
+
+  if (/^(delete|remove) payout$/.test(normalizedCommand)) {
+    const profiles = await getPaymentProfiles(user.id);
+    if (!profiles.length) return viewPayoutsReply(user, "You do not have a payout detail to delete.");
+    if (profiles.length > 1) return payoutActionPickerReply(profiles, "delete");
+    return handleSettings("delete payout 1", user, {
+      ...session,
+      context_json: {
+        ...context,
+        payout_map: { "1": profiles[0].id },
+      },
     });
   }
 
@@ -607,11 +684,20 @@ async function handleSettings(text, user, session) {
       ...context,
       pending_payout_id: payoutId,
     });
-    return [
-      "Delete this payout detail?",
+    const body = [
+      title("Delete payout detail?"),
       "",
-      "Reply yes to delete it, or no to keep it.",
+      "This account will no longer be available for new trades.",
     ].join("\n");
+    return whatsappButtonsReply(body, [
+      { id: "yes", title: "Delete payout" },
+      { id: "no", title: "Keep payout" },
+    ], [
+      body,
+      "",
+      `${action("yes")} to delete it`,
+      `${action("no")} to keep it`,
+    ].join("\n"));
   }
 
   const editListingNumber = parseNumberedAction(normalizedCommand, ["edit", "modify", "update", "change"], ["offer", "listing"]);

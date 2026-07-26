@@ -11,6 +11,7 @@ const titles = {
   listings: ["Offers", ""],
   deals: ["Deals", ""],
   disputes: ["Reports", ""],
+  support: ["Support", ""],
   integrity: ["Integrity", ""],
 };
 
@@ -60,6 +61,7 @@ const statusLabels = {
   watch: "Watch",
   limited: "Limited",
   open: "Open",
+  in_review: "In review",
   flagged_user: "Flagged user",
   verification: "Verification",
   dispute: "Dispute",
@@ -182,6 +184,7 @@ function renderOverview(data) {
   renderNavBadge("#nav-users-badge", data.totals.flaggedUsers);
   $("#metric-disputes").textContent = data.totals.openDisputes;
   renderNavBadge("#nav-disputes-badge", data.totals.openDisputes);
+  renderNavBadge("#nav-support-badge", data.totals.openSupportRequests);
   renderLineChart("#activity-chart", data.charts?.activity || [], "deals");
   renderDonutChart("#offer-status-chart", data.charts?.offerStatus || {});
   renderVerticalBarChart("#deal-status-chart", data.charts?.dealStatus || {});
@@ -207,6 +210,12 @@ function renderOverview(data) {
     if (item.queue_type === "dispute") {
       return {
         title: "Open dispute",
+        meta: `${statusLabels[item.status] || item.status} · ${date(item.created_at)}`,
+      };
+    }
+    if (item.queue_type === "support") {
+      return {
+        title: item.reference || "Support request",
         meta: `${statusLabels[item.status] || item.status} · ${date(item.created_at)}`,
       };
     }
@@ -588,6 +597,29 @@ function renderDisputes(rows) {
   ], rows);
 }
 
+function renderSupport(rows) {
+  attachTable("support-table", [
+    { label: "Reference", render: (row) => `<code>${escapeHtml(row.reference || "-")}</code>` },
+    { label: "User", render: (row) => escapeHtml(row.user?.legal_name || row.user?.display_name || row.whatsapp_phone || "-") },
+    { label: "Phone", render: (row) => escapeHtml(row.user?.whatsapp_phone || row.whatsapp_phone || "-") },
+    { label: "Category", render: (row) => escapeHtml(row.category || "general") },
+    { label: "Status", render: (row) => chip(row.status || "open") },
+    { label: "Message", render: (row) => escapeHtml(row.description || "-") },
+    { label: "Trade", render: (row) => escapeHtml(row.deal_code || "-") },
+    { label: "Created", render: (row) => escapeHtml(date(row.created_at)) },
+    {
+      label: "Action",
+      render: (row) => `
+        <div class="dispute-actions" data-support-id="${escapeHtml(row.id)}">
+          ${select("status", row.id, row.status || "open", ["open", "in_review", "resolved"], "support-draft")}
+          <textarea data-support-note="${escapeHtml(row.id)}" placeholder="Reply or resolution note">${escapeHtml(row.admin_note || "")}</textarea>
+          <button class="mini-button" data-support-apply="${escapeHtml(row.id)}">Update</button>
+        </div>
+      `,
+    },
+  ], rows);
+}
+
 function shortHash(value) {
   const text = String(value || "");
   if (!text) return "-";
@@ -722,6 +754,7 @@ async function loadView(view = state.view) {
   if (view === "listings") renderListings(data);
   if (view === "deals") renderDeals(data);
   if (view === "disputes") renderDisputes(data);
+  if (view === "support") renderSupport(data);
   if (view === "integrity") renderIntegrity(data);
 }
 
@@ -793,6 +826,28 @@ async function applyDisputeUpdate(button) {
   });
 
   showNotice("Report updated and users notified.");
+  await loadView(state.view);
+}
+
+async function applySupportUpdate(button) {
+  const id = button.dataset.supportApply;
+  const container = button.closest(".dispute-actions");
+  const status = container.querySelector("select[data-type='support-draft']").value;
+  const adminNote = container.querySelector("textarea[data-support-note]").value.trim();
+
+  if (status === "resolved" && !adminNote) {
+    throw new Error("Add a short resolution note before resolving this support request.");
+  }
+
+  await api(`/admin/api/support/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status,
+      admin_note: adminNote,
+    }),
+  });
+
+  showNotice("Support request updated and the user was notified.");
   await loadView(state.view);
 }
 
@@ -879,6 +934,10 @@ function bindEvents() {
 
     if (event.target.matches("button[data-dispute-apply]")) {
       applyDisputeUpdate(event.target).catch((error) => showNotice(error.message, true));
+    }
+
+    if (event.target.matches("button[data-support-apply]")) {
+      applySupportUpdate(event.target).catch((error) => showNotice(error.message, true));
     }
 
     if (event.target.matches("button[data-user-suspend]")) {

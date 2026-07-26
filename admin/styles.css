@@ -355,6 +355,22 @@ button {
   transform: rotate(-35deg);
 }
 
+.nav-support::before {
+  width: 12px;
+  height: 9px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+}
+
+.nav-support::after {
+  bottom: 4px;
+  left: 5px;
+  width: 5px;
+  height: 5px;
+  border-left: 2px solid currentColor;
+  transform: skewY(-35deg);
+}
+
 .sidebar-footer {
   display: grid;
   gap: 8px;

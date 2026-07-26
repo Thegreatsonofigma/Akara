@@ -28,6 +28,7 @@
           <button class="nav-item" data-view="listings"><span class="nav-icon nav-offers"></span>Offers</button>
           <button class="nav-item" data-view="deals"><span class="nav-icon nav-deals"></span>Deals</button>
           <button class="nav-item" data-view="disputes"><span class="nav-icon nav-reports"></span>Reports<span id="nav-disputes-badge" class="nav-badge" hidden>0</span></button>
+          <button class="nav-item" data-view="support"><span class="nav-icon nav-support"></span>Support<span id="nav-support-badge" class="nav-badge" hidden>0</span></button>
           <button class="nav-item" data-view="integrity"><span class="nav-icon nav-integrity"></span>Integrity</button>
         </nav>
 
@@ -193,6 +194,18 @@
             </div>
             <div class="table-wrap">
               <table id="disputes-table"></table>
+            </div>
+          </div>
+        </section>
+
+        <section id="support" class="view">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Support Requests</h2>
+              <input class="filter" data-filter="support-table" placeholder="Filter support requests" />
+            </div>
+            <div class="table-wrap">
+              <table id="support-table"></table>
             </div>
           </div>
         </section>

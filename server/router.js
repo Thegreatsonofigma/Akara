@@ -18,6 +18,7 @@ const {
   isHistoryCommand,
   isProfileCommand,
   isPayoutsCommand,
+  isTrustRecordCommand,
   isMyListingsCommand,
   isBulkListingCancelIntent,
   isBulkPayoutDeleteIntent,
@@ -44,12 +45,11 @@ const {
   verificationIntro,
   mainMenuListPayload,
   verificationStartButtonPayload,
-  supportReply,
   explainMissingListing,
   menuOptionLines,
   currencyListReply,
 } = require("./messages/copy");
-const { scopedAssistantReply } = require("./messages/assistant");
+const { scopedAssistantReply, reputationAssistantReply } = require("./messages/assistant");
 const { startVerification, handleVerification, verificationStepPrompt } = require("./flows/verification");
 const { startPaymentProfileFlow, startPaymentProfileForCurrency, handlePaymentProfile } = require("./flows/payment-profile");
 const { prepareListingPreview, reserveListingByCode, handleCreateListing, handleNegotiation } = require("./flows/listing");
@@ -78,6 +78,14 @@ const {
   isExplicitTradeRecallIntent,
 } = require("./flows/deal-room");
 const { getMyListingsReply, getMyDealsReply } = require("./flows/history");
+const {
+  supportOptionsReply,
+  supportEmailReply,
+  disputeSupportReply,
+  startSupportRequest,
+  submitSupportRequest,
+  handleSupport,
+} = require("./flows/support");
 
 function accountOnHoldReply(user) {
   return `Your account is paused until ${new Date(user.hold_until).toLocaleString()}.`;
@@ -161,6 +169,28 @@ function isSupportCommand(text) {
     || /\bsupport@tryakara\.com\b/i.test(value);
 }
 
+function isHumanSupportRequest(text, session = null) {
+  const value = String(text || "").trim().toLowerCase();
+  if (!value) return false;
+  const asksForHuman = /\b(human|person|someone|somebody|admin|customer care|customer service|support agent|support team)\b/.test(value);
+  const reportsProblem = /\b(issue|problem|complaint|conflict|dispute|wrong|stuck|failed|not working|cannot|can'?t)\b/.test(value);
+  const asksForReview = /\b(resolve|review|look into|check|investigate|help|assist|respond|reply|fix|sort out)\b/.test(value);
+  const activeTrade = session?.current_flow === "deal_room" || Boolean(extractDealCode(text));
+
+  if (asksForHuman) return true;
+  if (activeTrade) return false;
+  return reportsProblem && asksForReview;
+}
+
+function supportCategory(text) {
+  const value = String(text || "").toLowerCase();
+  if (/\b(dispute|conflict|scam|fraud|payment|receipt|not received|no alert)\b/.test(value)) return "trade";
+  if (/\b(verify|verification|kyc|id|selfie)\b/.test(value)) return "verification";
+  if (/\b(payout|bank|momo|account)\b/.test(value)) return "payout";
+  if (/\b(listing|offer)\b/.test(value)) return "listing";
+  return "general";
+}
+
 // Handles a numeric reply that quotes an earlier Akara message (menu, offer
 // list, or payout options).
 async function resolveQuotedReply(text, user, incoming = {}) {
@@ -180,7 +210,7 @@ async function resolveQuotedReply(text, user, incoming = {}) {
     if (number === 3) return getMyListingsReply(user);
     if (number === 4) return getMyDealsReply(user);
     if (number === 5) return viewProfileReply(user);
-    if (number === 6) return supportReply();
+    if (number === 6) return supportOptionsReply();
   }
 
   const listingCode = listingCodesFromText(quotedText)[number];
@@ -210,6 +240,7 @@ const FLOW_COMPATIBLE_ACTIONS = {
   negotiation: new Set(["flow_reply", "reserve_listing", "trade_action"]),
   settings: new Set(["settings_action", "add_payout"]),
   deal_room: new Set(["trade_action", "reserve_listing"]),
+  support: new Set(["flow_reply", "get_support"]),
 };
 
 function actionInterruptsFlow(interpretedAction, flow) {
@@ -269,12 +300,43 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     if (command === "3") return getMyListingsReply(user);
     if (command === "4") return getMyDealsReply(user);
     if (command === "5") return viewProfileReply(user);
-    if (command === "6") return supportReply();
+    if (command === "6") return supportOptionsReply();
   }
 
-  if (interpretedAction === "get_support" || isSupportCommand(text)) {
+  if (command === "email support") {
     await clearSession(user, user.whatsapp_phone);
-    return supportReply();
+    return supportEmailReply();
+  }
+
+  if (command === "report issue") {
+    await clearSession(user, user.whatsapp_phone);
+    return startSupportRequest(user);
+  }
+
+  if (command === "dispute help") {
+    await clearSession(user, user.whatsapp_phone);
+    return disputeSupportReply();
+  }
+
+  if (session?.current_flow === "support"
+      && session.current_step === "awaiting_issue"
+      && !isSupportCommand(command)
+      && !isMenuCommand(text)) {
+    return handleSupport(text, user, session);
+  }
+
+  if (interpretedAction === "get_support" || isSupportCommand(command)) {
+    await clearSession(user, user.whatsapp_phone);
+    return supportOptionsReply();
+  }
+
+  if (isHumanSupportRequest(text, session)) {
+    const dealCode = extractDealCode(text);
+    return submitSupportRequest(user, text, {
+      category: supportCategory(text),
+      source: "whatsapp_natural_request",
+      dealCode,
+    });
   }
 
   if (!isVerified(user)) {
@@ -353,13 +415,18 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return sendMenuList(user, mainMenu(user));
   }
 
-  if (interpretedAction === "get_support" || isSupportCommand(text)) {
+  if (interpretedAction === "get_support" || isSupportCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
-    return supportReply();
+    return supportOptionsReply();
   }
 
   if (interpretedAction === "bulk_cancel_listings" || isBulkListingCancelIntent(text)) return requestBulkListingCancel(user);
   if (interpretedAction === "bulk_delete_payouts" || isBulkPayoutDeleteIntent(text)) return requestBulkPayoutDelete(user);
+
+  if (interpretedAction === "view_trust_record" || isTrustRecordCommand(text)) {
+    await clearSession(user, user.whatsapp_phone);
+    return reputationAssistantReply(text, user);
+  }
 
   if (interpretedAction === "my_deals" || isHistoryCommand(text)) {
     await clearSession(user, user.whatsapp_phone);
@@ -578,7 +645,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   }
 
   if (session?.current_flow === "settings") {
-    const settingsText = interpretedSettingsCommand(interpreted, text, session);
+    const settingsText = interpretedSettingsCommand(interpreted, command, session);
     if (interpretedAction === "unknown" && shouldLeaveSettingsForFreshCommand(settingsText)) {
       await clearSession(user, user.whatsapp_phone);
       session = null;
@@ -675,8 +742,8 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return viewProfileReply(user);
   }
 
-  if (command === "6" || isSupportCommand(text)) {
-    return supportReply();
+  if (command === "6" || isSupportCommand(command)) {
+    return supportOptionsReply();
   }
 
   if (isRateQuestion(text)) {
@@ -845,6 +912,7 @@ async function routeMessage(text, user, session, incoming = {}) {
     || interpreted.action === "trade_action"
     || interpreted.action === "settings_action"
     || interpreted.action === "view_profile"
+    || interpreted.action === "view_trust_record"
     || interpreted.action === "my_listings"
     || interpreted.action === "my_deals"
     || interpreted.action === "get_support"
@@ -865,10 +933,20 @@ function normalizeInteractiveCommand(command) {
     view_history: "history",
     view_profile: "profile",
     get_support: "get support",
+    support_email: "email support",
+    support_report: "report issue",
+    support_dispute: "dispute help",
+    trust_record: "my trust record",
+    manage_payout_add: "add payout",
+    manage_payout_edit: "edit payout",
+    manage_payout_delete: "delete payout",
     add_payout: "add payout",
     verify: "verify",
   };
-  return map[command] || command;
+  if (map[command]) return map[command];
+  const payoutAction = String(command || "").match(/^(edit|delete)_payout_(\d+)$/);
+  if (payoutAction) return `${payoutAction[1]} payout ${payoutAction[2]}`;
+  return command;
 }
 
 async function routeInterpreted(interpreted, text, user, session, incoming = {}) {
@@ -945,6 +1023,9 @@ function describeOutgoingForHistory(reply) {
   if (typeof reply === "string") return reply;
   if (reply.type === "whatsapp_list") {
     return reply.fallbackText || reply.list?.body || "[sent interactive options]";
+  }
+  if (reply.type === "whatsapp_buttons") {
+    return reply.fallbackText || reply.body || "[sent reply buttons]";
   }
   if (reply.type === "whatsapp_flow") {
     return reply.fallbackText || reply.flow?.body || "[sent WhatsApp Flow]";

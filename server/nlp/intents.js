@@ -47,6 +47,12 @@ function isPayoutsCommand(text) {
   return /^(?:show |see |view |check |open )*(?:my |me my )?(payouts?|payout details?|payout info(?:rmation)?|bank|banks|bank details?|bank info(?:rmation)?|bank accounts?|payment details?|payment info(?:rmation)?|account number|momo|momo details?|mobile money|mobile money details?|wallet|wallets?)$/.test(value);
 }
 
+function isTrustRecordCommand(text) {
+  const value = compactText(text);
+  return /^(?:show |see |view |check |open )*(?:my )?(trust record|trust profile|reputation|reputation record|reputation passport|trust credential)$/.test(value)
+    || /\b(show|see|view|check|open)\b.*\b(my )?(trust|reputation)\b/.test(value);
+}
+
 function isMyListingsCommand(text) {
   const value = compactText(text);
   return /^(?:show |see |view |check |open )*(?:my |me my )(listings?|offers?|ads?|posts?|deals? i posted)$/.test(value)
@@ -248,6 +254,7 @@ module.exports = {
   isHistoryCommand,
   isProfileCommand,
   isPayoutsCommand,
+  isTrustRecordCommand,
   isMyListingsCommand,
   inferIntent,
   isBulkListingCancelIntent,

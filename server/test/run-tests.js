@@ -294,6 +294,7 @@ async function run() {
   check("payment details → payouts", intents.isPayoutsCommand("payment details"));
   check("my momo → payouts", intents.isPayoutsCommand("my momo"));
   check("view my payout details → payouts", intents.isPayoutsCommand("view my payout details"));
+  check("my trust record → trust record", intents.isTrustRecordCommand("my trust record"));
   check("my profile → profile", intents.isProfileCommand("my profile"));
   check("my account → profile", intents.isProfileCommand("my account"));
   check("account info → profile", intents.isProfileCommand("account info"));
@@ -395,6 +396,16 @@ async function run() {
   check("profile has no bank numbers", !reply.includes("0123456789"), reply);
   check("profile has no payout list", !reply.includes("*Payouts*"), reply);
 
+  reply = await send(ALICE, "my trust record");
+  check("trust record opens its own view", reply.includes("*Akara Trust Record*") || reply.includes("*Your trust record*"), reply);
+  check("trust record does not resend profile", !reply.includes("*Your profile*"), reply);
+  check("trust record shows concise activity", reply.includes("Completed trades") && reply.includes("Completion rate"), reply);
+
+  reply = await send(ALICE, "my trust record", {
+    interpret: { action: "view_profile", answer: "Here is your profile." },
+  });
+  check("trust record wording overrides a generic profile classification", !reply.includes("*Your profile*"), reply);
+
   reply = await send(ALICE, "okay thanks");
   check("session closure is conversational", reply.includes("You are welcome, Test"), reply);
   check("session closure gives one useful nudge", reply.includes("Ready to exchange?") && !reply.includes("Choose what you want to do next"), reply);
@@ -426,6 +437,20 @@ async function run() {
   check("payouts view title", reply.includes("Bank & payout details"), reply);
   check("payouts view shows bank", reply.includes("GTBank"), reply);
   check("payouts view has no listings", !reply.includes("*Listings*"), reply);
+  check(
+    "payouts view uses native actions",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "manage_payout_add,manage_payout_edit,manage_payout_delete",
+    JSON.stringify(lastButtonPayload())
+  );
+
+  reply = await send(ALICE, "manage_payout_edit");
+  check("edit payout action opens account picker", reply.includes("Choose the payout detail you want to edit"), reply);
+  check(
+    "edit payout picker lists saved accounts",
+    (lastListPayload()?.sections?.[0]?.rows || []).length === 2,
+    JSON.stringify(lastListPayload())
+  );
+  await send(ALICE, "menu");
 
   reply = await send(ALICE, "my listings");
   check("listings view empty state", reply.includes("No listings yet"), reply);
@@ -455,10 +480,36 @@ async function run() {
 	  );
 
 	  reply = await send(ALICE, "6");
-	  check("typed menu 6 opens support email", reply.includes("mailto:support@tryakara.com"), reply);
+	  check("typed menu 6 opens support channels", reply.includes("support@tryakara.com") && reply.includes("tryakara.com/support"), reply);
+	  check(
+	    "support menu uses clear native actions",
+	    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "support_email,support_report,support_dispute",
+	    JSON.stringify(lastButtonPayload())
+	  );
+
+	  reply = await send(ALICE, "get_support", {
+	    interpret: { action: "question", answer: "Akara is free to use for swapping currencies." },
+	  });
+	  check("support menu action cannot be hijacked by fee copy", reply.includes("*Akara support*") && !reply.includes("free to use"), reply);
 
 	  reply = await send(ALICE, "contact support");
 	  check("natural support request opens email", reply.includes("support@tryakara.com"), reply);
+
+	  reply = await send(ALICE, "I have an issue and need an admin to look into it");
+	  check("frustrated help request creates support record", reply.includes("*Support request received*"), reply);
+	  check(
+	    "support request reaches admin queue",
+	    __table("audit_events").some((row) =>
+	      row.entity_type === "support_request"
+	      && row.event_payload?.description.includes("need an admin")
+	    ),
+	    JSON.stringify(__table("audit_events").filter((row) => row.entity_type === "support_request"))
+	  );
+
+	  reply = await send(ALICE, "report issue");
+	  check("report issue asks for one concise message", reply.includes("*Report an issue*"), reply);
+	  reply = await send(ALICE, "My payout account update is stuck");
+	  check("support flow saves the submitted issue", reply.includes("*Support request received*"), reply);
 
 	  // ---------- service fee + referral copy
   scenario("service fee copy");
