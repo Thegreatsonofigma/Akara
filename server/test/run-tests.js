@@ -97,6 +97,7 @@ const { config } = require("../config");
 const { findNigerianBanks } = require("../lib/coinprofile");
 const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
 const { normalizeMobileMoneyNumber } = require("../lib/mobile-number");
+const { formatMessageLayout } = require("../lib/format");
 const { handlePaymentProfile } = require("../flows/payment-profile");
 
 const { __table, __reset } = fakeSupabase;
@@ -312,6 +313,24 @@ async function run() {
   check("https listing links enable WhatsApp previews", containsPreviewableUrl("Open https://www.tryakara.com/l/AKR-LIST-001"));
   check("ordinary chat does not request a link preview", !containsPreviewableUrl("Show me my listings"));
 
+  // ---------- shared WhatsApp message formatting
+  scenario("message formatting");
+  const formattedMessage = formatMessageLayout([
+    "*Offer summary*",
+    "*You send:* 50,000 NGN",
+    "*You receive:* 55,000 RWF",
+    "",
+    "",
+    "`publish` to continue",
+  ].join("\n"));
+  check(
+    "consecutive information fields have breathing room",
+    formattedMessage.includes("*You send:* 50,000 NGN\n\n*You receive:* 55,000 RWF"),
+    formattedMessage
+  );
+  check("excess blank lines are collapsed", !formattedMessage.includes("\n\n\n"), formattedMessage);
+  check("actions are separated from information", formattedMessage.includes("55,000 RWF\n\n`publish`"), formattedMessage);
+
   // ---------- mobile money number formatting
   scenario("mobile money number formatting");
   check(
@@ -400,6 +419,12 @@ async function run() {
   check("trust record opens its own view", reply.includes("*Akara Trust Record*") || reply.includes("*Your trust record*"), reply);
   check("trust record does not resend profile", !reply.includes("*Your profile*"), reply);
   check("trust record shows concise activity", reply.includes("Completed trades") && reply.includes("Completion rate"), reply);
+  check("trust record uses restrained visual cues", reply.includes("✅") && reply.includes("📈") && reply.includes("⚠️"), reply);
+  check(
+    "trust record omits unnecessary hidden-data disclaimer",
+    !reply.includes("phone number") && !reply.includes("payout detail") && !reply.includes("transaction amount"),
+    reply
+  );
 
   reply = await send(ALICE, "my trust record", {
     interpret: { action: "view_profile", answer: "Here is your profile." },
@@ -408,7 +433,14 @@ async function run() {
 
   reply = await send(ALICE, "okay thanks");
   check("session closure is conversational", reply.includes("You are welcome, Test"), reply);
-  check("session closure gives one useful nudge", reply.includes("Ready to exchange?") && !reply.includes("Choose what you want to do next"), reply);
+  check("session closure gives one concise nudge", reply.includes("What would you like to do next?"), reply);
+  check(
+    "session closure embeds the native menu without static menu copy",
+    lastListPayload()?.sections?.[0]?.rows?.length === 6
+      && !reply.includes("1. `make offer`")
+      && !reply.includes("Choose what you want to do next on Akara"),
+    JSON.stringify({ reply, list: lastListPayload() })
+  );
   removeSeededDeals(completedProfileDeals);
 
   // ---------- inactivity menu nudge
@@ -765,7 +797,7 @@ async function run() {
   reply = await send(ALICE, "show me ngn offers");
   check("browse shows bob listing", reply.includes("AKR-LIST-090"), reply);
   check("browse enters search_results", (await sessionFlow(ALICE)) === "search_results");
-  const fixedOfferNumber = reply.match(/(?:^|\n)\s*(\d+)\.\s+\*?AKR-LIST-090\b/i)?.[1];
+  const fixedOfferNumber = reply.match(/(?:^|\n)\*?\s*(\d+)\.\s+\*?AKR-LIST-090\b/i)?.[1];
 
   reply = await send(ALICE, "9");
   check("invalid number is guided", reply.includes("valid offer number"), reply);
@@ -1127,7 +1159,12 @@ async function run() {
     },
   });
   check("out-of-scope request gets a useful answer", reply.includes("focused outline"), reply);
-  check("out-of-scope answer returns gently to Akara", reply.includes("Ready to exchange?"), reply);
+  check("out-of-scope answer returns gently to Akara", reply.includes("What would you like to do next?"), reply);
+  check(
+    "out-of-scope answer carries the native Akara menu",
+    lastListPayload()?.sections?.[0]?.rows?.some((row) => row.id === "find_offers"),
+    JSON.stringify(lastListPayload())
+  );
 
   // ---------- reserve without context
   scenario("reserve guidance");

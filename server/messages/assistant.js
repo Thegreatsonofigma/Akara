@@ -178,10 +178,7 @@ function conversationNudge(user, activeFlow = "") {
   }[activeFlow];
   if (active) return caption(active);
 
-  return [
-    caption("Ready to exchange? Tell me what you have and what you want."),
-    action("I have 50k NGN and want RWF"),
-  ].join("\n");
+  return caption("What would you like to do next?");
 }
 
 function genericAkaraAssistantReply(user, options = {}) {
@@ -262,19 +259,23 @@ function trustCredentialMessage(credential, heading = "Akara Trust Record") {
   const link = credentialShareUrl(credential.credential_code);
   return [
     title(heading),
-    caption("A privacy-safe record of activity completed through Akara."),
+    caption("Your activity and reliability on Akara."),
     "",
-    labeled("Credential", credential.credential_code),
-    labeled("Trust level", String(credential.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())),
-    labeled("Completed trades", String(claims.completed_trades || 0)),
-    labeled("Completion rate", `${Number(claims.completion_rate || 0).toFixed(0)}%`),
-    labeled("Open disputes", String(claims.unresolved_disputes || 0)),
-    labeled("Record integrity", claims.integrity_status === "verified" ? "Stellar verified" : "Updating"),
-    labeled("Valid until", new Date(credential.expires_at).toLocaleDateString("en-GB")),
+    `*Reference*\n${credential.credential_code}`,
     "",
-    link ? labeled("Share", link) : "",
+    `*🏅 Trust level*\n${String(credential.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())}`,
     "",
-    caption("This record contains no phone number, payout detail, ID number, or transaction amount."),
+    `*✅ Completed trades*\n${claims.completed_trades || 0}`,
+    "",
+    `*📈 Completion rate*\n${Number(claims.completion_rate || 0).toFixed(0)}%`,
+    "",
+    `*⚠️ Open disputes*\n${claims.unresolved_disputes || 0}`,
+    "",
+    `*🔐 Record integrity*\n${claims.integrity_status === "verified" ? "Stellar verified" : "Updating"}`,
+    "",
+    `*Valid until*\n${new Date(credential.expires_at).toLocaleDateString("en-GB")}`,
+    "",
+    link ? `*🔗 Share record*\n${link}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -301,15 +302,13 @@ async function reputationAssistantReply(text, user) {
       title("Your trust record"),
       caption("Your activity and reliability on Akara."),
       "",
-      labeled(
-        "Trust level",
-        String(reputation.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())
-      ),
-      labeled("Completed trades", String(reputation.completed_trades || 0)),
-      labeled("Completion rate", `${Number(reputation.completion_rate || 0).toFixed(0)}%`),
-      labeled("Open disputes", String(reputation.open_disputes || 0)),
+      `*🏅 Trust level*\n${String(reputation.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())}`,
       "",
-      caption("No phone number, payout detail, ID number, or transaction amount is shown."),
+      `*✅ Completed trades*\n${reputation.completed_trades || 0}`,
+      "",
+      `*📈 Completion rate*\n${Number(reputation.completion_rate || 0).toFixed(0)}%`,
+      "",
+      `*⚠️ Open disputes*\n${reputation.open_disputes || 0}`,
     ].join("\n");
   }
   return trustCredentialMessage(credential);

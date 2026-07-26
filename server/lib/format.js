@@ -22,6 +22,39 @@ function fieldBlock(label, value) {
   return `${caption(label)}\n${title(value)}`;
 }
 
+function formatMessageLayout(input) {
+  const source = String(input || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.trimEnd());
+  const output = [];
+  const inlineField = /^\*[^*\n]+:\*\s+\S/;
+  const sectionTitle = /^\*[^*\n]+\*$/;
+  const actionLine = /^`[^`\n]+`(?:\s|$)/;
+
+  for (const line of source) {
+    if (!line.trim()) {
+      if (output.length && output[output.length - 1] !== "") output.push("");
+      continue;
+    }
+
+    const previous = output[output.length - 1] || "";
+    const previousContent = [...output].reverse().find((item) => item !== "") || "";
+    const beginsNewField = inlineField.test(line) && inlineField.test(previousContent);
+    const beginsSection = sectionTitle.test(line) && output.length > 0;
+    const beginsActions = actionLine.test(line) && previousContent && !actionLine.test(previousContent);
+
+    if ((beginsNewField || beginsSection || beginsActions) && previous !== "") {
+      output.push("");
+    }
+    output.push(line);
+  }
+
+  while (output[0] === "") output.shift();
+  while (output[output.length - 1] === "") output.pop();
+  return output.join("\n");
+}
+
 function normalizeShortText(input, maxLength = 80) {
   const value = String(input || "").trim().replace(/\s+/g, " ");
   if (!value) return null;
@@ -95,5 +128,6 @@ module.exports = {
   positiveMoney,
   digitsOnly,
   formatCooldown,
+  formatMessageLayout,
   applyInterpretedAnswer,
 };

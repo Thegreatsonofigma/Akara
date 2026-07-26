@@ -249,13 +249,27 @@ function actionInterruptsFlow(interpretedAction, flow) {
   return !(compatible && compatible.has(interpretedAction));
 }
 
-function conversationalReply(interpreted, text, user, session, options = {}) {
-  return scopedAssistantReply(text, user, {
+async function conversationalReply(interpreted, text, user, session, options = {}) {
+  const reply = await scopedAssistantReply(text, user, {
     modelAnswer: interpreted?.answer || "",
     interpretedAction: interpreted?.action || "unknown",
     activeFlow: session?.current_flow || "",
     ...options,
   });
+
+  if (isVerified(user) && !session?.current_flow && !options.suppressNudge) {
+    return {
+      type: "whatsapp_list",
+      list: mainMenuListPayload(reply),
+      fallbackText: [
+        reply,
+        "",
+        mainMenu(user),
+      ].join("\n"),
+    };
+  }
+
+  return reply;
 }
 
 function isConversationalInterpretation(interpreted) {
