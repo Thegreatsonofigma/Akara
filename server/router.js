@@ -119,6 +119,27 @@ function makeOfferPrompt() {
   });
 }
 
+function isBulkOfferStartRequest(text) {
+  const value = String(text || "").trim().toLowerCase();
+  const bulkLanguage = /\b(bulk|multiple|several|many|more than one|different (?:currency|currencies|pairs?))\b/.test(value);
+  const listingLanguage = /\b(offers?|listings?|rates?)\b/.test(value);
+  const creationLanguage = /\b(create|make|post|publish|list|add|set up|want|need)\b/.test(value);
+  return bulkLanguage && listingLanguage && creationLanguage;
+}
+
+function bulkOfferPrompt() {
+  return [
+    title("Create listings in bulk"),
+    "",
+    "Send 2 to 10 complete listings in one message. They can use different currency pairs.",
+    "",
+    caption("Example"),
+    "`50k NGN for 55k RWF; 30k KES for 4.2m RWF; 20k GHS for 300k XAF`",
+    "",
+    "I will prepare one review before anything goes live.",
+  ].join("\n");
+}
+
 function findOfferPrompt() {
   return currencyListReply({
     mode: "want",
@@ -365,6 +386,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const interpretedAction = interpreted?.action || "unknown";
   const details = interpreted?.details || {};
   const bulkRequest = bulkListingRequest(text, interpretedAction, session);
+  const bulkStartRequest = isBulkOfferStartRequest(text);
 
   if (isVerified(user) && !session?.current_flow && /^[1-6]$/.test(command)) {
     await clearSession(user, user.whatsapp_phone);
@@ -397,17 +419,18 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   if (session?.current_flow === "support"
       && session.current_step === "awaiting_issue"
       && !bulkRequest.eligible
+      && !bulkStartRequest
       && !isSupportCommand(command)
       && !isMenuCommand(text)) {
     return handleSupport(text, user, session);
   }
 
-  if ((interpretedAction === "get_support" && !bulkRequest.eligible) || isSupportCommand(command)) {
+  if ((interpretedAction === "get_support" && !bulkRequest.eligible && !bulkStartRequest) || isSupportCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return supportOptionsReply();
   }
 
-  if (!bulkRequest.eligible && isHumanSupportRequest(text, session)) {
+  if (!bulkRequest.eligible && !bulkStartRequest && isHumanSupportRequest(text, session)) {
     const dealCode = extractDealCode(text);
     return submitSupportRequest(user, text, {
       category: supportCategory(text),
@@ -475,6 +498,15 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
       "",
       "Use the button below to start.",
     ].join("\n"));
+  }
+
+  if (bulkStartRequest) {
+    if (isOnHold(user)) return accountOnHoldReply(user);
+    await clearSession(user, user.whatsapp_phone);
+    await upsertSession(user, user.whatsapp_phone, "create_listing", "quick", {
+      bulk_guidance: true,
+    });
+    return bulkOfferPrompt();
   }
 
   if (bulkRequest.eligible) {

@@ -58,6 +58,11 @@ const { containsPreviewableUrl } = whatsapp;
 const listSends = [];
 const buttonSends = [];
 const mediaSends = [];
+const textSends = [];
+whatsapp.sendWhatsAppText = async (to, text) => {
+  textSends.push({ to, text });
+  return { logged: true };
+};
 whatsapp.sendWhatsAppList = async (to, payload) => {
   listSends.push({ to, payload });
   return { logged: true };
@@ -768,6 +773,12 @@ async function run() {
   const bulkRoutingUser = seedVerifiedUser(BULK_ROUTING, "Bulk Routing User");
   seedPayout(bulkRoutingUser, "NGN");
   seedPayout(bulkRoutingUser, "RWF");
+  reply = await send(BULK_ROUTING, "I want to create a bulk offer", {
+    interpret: { action: "get_support" },
+  });
+  check("bulk start request opens concise batch guidance", reply.includes("*Create listings in bulk*"), reply);
+  check("bulk guidance explains mixed currency pairs", reply.includes("30k KES for 4.2m RWF") && reply.includes("20k GHS for 300k XAF"), reply);
+  check("bulk start request cannot be misrouted to support", !reply.includes("*Akara support*"), reply);
   const tenListingMessage = [
     "Can someone help me create these NGN to RWF listings:",
     ...Array.from({ length: 10 }, (_, index) =>
@@ -1270,6 +1281,35 @@ async function run() {
   const twoWayDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-092")?.id);
   check("deal keeps negotiated send side", Number(twoWayDeal?.want_amount) === 105000, JSON.stringify(twoWayDeal));
   check("deal keeps negotiated receive side", Number(twoWayDeal?.have_amount) === 98000, JSON.stringify(twoWayDeal));
+
+  // ---------- natural owner counter with a leading rejection
+  scenario("natural-language counter");
+  const naturalCounterListing = seedListing(charlieRow, {
+    code: "AKR-LIST-7093",
+    have_currency: "RWF",
+    have_amount: 4200000,
+    want_currency: "KES",
+    want_amount: 30000,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(BOB, "open AKR-LIST-7093");
+  check("natural counter fixture opens negotiation", reply.includes("*Negotiable listing*"), reply);
+  reply = await send(BOB, "I can send 30,000 Kenyan shillings for 4,200,000 Rwandan francs");
+  check("original natural proposal reaches the owner", reply.includes("30,000 KES") && reply.includes("4,200,000 RWF"), reply);
+
+  const textSendsBeforeNaturalCounter = textSends.length;
+  reply = await send(CHARLIE, "No. I want 46,500 Kenyan shillings");
+  const naturalCounterNotice = textSends
+    .slice(textSendsBeforeNaturalCounter)
+    .find((message) => message.to === BOB)?.text || "";
+  check("leading no plus a new value creates a counter", reply.includes("*Counter sent*") && reply.includes("46,500 KES"), reply);
+  check("new counter replaces the earlier value for the other user", naturalCounterNotice.includes("46,500 KES") && !naturalCounterNotice.includes("30,000 KES"), naturalCounterNotice);
+  check("one-sided natural counter retains the other side", naturalCounterNotice.includes("4,200,000 RWF"), naturalCounterNotice);
+  reply = await send(BOB, "decline AKR-LIST-7093");
+  check("plain decline still closes a counter", reply.includes("Counter declined"), reply);
+  const naturalCounterListingIndex = __table("listings").indexOf(naturalCounterListing);
+  if (naturalCounterListingIndex >= 0) __table("listings").splice(naturalCounterListingIndex, 1);
 
   // ---------- partial fill matching
   scenario("partial fill matching");
