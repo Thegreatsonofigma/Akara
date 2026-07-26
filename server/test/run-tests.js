@@ -485,7 +485,7 @@ async function run() {
   await send(ALICE, "menu");
 
   reply = await send(ALICE, "my listings");
-  check("listings view empty state", reply.includes("No listings yet"), reply);
+  check("listings view empty state", reply.includes("No active listings"), reply);
 
   reply = await send(ALICE, "my transactions");
   check("history synonym works", reply.includes("No transaction history yet"), reply);
@@ -1064,8 +1064,24 @@ async function run() {
   check("single listing confirmation uses reply buttons", listingButtonIds.join(",") === "confirm,keep", JSON.stringify(lastButtonPayload()));
 
   reply = await send(ALICE, "confirm");
-  check("single listing cancel completes", reply.includes("*Listing closed*") && reply.includes("off search"), reply);
+  check("single listing cancel completes", reply.includes("*Listing closed") && reply.includes("off search"), reply);
   check("single listing cancel does not dump profile", !reply.includes("Manage payout details") && !reply.includes("*Payouts*") && !reply.includes("*Profile*"), reply);
+  check(
+    "single listing close ends with the native main menu",
+    lastListPayload()?.sections?.[0]?.rows?.some((row) => row.id === "find_offers")
+      && reply.includes("What would you like to do next?"),
+    JSON.stringify({ reply, list: lastListPayload() })
+  );
+
+  reply = await send(ALICE, "my listings");
+  check("closed listing disappears from My Listings immediately", !reply.includes("AKR-LIST-778"), reply);
+  check(
+    "closed listing is absent from listing picker",
+    !(lastListPayload()?.sections || []).some((section) =>
+      (section.rows || []).some((row) => String(row.title || "").includes("AKR-LIST-778"))
+    ),
+    JSON.stringify(lastListPayload())
+  );
 
   seedListing(aliceRow, {
     code: "AKR-LIST-779",
@@ -1092,7 +1108,16 @@ async function run() {
   check("bulk cancel asks to confirm", reply.includes("Cancel all listings?"), reply);
 
   reply = await send(ALICE, "confirm");
-  check("bulk cancel completes", reply.includes("Listings cancelled"), reply);
+  check("bulk cancel completes", reply.includes("Listings closed"), reply);
+  check(
+    "bulk close ends with the native main menu",
+    lastListPayload()?.sections?.[0]?.rows?.some((row) => row.id === "my_listings")
+      && reply.includes("off search"),
+    JSON.stringify({ reply, list: lastListPayload() })
+  );
+
+  reply = await send(ALICE, "my listings");
+  check("bulk-closed listings stay out of My Listings", reply.includes("No active listings") && !reply.includes("AKR-LIST-777"), reply);
 
   reply = await send(ALICE, "delete all my payouts");
   check("bulk payout delete asks", reply.includes("Delete all payout details?"), reply);

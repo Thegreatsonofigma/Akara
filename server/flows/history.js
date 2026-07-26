@@ -3,6 +3,7 @@ const { title, caption, action, labeled, formatMoney } = require("../lib/format"
 const { getUserListings, displayReference, listingStatusLabel } = require("../db/listings");
 const { userRoleInDeal, dealPartySummary, readableDealStatus } = require("../db/deals");
 const { upsertSession } = require("../db/sessions");
+const { mainMenu, mainMenuListPayload } = require("../messages/copy");
 
 function listingPickerReply(listings, body) {
   return {
@@ -32,13 +33,23 @@ async function getMyListingsReply(user) {
   const listings = await getUserListings(user.id, 5);
 
   if (listings.length === 0) {
-    return [
-      title("No listings yet"),
+    const body = [
+      title("No active listings"),
       "",
-      caption("Make one by typing what you have and what you want."),
+      "You have no live, paused, or reserved listings right now.",
       "",
-      action("I have 50k naira and want 55k RWF"),
+      caption("What would you like to do next?"),
     ].join("\n");
+
+    return {
+      type: "whatsapp_list",
+      list: mainMenuListPayload(body),
+      fallbackText: [
+        body,
+        "",
+        mainMenu(user),
+      ].join("\n"),
+    };
   }
 
   const listingMap = {};

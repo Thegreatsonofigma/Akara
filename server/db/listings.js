@@ -129,14 +129,18 @@ function listingStatusLabel(status) {
   }[status] || status;
 }
 
-async function getUserListings(userId, limit = 10) {
+async function getUserListings(userId, limit = 10, options = {}) {
+  const statuses = Array.isArray(options.statuses)
+    ? options.statuses.filter(Boolean)
+    : ["active", "reserved", "paused"];
   return supabaseRequest(
     [
       "listings?select=id,listing_code,status,have_currency,want_currency,have_amount,want_amount,listing_type,created_at",
       `owner_user_id=eq.${filterValue(userId)}`,
+      statuses.length ? `status=in.(${statuses.map(filterValue).join(",")})` : "",
       "order=created_at.desc",
       `limit=${limit}`,
-    ].join("&")
+    ].filter(Boolean).join("&")
   );
 }
 

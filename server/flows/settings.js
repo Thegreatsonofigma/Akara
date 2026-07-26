@@ -18,7 +18,7 @@ const { getPaymentProfiles, formatPaymentProfileCompact } = require("../db/payme
 const { getUserListings, displayReference, listingShareUrl, listingStatusLabel } = require("../db/listings");
 const { getCompletedTradeCount } = require("../db/deals");
 const { getLatestUserReputation } = require("../db/integrity");
-const { mainMenu, referralPitch } = require("../messages/copy");
+const { mainMenu, mainMenuListPayload, referralPitch } = require("../messages/copy");
 const {
   startPaymentProfileFlow,
   paymentEditMenuPrompt,
@@ -218,7 +218,7 @@ async function profileSettingsReply(user, intro = "") {
         `${formatMoney(listing.have_amount, listing.have_currency)} for ${formatMoney(listing.want_amount, listing.want_currency)}`,
         `Status: ${listingStatusLabel(listing.status)}`,
       ].join("\n"))
-    : [caption("No listings yet.")];
+    : [caption("No active listings.")];
 
   return [
     intro,
@@ -324,21 +324,37 @@ async function requestBulkPayoutDelete(user) {
   ].join("\n");
 }
 
-function listingActionReply(listing, label) {
+function menuCompletionReply(user, body) {
+  return {
+    type: "whatsapp_list",
+    list: mainMenuListPayload(body),
+    fallbackText: [
+      body,
+      "",
+      mainMenu(user),
+    ].join("\n"),
+  };
+}
+
+function listingActionReply(user, listing, label) {
   const reference = displayReference(listing.listing_code, "listing");
   const messages = {
     paused: "It is hidden from search until you reopen it.",
-    reopened: "It can appear in search again.",
-    closed: "It is off search now, so people cannot find it or open new trades from it.",
+    reopened: "It is live again and can appear in offer searches.",
+    closed: "It is now off search. People can no longer find it or open a new exchange from it.",
   };
 
-  return [
-    title(`Listing ${label}`),
+  const body = [
+    title(`Listing ${label} ✅`),
     "",
     labeled("Reference", reference),
     "",
     messages[label] || "The listing has been updated.",
+    "",
+    caption("What would you like to do next?"),
   ].join("\n");
+
+  return menuCompletionReply(user, body);
 }
 
 async function requestSingleListingClose(user, context, listing) {
@@ -460,7 +476,7 @@ async function completeListingAction(user, context = {}) {
     ].join("\n");
   }
 
-  return listingActionReply(rows[0], "closed");
+  return listingActionReply(user, rows[0], "closed");
 }
 
 async function completeBulkAction(user, context = {}) {
@@ -477,13 +493,16 @@ async function completeBulkAction(user, context = {}) {
     );
 
     await clearSession(user, user.whatsapp_phone);
-    return [
-      title("Listings cancelled"),
+    const body = [
+      title("Listings closed ✅"),
       "",
       `${rows.length} listing${rows.length === 1 ? "" : "s"} closed successfully.`,
       "",
-      action("profile"),
+      "They are now off search and cannot receive new offers.",
+      "",
+      caption("What would you like to do next?"),
     ].join("\n");
+    return menuCompletionReply(user, body);
   }
 
   if (context.bulk_action === "delete_payouts") {
@@ -817,7 +836,7 @@ async function handleSettings(text, user, session) {
       ].join("\n");
     }
     await clearSession(user, user.whatsapp_phone);
-    return listingActionReply(rows[0], listingAction.label);
+    return listingActionReply(user, rows[0], listingAction.label);
   }
 
   return [
