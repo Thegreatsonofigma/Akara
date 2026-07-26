@@ -110,7 +110,12 @@ async function sendWhatsAppList(to, { body, button = "Click to Select", sections
   return text ? JSON.parse(text) : null;
 }
 
-async function sendWhatsAppButtons(to, { body, buttons = [], fallbackText = "" }) {
+async function sendWhatsAppButtons(to, {
+  body,
+  buttons = [],
+  fallbackText = "",
+  preserveLayout = false,
+}) {
   const safeButtons = buttons.slice(0, 3).map((button, index) => ({
     type: "reply",
     reply: {
@@ -123,7 +128,8 @@ async function sendWhatsAppButtons(to, { body, buttons = [], fallbackText = "" }
     throw new Error("At least one WhatsApp reply button is required");
   }
 
-  const messageBody = formatMessageLayout(body || fallbackText || "").slice(0, 1024);
+  const rawBody = String(body || fallbackText || "");
+  const messageBody = (preserveLayout ? rawBody.trim() : formatMessageLayout(rawBody)).slice(0, 1024);
 
   if (config.sendMode === "log") {
     console.log(`\nAkara buttons -> ${to}\n${messageBody}\n${JSON.stringify(safeButtons, null, 2)}\n`);

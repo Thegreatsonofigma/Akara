@@ -22,6 +22,7 @@ process.env.AKARA_SECURITY_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_RECEIPT_OCR = "off";
 process.env.AKARA_ID_OCR = "off";
+process.env.AKARA_MATCHING_BATCH_WINDOW_MS = "0";
 process.env.AKARA_PUBLIC_URL = "https://akara-share.example";
 process.env.AKARA_SHARE_URL = "https://akara-share.example";
 
@@ -113,6 +114,11 @@ const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
 const { normalizeMobileMoneyNumber } = require("../lib/mobile-number");
 const { formatMessageLayout } = require("../lib/format");
 const { parseBulkListingDetails } = require("../nlp/exchange");
+const {
+  buildClearingPlan,
+  buildNegotiationPlan,
+  compareClearingPlans,
+} = require("../lib/matching-engine");
 const {
   handlePaymentProfile,
   mobileMoneyNumberPrompt,
@@ -306,6 +312,72 @@ async function run() {
   const ALICE = "250700000001";
   const BOB = "250700000002";
   const CHARLIE = "250700000003";
+
+  // ---------- smart matching math
+  scenario("smart matching math");
+  const fairSource = {
+    have_currency: "RWF",
+    want_currency: "KES",
+    have_amount: 10000,
+    want_amount: 13000,
+    listing_type: "negotiable",
+  };
+  const fairCandidate = {
+    id: "fair-candidate",
+    owner_user_id: "fair-owner",
+    have_currency: "KES",
+    want_currency: "RWF",
+    have_amount: 500000,
+    want_amount: 320000,
+    listing_type: "negotiable",
+  };
+  const fairPlan = buildClearingPlan(fairCandidate, fairSource);
+  check(
+    "geometric clearing improves both peers",
+    Number(fairPlan?.reciprocal_units) === 14252.19
+      && Number(fairPlan?.source_minimum) === 13000
+      && Number(fairPlan?.candidate_maximum) === 15625
+      && fairPlan.source_improvement > 0
+      && fairPlan.candidate_savings > 0,
+    JSON.stringify(fairPlan)
+  );
+  const fullCandidatePlan = buildClearingPlan({
+    ...fairCandidate,
+    id: "full-candidate",
+    have_amount: 13000,
+    want_amount: 10000,
+  }, fairSource);
+  check(
+    "a full mutual fill ranks before a small partial fill",
+    compareClearingPlans(fullCandidatePlan, fairPlan, {}) < 0,
+    JSON.stringify({ fullCandidatePlan, fairPlan })
+  );
+  check(
+    "near rates receive a midpoint negotiation",
+    Boolean(buildNegotiationPlan({
+      ...fairCandidate,
+      have_amount: 90000,
+      want_amount: 100000,
+    }, {
+      ...fairSource,
+      have_amount: 100000,
+      want_amount: 100000,
+      want_currency: "KES",
+    }, 20))
+  );
+  check(
+    "irrelevant rate gaps do not create noisy negotiations",
+    !buildNegotiationPlan({
+      ...fairCandidate,
+      have_amount: 50000,
+      want_amount: 100000,
+    }, {
+      ...fairSource,
+      have_amount: 100000,
+      want_amount: 100000,
+      want_currency: "KES",
+    }, 20)
+  );
 
   // ---------- intent regex units
   scenario("intent regex units");
@@ -523,9 +595,27 @@ async function run() {
   );
 
   await rememberFailedMessage(aliceRow, ALICE, { text: "my trust record", type: "text" });
+  await rememberFailedMessage(aliceRow, ALICE, { text: "retry_last_message", type: "text" });
+  check(
+    "a failed retry cannot replace the original saved request",
+    (await getSession(ALICE))?.context_json?.pending_retry?.incoming?.text === "my trust record",
+    JSON.stringify(await getSession(ALICE))
+  );
   reply = await send(ALICE, "retry_last_message");
   check("retry resumes the saved action from its original context", reply.includes("Trust Record") || reply.includes("trust record"), reply);
   check("successful retry clears the saved failure", !(await getSession(ALICE))?.context_json?.pending_retry, JSON.stringify(await getSession(ALICE)));
+
+  const staleRetrySession = await getSession(ALICE);
+  staleRetrySession.context_json = {
+    ...(staleRetrySession.context_json || {}),
+    pending_retry: {
+      incoming: { text: "retry_last_message", type: "text", media: null, quotedText: "" },
+      failed_at: new Date().toISOString(),
+    },
+  };
+  reply = await send(ALICE, "retry_last_message");
+  check("a stale self-referencing retry terminates safely", reply.includes("*Nothing waiting to retry*") && reply.includes("stale"), reply);
+  check("stale retry state is cleared", !(await getSession(ALICE))?.context_json?.pending_retry, JSON.stringify(await getSession(ALICE)));
 
   reply = await send(ALICE, "okay thanks");
   check("session closure is conversational", reply.includes("You are welcome, Test"), reply);
@@ -553,6 +643,47 @@ async function run() {
     lastListPayload()?.sections?.[0]?.rows?.length === 6,
     JSON.stringify(lastListPayload())
   );
+
+  reply = await send(ALICE, "What can I do on Akara?", {
+    interpret: { action: "question", answer: "You can use Akara for currency exchange." },
+  });
+  check("capabilities question gets a concise product answer", reply.includes("*What you can do on Akara*") && reply.includes("inside WhatsApp"), reply);
+  check(
+    "capabilities question embeds the native menu tray",
+    lastListPayload()?.sections?.[0]?.rows?.length === 6
+      && lastListPayload()?.sections?.[0]?.rows?.some((row) => row.id === "find_offers"),
+    JSON.stringify(lastListPayload())
+  );
+  check("capabilities answer does not repeat the static menu", !reply.includes("1. `make offer`"), reply);
+
+  reply = await send(ALICE, "I am new here and honestly do not know where to begin", {
+    interpret: {
+      action: "unknown",
+      answer: "No pressure. I can help you find an exchange or organize one of your own.",
+    },
+  });
+  check("open-ended orientation language receives a useful answer", reply.includes("No pressure"), reply);
+  check(
+    "open-ended orientation language receives the native menu without phrase matching",
+    lastListPayload()?.sections?.[0]?.rows?.length === 6,
+    JSON.stringify(lastListPayload())
+  );
+
+  await send(ALICE, "payouts", { interpret: { action: "view_payouts" } });
+  check("payout view establishes a settings context", (await sessionFlow(ALICE)) === "settings");
+  reply = await send(ALICE, "Why do people use peer exchange?", {
+    interpret: {
+      action: "question",
+      answer: "People often use peer exchange to find terms that fit how they already move money.",
+    },
+  });
+  check("a general answer can leave non-resumable settings context", reply.includes("People often use peer exchange"), reply);
+  check(
+    "a general answer after settings carries the native menu",
+    lastListPayload()?.sections?.[0]?.rows?.length === 6,
+    JSON.stringify(lastListPayload())
+  );
+  check("non-resumable settings context is cleared after conversational steering", (await sessionFlow(ALICE)) === null);
 
   // ---------- inactivity menu nudge
   scenario("inactivity menu nudge");
@@ -609,6 +740,105 @@ async function run() {
   reply = await send(ALICE, "find offers");
   check("empty history button opens all offers", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
   await send(ALICE, "cancel");
+
+  // ---------- conversational account overviews
+  scenario("conversational account overviews");
+  const OVERVIEW_USER = "250700000024";
+  const overviewUser = seedVerifiedUser(OVERVIEW_USER, "Overview User");
+  seedPayout(overviewUser, "NGN");
+  seedPayout(overviewUser, "RWF");
+  const overviewStatuses = [
+    "active", "active", "active", "active",
+    "paused", "paused",
+    "reserved",
+    "cancelled", "cancelled", "completed", "expired",
+  ];
+  overviewStatuses.forEach((status, index) => {
+    seedListing(overviewUser, {
+      code: `AKR-LIST-8${String(index).padStart(2, "0")}`,
+      have_currency: index % 2 ? "NGN" : "RWF",
+      have_amount: 10000 + index,
+      want_currency: index % 2 ? "RWF" : "NGN",
+      want_amount: 12000 + index,
+      status,
+      created_at: new Date(Date.now() - index * 1000).toISOString(),
+    });
+  });
+  const overviewCompletedDeal = seedCompletedDeal(overviewUser, aliceRow, {
+    deal_code: "AKR-TXN-OVERVIEW",
+  });
+  const overviewCompletedListingIndex = __table("listings")
+    .findIndex((listing) => listing.id === overviewCompletedDeal.listing_id);
+  if (overviewCompletedListingIndex >= 0) __table("listings").splice(overviewCompletedListingIndex, 1);
+
+  reply = await send(OVERVIEW_USER, "Can I see all my listings?", {
+    interpret: { action: "question", answer: "Here are your listings. What would you like to do next?" },
+  });
+  check("natural all-listings request opens the real listing picker", lastListPayload()?.button === "Choose listing" && reply.includes("*Your listings*"), JSON.stringify(lastListPayload()));
+  check("generic model copy cannot replace the real listing records", !reply.includes("What would you like to do next?"), reply);
+  check(
+    "listing overview reports real status counts",
+    reply.includes("*Total listings:* 11")
+      && reply.includes("*🟢 Live:* 4")
+      && reply.includes("*⏸️ Paused:* 2")
+      && reply.includes("*🔒 In trade:* 1")
+      && reply.includes("*⚫ Closed:* 3")
+      && reply.includes("*✅ Completed listings:* 1")
+      && reply.includes("*✅ Completed exchanges:* 1"),
+    reply
+  );
+  const overviewRows = (lastListPayload()?.sections || []).flatMap((section) => section.rows || []);
+  check("long listing history provides a native see-more action", overviewRows.length === 10 && overviewRows.at(-1)?.id === "my_listings_page_1", JSON.stringify(lastListPayload()));
+
+  reply = await send(OVERVIEW_USER, "my_listings_page_1");
+  check("listing pagination returns the remaining records", reply.includes("Showing 10-11 of 11"), reply);
+
+  reply = await send(OVERVIEW_USER, "How many listings do I have live?", {
+    interpret: { action: "question", answer: "Let me check that for you." },
+  });
+  check("listing count question returns the account overview", reply.includes("*🟢 Live listings:* 4") && !reply.includes("Let me check"), reply);
+
+  reply = await send(OVERVIEW_USER, "How many payout details do I have set up on Akara?", {
+    interpret: { action: "question", answer: "You have some payout accounts." },
+  });
+  check("payout count question returns the real saved count", reply.includes("*🏦 Saved payout details:* 2"), reply);
+  check("payout count question stays concise", !reply.includes("NGN bank account") && !reply.includes("RWF mobile money"), reply);
+
+  reply = await send(
+    OVERVIEW_USER,
+    "How many listings do I have opened and how many payout details do I have saved?",
+    { interpret: { action: "view_payouts", answer: "You have two payout details." } }
+  );
+  check(
+    "compound account question answers every requested clause",
+    reply.includes("*🟢 Live listings:* 4")
+      && reply.includes("*🏦 Saved payout details:* 2"),
+    reply
+  );
+  check(
+    "compound account answer offers both detailed views",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "my_listings,view_payouts,main_menu",
+    JSON.stringify(lastButtonPayload())
+  );
+
+  reply = await send(OVERVIEW_USER, "view_payouts");
+  check("compound overview payout button opens the saved payout records", reply.includes("*Bank & payout details*") && reply.includes("*Total saved:* 2"), reply);
+
+  reply = await send(OVERVIEW_USER, "How many closed listings do I have?", {
+    interpret: { action: "question", answer: "Let me look at your listings." },
+  });
+  check("status-specific count answers only the requested listing state", reply.includes("*⚫ Closed listings:* 3"), reply);
+  check("status-specific count avoids an unnecessary full listing dump", !reply.includes("*Total listings:*"), reply);
+
+  for (const tableName of ["listings", "deals"]) {
+    const rows = __table(tableName);
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const row = rows[index];
+      if (row.owner_user_id === overviewUser.id || row.maker_user_id === overviewUser.id || row.taker_user_id === overviewUser.id) {
+        rows.splice(index, 1);
+      }
+    }
+  }
 
   reply = await send(ALICE, "1");
   check("typed menu 1 opens make offer", reply.includes("Tell me what currency you have"), reply);
@@ -690,9 +920,59 @@ async function run() {
 
   receiptCheck = await analyzeReceiptEvidence(
     { amount: 80000, currency: "NGN" },
+    { text: "Transfer successful\nAmount NGN 80,000\nAccount 0123456789\nReference 20260726001" }
+  );
+  check(
+    "receipt parser finds the locked amount among account and reference numbers",
+    receiptCheck.ocr_status === "matched" && Number(receiptCheck.ocr_amount) === 80000,
+    JSON.stringify(receiptCheck)
+  );
+
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
+    { text: "Transfer failed\nAmount NGN 80,000" }
+  );
+  check("receipt parser rejects failed payment status", receiptCheck.ocr_status === "mismatch", JSON.stringify(receiptCheck));
+
+  const mpesaReceiptText = [
+    "Transaction Successful",
+    "Jul 25, 2026",
+    "2:17 PM",
+    "Amount Paid",
+    "KES 13,000.00",
+    "Sent to 0704030385",
+    "Phone Number 0704030385",
+    "Amount KES 13,000.00",
+    "Transaction ID QX3W7ZL0J7",
+    "Completed",
+    "You have successfully sent KES 13,000.00 to 0704030385.",
+  ].join("\n");
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 12000, currency: "KES" },
+    { text: mpesaReceiptText }
+  );
+  check(
+    "M-Pesa mismatch reports the currency-labelled amount rather than phone or date digits",
+    receiptCheck.ocr_status === "mismatch"
+      && receiptCheck.ocr_mismatch_reason.includes("13,000 KES")
+      && !receiptCheck.ocr_mismatch_reason.includes("704,030,385"),
+    JSON.stringify(receiptCheck)
+  );
+
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
     { media: { id: "m1", filename: "receipt.png" } }
   );
   check("receipt parser keeps image-only receipt pending", receiptCheck.ocr_status === "pending", JSON.stringify(receiptCheck));
+
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
+    {
+      text: "Paid 80,000 NGN",
+      media: { id: "m2", filename: "receipt-80000-ngn.png", mimeType: "image/png" },
+    }
+  );
+  check("receipt caption cannot substitute for image OCR", receiptCheck.ocr_status === "pending", JSON.stringify(receiptCheck));
 
   // ---------- one-shot listing creation + publish + free service fee in review
   scenario("one-shot listing");
@@ -1184,15 +1464,80 @@ async function run() {
   reply = await send(ALICE, fixedOfferNumber || "1");
   check("displayed fixed-offer number opens the trade", reply.includes("Akara Trade opened ✅"), reply);
   check("selection enters deal room", (await sessionFlow(ALICE)) === "deal_room");
+  check(
+    "trade opening keeps payment facts compact and inline",
+    reply.includes("*You send:*")
+      && reply.includes("*You receive:*")
+      && reply.includes("*Payment window:* 15 minutes")
+      && reply.includes("*Service fee:* Free")
+      && !reply.includes("_You send_"),
+    reply
+  );
+  check(
+    "trade opening uses native payment actions",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "paid,received,dispute",
+    JSON.stringify(lastButtonPayload())
+  );
+  check(
+    "trade opening removes the duplicate typed action block",
+    !reply.includes("*Actions*") && !reply.includes("`paid` after you send"),
+    reply
+  );
   const openedDealCode = (await getSession(ALICE))?.context_json?.deal_code || __table("deals").at(-1)?.deal_code;
 
   // ---------- deal room actions
   scenario("deal room");
   reply = await send(ALICE, "status");
-  check("status shows summary", reply.includes("_Transaction ref_") && reply.includes(`*${openedDealCode}*`), reply);
+  check("status shows summary", reply.includes("*Transaction ref:*") && reply.includes(openedDealCode), reply);
 
   reply = await send(ALICE, "i don pay");
   check("paid asks for receipt", reply.includes("Receipt needed"), reply);
+
+  const dealBeforeInvalidReceipt = __table("deals").find((row) => row.deal_code === openedDealCode);
+  const textSendsBeforeInvalidReceipt = textSends.length;
+  const interruptedReceiptSession = __table("message_sessions").find((row) => row.whatsapp_phone === ALICE);
+  Object.assign(interruptedReceiptSession, {
+    current_flow: null,
+    current_step: null,
+    context_json: {},
+  });
+  reply = await send(ALICE, "Hi Doreen", {
+    media: { id: "unrelated-receipt", mimeType: "image/png", filename: "unrelated.png" },
+    interpret: { action: "greeting", answer: "Hi Doreen, good to hear from you." },
+  });
+  check(
+    "receipt media stays in the active trade instead of becoming a greeting",
+    reply.includes("Receipt could not be verified") && !reply.includes("good to hear from you"),
+    reply
+  );
+  check(
+    "unverified receipt leaves payment status unchanged",
+    !dealBeforeInvalidReceipt?.taker_sent_at,
+    JSON.stringify(dealBeforeInvalidReceipt)
+  );
+  check(
+    "unverified receipt is not forwarded to the other party",
+    !textSends.slice(textSendsBeforeInvalidReceipt).some((message) => message.to === BOB),
+    JSON.stringify(textSends.slice(textSendsBeforeInvalidReceipt))
+  );
+  check(
+    "receipt rejection offers retry and dispute buttons",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "retry_receipt,dispute",
+    JSON.stringify(lastButtonPayload())
+  );
+  check(
+    "receipt rejection keeps the upload step active",
+    (await getSession(ALICE))?.current_step === "awaiting_receipt",
+    JSON.stringify(await getSession(ALICE))
+  );
+  check(
+    "receipt media reconstructs a lost trade-room session",
+    (await getSession(ALICE))?.context_json?.deal_code === openedDealCode,
+    JSON.stringify(await getSession(ALICE))
+  );
+
+  reply = await send(ALICE, "retry_receipt");
+  check("receipt retry button restores the upload prompt", reply.includes("*Upload receipt*"), reply);
 
   reply = await send(BOB, "received");
   check("bob confirms receipt", reply.includes("Receipt confirmed ✅"), reply);
@@ -1372,7 +1717,7 @@ async function run() {
 
   reply = await send(CHARLIE, "accept");
   check("partial acceptance opens trade", reply.includes("Akara Trade opened ✅"), reply);
-  check("partial acceptance tells owner remaining value", reply.includes("_Still listed_") && reply.includes("*10,000 RWF for 10,000 NGN*"), reply);
+  check("partial acceptance tells owner remaining value", reply.includes("*Still listed:* 10,000 RWF for 9,230.77 NGN"), reply);
   const partialSource = __table("listings").find((listing) => listing.listing_code === "AKR-LIST-993");
   const partialResidual = __table("listings").find((listing) => (
     listing.owner_user_id === charlieRow.id
@@ -1381,7 +1726,7 @@ async function run() {
     && listing.have_currency === "RWF"
     && listing.want_currency === "NGN"
     && Number(listing.have_amount) === 10000
-    && Number(listing.want_amount) === 10000
+    && Number(listing.want_amount) === 9230.77
   ));
   check("partial source listing is reserved", partialSource?.status === "reserved", JSON.stringify(partialSource));
   check("partial residual listing remains live", Boolean(partialResidual), JSON.stringify(__table("listings").filter((listing) => listing.owner_user_id === charlieRow.id)));
@@ -1469,9 +1814,12 @@ async function run() {
   check("my listings opens a listing picker", lastListPayload()?.button === "Choose listing", JSON.stringify(lastListPayload()));
   check("listing picker maps the first listing", lastListPayload()?.sections?.[0]?.rows?.[0]?.id === "manage_listing_1", JSON.stringify(lastListPayload()));
   check(
-    "listing status guide uses separate scannable rows",
-    lastListPayload()?.body?.includes("🟢 Live\n\n🟡 Paused")
-      && lastListPayload()?.body?.includes("🔒 In trade\n\n⚫ Closed"),
+    "listing picker starts with a compact status overview",
+    lastListPayload()?.body?.includes("*Total listings:*")
+      && lastListPayload()?.body?.includes("*🟢 Live:*")
+      && lastListPayload()?.body?.includes("*⏸️ Paused:*")
+      && lastListPayload()?.body?.includes("*🔒 In trade:*")
+      && lastListPayload()?.body?.includes("*⚫ Closed:*"),
     lastListPayload()?.body
   );
 
@@ -1664,14 +2012,218 @@ async function run() {
 
   // ---------- auto-match on publish
   scenario("auto match");
-  seedListing(bobRow, { code: "AKR-LIST-200", have_currency: "NGN", have_amount: 200000, want_currency: "RWF", want_amount: 220000 });
+  const incompatibleReciprocal = seedListing(bobRow, {
+    code: "AKR-LIST-199",
+    have_currency: "NGN",
+    have_amount: 200000,
+    want_currency: "RWF",
+    want_amount: 300000,
+    created_at: "2025-01-01T00:00:00.000Z",
+  });
+  const compatibleReciprocal = seedListing(bobRow, {
+    code: "AKR-LIST-200",
+    have_currency: "NGN",
+    have_amount: 200000,
+    want_currency: "RWF",
+    want_amount: 220000,
+    created_at: "2025-01-02T00:00:00.000Z",
+  });
   reply = await send(ALICE, "i have 220k rwf and want 200k naira");
   check("reciprocal request previews listing", reply.includes("*Review listing*"), reply);
 
   reply = await send(ALICE, "publish");
   check("publish auto-matches reciprocal listing", reply.includes("Akara Trade opened ✅"), reply);
-  await send(ALICE, "cancel trade");
+  const autoMatchedDeal = __table("deals").at(-1);
+  check(
+    "auto-match skips a reciprocal listing whose rate does not cross",
+    autoMatchedDeal?.listing_id === compatibleReciprocal.id && incompatibleReciprocal.status === "active",
+    JSON.stringify({ autoMatchedDeal, incompatibleReciprocal, compatibleReciprocal })
+  );
+  check(
+    "auto-match explains its compatibility basis",
+    reply.includes("The currencies, available value and rates are compatible."),
+    reply
+  );
+  reply = await send(ALICE, "cancel trade");
+  check(
+    "pre-payment cancellation requeues the locked auto-match portions",
+    reply.includes("locked portions were restored")
+      && __table("audit_events").some((event) => (
+        event.entity_id === autoMatchedDeal.id
+        && event.event_name === "smart_match_requeued"
+      )),
+    JSON.stringify({
+      reply,
+      events: __table("audit_events").filter((event) => event.entity_id === autoMatchedDeal.id),
+    })
+  );
+  check(
+    "cancelled peers receive a temporary pairing exclusion",
+    __table("audit_events").filter((event) => event.event_name === "match_pair_excluded").length >= 2,
+    JSON.stringify(__table("audit_events").filter((event) => event.event_name === "match_pair_excluded"))
+  );
   await send(ALICE, "cancel");
+
+  scenario("auto match passes favorable rate to user");
+  for (const phone of [ALICE, BOB]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
+  for (const testListing of __table("listings")) {
+    const isTestPair = ["NGN", "RWF"].includes(testListing.have_currency)
+      && ["NGN", "RWF"].includes(testListing.want_currency);
+    if (isTestPair && testListing.status === "active") testListing.status = "closed";
+  }
+  const favorableReciprocal = seedListing(bobRow, {
+    code: "AKR-LIST-201",
+    have_currency: "NGN",
+    have_amount: 500000,
+    want_currency: "RWF",
+    want_amount: 320000,
+    listing_type: "negotiable",
+    created_at: "2025-01-02T00:00:00.000Z",
+  });
+  reply = await send(ALICE, "I have 10000 RWF and want at least 13000 NGN");
+  check("favorable reciprocal request previews listing", reply.includes("*Review listing*"), reply);
+  reply = await send(ALICE, "publish");
+  const favorableDeal = __table("deals").at(-1);
+  check(
+    "better reciprocal rate is passed through to the user",
+    favorableDeal?.listing_id === favorableReciprocal.id
+      && Number(favorableDeal?.want_amount) === 10000
+      && Number(favorableDeal?.have_amount) === 14252.19
+      && reply.includes("14,252.19 NGN"),
+    JSON.stringify({ favorableDeal, favorableReciprocal, reply })
+  );
+  check(
+    "price improvement is explained without asking for negotiation",
+    reply.includes("receive more than your minimum")
+      && !reply.includes("negotiation opened"),
+    reply
+  );
+  const favorableResidual = __table("listings").find((row) => (
+    row.owner_user_id === bobRow.id
+      && row.status === "active"
+      && row.have_currency === "NGN"
+      && row.want_currency === "RWF"
+      && Number(row.have_amount) === 484375
+      && Number(row.want_amount) === 310000
+  ));
+  check(
+    "favorable partial fill preserves the reciprocal listing rate",
+    Boolean(favorableResidual) && favorableReciprocal.status === "reserved",
+    JSON.stringify({ favorableReciprocal, favorableResidual })
+  );
+  favorableDeal.status = "cancelled";
+
+  scenario("favorable partial fill preserves requester minimum");
+  for (const phone of [ALICE, BOB]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
+  for (const testListing of __table("listings")) {
+    const isTestPair = ["NGN", "RWF"].includes(testListing.have_currency)
+      && ["NGN", "RWF"].includes(testListing.want_currency);
+    if (isTestPair && testListing.status === "active") testListing.status = "closed";
+  }
+  seedListing(bobRow, {
+    code: "AKR-LIST-202",
+    have_currency: "NGN",
+    have_amount: 15625,
+    want_currency: "RWF",
+    want_amount: 10000,
+    listing_type: "negotiable",
+  });
+  reply = await send(ALICE, "I have 20000 RWF and want at least 26000 NGN");
+  reply = await send(ALICE, "publish");
+  const requesterPartialDeal = __table("deals").at(-1);
+  const requesterResidual = __table("listings").find((row) => (
+    row.owner_user_id === aliceRow.id
+      && row.status === "active"
+      && row.have_currency === "RWF"
+      && row.want_currency === "NGN"
+      && Number(row.have_amount) === 10000
+      && Number(row.want_amount) === 13000
+  ));
+  check(
+    "requester residual keeps the original minimum rate after price improvement",
+    Number(requesterPartialDeal?.want_amount) === 10000
+      && Number(requesterPartialDeal?.have_amount) === 14252.19
+      && Boolean(requesterResidual),
+    JSON.stringify({ requesterPartialDeal, requesterResidual })
+  );
+  requesterPartialDeal.status = "cancelled";
+
+  scenario("non-crossing negotiable reciprocal");
+  for (const phone of [ALICE, BOB]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
+  for (const listing of __table("listings")) {
+    const isTestPair = ["NGN", "RWF"].includes(listing.have_currency)
+      && ["NGN", "RWF"].includes(listing.want_currency);
+    if (isTestPair && listing.status === "active") listing.status = "closed";
+  }
+  const negotiationCandidate = seedListing(bobRow, {
+    code: "AKR-LIST-203",
+    have_currency: "NGN",
+    have_amount: 90000,
+    want_currency: "RWF",
+    want_amount: 100000,
+    listing_type: "negotiable",
+  });
+  const buttonsBeforeReciprocalNegotiation = buttonSends.length;
+  reply = await send(ALICE, "I have 100000 RWF and want 100000 NGN");
+  check("non-crossing reciprocal request previews listing", reply.includes("*Review listing*"), reply);
+  reply = await send(ALICE, "publish");
+  check(
+    "non-crossing negotiable pair opens negotiation instead of a trade",
+    reply.includes("*Listing live · negotiation opened*") && !reply.includes("Akara Trade opened"),
+    reply
+  );
+  const reciprocalOffer = __table("negotiable_offers").at(-1);
+  const reciprocalSourceId = String(reciprocalOffer?.message || "").match(/^reciprocal_source:([0-9a-f-]{36})$/i)?.[1];
+  const reciprocalSource = __table("listings").find((row) => row.id === reciprocalSourceId);
+  check(
+    "reciprocal negotiation keeps both listings live until acceptance",
+    negotiationCandidate.status === "active" && reciprocalSource?.status === "active",
+    JSON.stringify({ negotiationCandidate, reciprocalSource })
+  );
+  check(
+    "reciprocal negotiation proposes values both listings can cover",
+    Number(reciprocalOffer?.offered_amount) === 94868.33
+      && Number(reciprocalOffer?.receive_amount) === 90000,
+    JSON.stringify(reciprocalOffer)
+  );
+  const ownerNegotiationButtons = buttonSends
+    .slice(buttonsBeforeReciprocalNegotiation)
+    .find((entry) => entry.to === BOB)?.payload?.buttons || [];
+  check(
+    "reciprocal listing owner receives accept counter and decline buttons",
+    ownerNegotiationButtons.map((button) => button.id).join(",") === "accept,counter,decline",
+    JSON.stringify(ownerNegotiationButtons)
+  );
+  check(
+    "publisher can change remind or withdraw the proposal with buttons",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "change_proposal,remind,cancel",
+    JSON.stringify(lastButtonPayload())
+  );
+  check("both users enter the same negotiation", (await sessionFlow(ALICE)) === "negotiation" && (await sessionFlow(BOB)) === "negotiation");
+  reply = await send(ALICE, "change_proposal");
+  check("change proposal button explains how to send new values", reply.includes("*Change proposal*") && reply.includes("Example:"), reply);
+  reply = await send(BOB, "accept");
+  check("accepting a reciprocal proposal opens the trade room", reply.includes("Akara Trade opened ✅"), reply);
+  check(
+    "accepted reciprocal negotiation removes both source listings from search",
+    reciprocalSource?.status === "reserved" && negotiationCandidate.status === "reserved",
+    JSON.stringify({ reciprocalSource, negotiationCandidate })
+  );
+  const reciprocalDeal = __table("deals").at(-1);
+  reciprocalDeal.status = "cancelled";
+  for (const phone of [ALICE, BOB]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
 
   // ---------- thanks and wellbeing
   scenario("small talk");

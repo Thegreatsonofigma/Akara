@@ -44,7 +44,16 @@ function isProfileCommand(text) {
 
 function isPayoutsCommand(text) {
   const value = compactText(text);
-  return /^(?:show |see |view |check |open )*(?:my |me my )?(payouts?|payout details?|payout info(?:rmation)?|bank|banks|bank details?|bank info(?:rmation)?|bank accounts?|payment details?|payment info(?:rmation)?|account number|momo|momo details?|mobile money|mobile money details?|wallet|wallets?)$/.test(value);
+  const exactView = /^(?:show |see |view |check |open )*(?:my |me my )?(payouts?|payout details?|payout info(?:rmation)?|bank|banks|bank details?|bank info(?:rmation)?|bank accounts?|payment details?|payment info(?:rmation)?|account number|momo|momo details?|mobile money|mobile money details?|wallet|wallets?)$/.test(value);
+  const payoutNoun = "(?:payouts?|payout details?|payout accounts?|bank accounts?|momo accounts?|mobile money accounts?|wallets?)";
+  const asksForOwnPayouts = new RegExp(
+    `\\bmy\\b.{0,35}\\b${payoutNoun}\\b`
+    + `|\\b${payoutNoun}\\b.{0,35}\\b(?:do i have|have i got|are set up|have set up|are saved)\\b`
+    + `|\\b(?:i have|i saved|i set up)\\b.{0,35}\\b${payoutNoun}\\b`
+  ).test(value);
+  const asksForOverview = /\b(how many|count|total|overview|summary|breakdown|show|see|view|check|list|which|what)\b/.test(value);
+  const mutatesPayouts = /\b(add|create|edit|change|update|delete|remove|clear)\b/.test(value);
+  return exactView || (asksForOwnPayouts && asksForOverview && !mutatesPayouts);
 }
 
 function isTrustRecordCommand(text) {
@@ -55,9 +64,18 @@ function isTrustRecordCommand(text) {
 
 function isMyListingsCommand(text) {
   const value = compactText(text);
-  return /^(?:show |see |view |check |open )*(?:my |me my )(listings?|offers?|ads?|posts?|deals? i posted)$/.test(value)
+  const exactView = /^(?:show |see |view |check |open )*(?:my |me my )(listings?|offers?|ads?|posts?|deals? i posted)$/.test(value)
     || /^(listings|offers|my listings|my offers|my listing|my offer)$/.test(value)
     || /\b(offers?|listings?|ads?|posts?)\s+i\s+(posted|created|made|listed)\b/.test(value);
+  const listingNoun = "(?:listings?|offers?|ads?|posts?)";
+  const asksForOwnListings = new RegExp(
+    `\\bmy\\b.{0,35}\\b${listingNoun}\\b`
+    + `|\\b${listingNoun}\\b.{0,35}\\b(?:do i have|have i got|are mine|i posted|i created|i made)\\b`
+    + `|\\b(?:i have|i posted|i created|i made)\\b.{0,35}\\b${listingNoun}\\b`
+  ).test(value);
+  const asksForView = /\b(how many|count|total|overview|summary|breakdown|show|see|view|check|open|list|all|which|what|can i|could i|may i)\b/.test(value);
+  const mutatesListings = /\b(create|make|edit|change|update|delete|remove|close|cancel|pause|reopen|publish|share)\b/.test(value);
+  return exactView || (asksForOwnListings && asksForView && !mutatesListings);
 }
 
 function inferIntent(text) {

@@ -72,6 +72,7 @@ const {
 const {
   viewProfileReply,
   viewPayoutsReply,
+  accountOverviewQuestionReply,
   profileSettingsReply,
   requestBulkListingCancel,
   requestBulkPayoutDelete,
@@ -280,6 +281,13 @@ function isExplicitMarketplaceBrowse(text) {
   return /^(?:please\s+)?(?:show|see|view|browse|find|list)(?:\s+me)?\s+(?:all|available|live|current)\s+(?:(?:ngn|naira|rwf|rwandan francs?|xaf|cfa|kes|kenyan shillings?|ghs|ghanaian? cedis?)\s+)?(?:offers?|listings?|deals?)$/.test(value);
 }
 
+function isCapabilitiesQuestion(text) {
+  const value = String(text || "").trim().toLowerCase();
+  return /\bwhat can (?:i|you|akara) do(?:\s+(?:on|with)\s+akara)?\b/.test(value)
+    || /\bhow can akara help(?: me)?\b/.test(value)
+    || /\bwhat (?:are|is) (?:my|the) (?:options|things i can do)(?:\s+on akara)?\b/.test(value);
+}
+
 // Handles a numeric reply that quotes an earlier Akara message (menu, offer
 // list, or payout options).
 async function resolveQuotedReply(text, user, incoming = {}) {
@@ -333,6 +341,19 @@ const FLOW_COMPATIBLE_ACTIONS = {
   support: new Set(["flow_reply", "get_support"]),
 };
 
+const RESUMABLE_CONVERSATION_FLOWS = new Set([
+  "create_listing",
+  "bulk_listing",
+  "find_offer",
+  "search_results",
+  "negotiation",
+  "payment_profile",
+  "deal_room",
+  "verification",
+  "kyc_upgrade",
+  "support",
+]);
+
 function actionInterruptsFlow(interpretedAction, flow) {
   if (!flow || !isFreshRequestAction(interpretedAction)) return false;
   const compatible = FLOW_COMPATIBLE_ACTIONS[flow];
@@ -347,7 +368,13 @@ async function conversationalReply(interpreted, text, user, session, options = {
     ...options,
   });
 
-  if (isVerified(user) && !session?.current_flow && !options.suppressNudge) {
+  const activeFlow = session?.current_flow || "";
+  const shouldShowMainMenu = isVerified(user)
+    && !options.suppressNudge
+    && (!activeFlow || !RESUMABLE_CONVERSATION_FLOWS.has(activeFlow));
+
+  if (shouldShowMainMenu) {
+    if (activeFlow) await clearSession(user, user.whatsapp_phone);
     return {
       type: "whatsapp_list",
       list: mainMenuListPayload(reply),
@@ -550,6 +577,16 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return sendMenuList(user, mainMenu(user));
   }
 
+  if (isCapabilitiesQuestion(text)) {
+    await clearSession(user, user.whatsapp_phone);
+    return conversationalReply(
+      { ...interpreted, action: "question" },
+      text,
+      user,
+      null
+    );
+  }
+
   if ((interpretedAction === "get_support" && !bulkRequest.eligible) || isSupportCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return supportOptionsReply();
@@ -572,7 +609,13 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   if (isAccountMigrationQuestion(text)) {
     await clearSession(user, user.whatsapp_phone);
-    return scopedAssistantReply(text, user);
+    return conversationalReply(interpreted, text, user, null);
+  }
+
+  const accountOverview = await accountOverviewQuestionReply(user, text);
+  if (accountOverview) {
+    await clearSession(user, user.whatsapp_phone);
+    return accountOverview;
   }
 
   if (interpretedAction === "view_trust_record" || isTrustRecordCommand(command)) {
@@ -593,6 +636,12 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   if (interpretedAction === "view_payouts" || isPayoutsCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return viewPayoutsReply(user);
+  }
+
+  const listingsPageMatch = command.match(/^my listings page (\d+)$/);
+  if (listingsPageMatch) {
+    await clearSession(user, user.whatsapp_phone);
+    return getMyListingsReply(user, { page: Number(listingsPageMatch[1]) });
   }
 
   if (
@@ -1026,8 +1075,18 @@ function paymentProfileInterrupt(interpretedAction) {
 
 async function routeMessage(text, user, session, incoming = {}) {
   const command = normalizeInteractiveCommand(text.trim().toLowerCase());
+  const retryCommands = ["retry", "try again", "retry_last_message"];
 
-  if (["retry", "try again", "retry_last_message"].includes(command)) {
+  if (retryCommands.includes(command)) {
+    if (Number(incoming.retryDepth || 0) >= 1) {
+      await clearFailedMessage(user, user.whatsapp_phone);
+      return [
+        title("Nothing waiting to retry"),
+        "",
+        "That saved retry was stale. Send your request again and I will handle it as a new message.",
+      ].join("\n");
+    }
+
     const savedIncoming = session?.context_json?.pending_retry?.incoming;
     if (!savedIncoming) {
       return [
@@ -1037,11 +1096,32 @@ async function routeMessage(text, user, session, incoming = {}) {
       ].join("\n");
     }
 
+    const savedCommand = normalizeInteractiveCommand(
+      String(savedIncoming.text || "").trim().toLowerCase()
+    );
+    if (retryCommands.includes(savedCommand)) {
+      await clearFailedMessage(user, user.whatsapp_phone);
+      return [
+        title("Nothing waiting to retry"),
+        "",
+        "That saved retry was stale. Send your request again and I will handle it as a new message.",
+      ].join("\n");
+    }
+
+    const retryContext = { ...(session?.context_json || {}) };
+    delete retryContext.pending_retry;
+    const retrySession = session
+      ? { ...session, context_json: retryContext }
+      : session;
     const reply = await routeMessage(
       savedIncoming.text || "",
       user,
-      session,
-      { ...savedIncoming, from: user.whatsapp_phone }
+      retrySession,
+      {
+        ...savedIncoming,
+        from: user.whatsapp_phone,
+        retryDepth: Number(incoming.retryDepth || 0) + 1,
+      }
     );
     await clearFailedMessage(user, user.whatsapp_phone);
     return reply;
@@ -1057,8 +1137,26 @@ async function routeMessage(text, user, session, incoming = {}) {
   // guard.
   if (incoming.media?.id) {
     const liveSession = session?.current_flow ? session : await getSession(user.whatsapp_phone);
-    if (liveSession?.current_flow === "deal_room" && liveSession.current_step === "awaiting_dispute_proof") {
+    if (liveSession?.current_flow === "deal_room") {
       return handleDealRoom(text, user, liveSession, incoming);
+    }
+    if (!liveSession?.current_flow) {
+      const latestDeal = await getLatestOpenDealForUser(user.id);
+      if (latestDeal) {
+        const restoredSession = await upsertSession(
+          user,
+          user.whatsapp_phone,
+          "deal_room",
+          "awaiting_receipt",
+          {
+            deal_id: latestDeal.id,
+            deal_code: latestDeal.deal_code,
+            awaiting_receipt_user_id: user.id,
+            receipt_due_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+          }
+        );
+        return handleDealRoom(text, user, restoredSession, incoming);
+      }
     }
   }
 
@@ -1147,6 +1245,8 @@ function normalizeInteractiveCommand(command) {
     my_listings: "my listings",
     view_history: "history",
     view_profile: "profile",
+    view_payouts: "payouts",
+    main_menu: "menu",
     get_support: "get support",
     support_email: "email support",
     support_report: "report issue",
@@ -1167,11 +1267,14 @@ function normalizeInteractiveCommand(command) {
     profile_trust: "my trust record",
     add_payout: "add payout",
     publish_bulk: "publish all",
+    retry_receipt: "upload receipt",
     verify: "verify",
   };
   if (map[command]) return map[command];
   const payoutAction = String(command || "").match(/^(edit|delete)_payout_(\d+)$/);
   if (payoutAction) return `${payoutAction[1]} payout ${payoutAction[2]}`;
+  const listingsPage = String(command || "").match(/^my_listings_page_(\d+)$/);
+  if (listingsPage) return `my listings page ${listingsPage[1]}`;
   return command;
 }
 

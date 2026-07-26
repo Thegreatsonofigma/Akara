@@ -15,7 +15,12 @@ const {
 } = require("../nlp/intents");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { getPaymentProfiles, formatPaymentProfileCompact } = require("../db/payments");
-const { getUserListings, displayReference, listingShareUrl, listingStatusLabel } = require("../db/listings");
+const {
+  getUserListings,
+  displayReference,
+  listingShareUrl,
+  listingStatusDisplay,
+} = require("../db/listings");
 const { getCompletedTradeCount } = require("../db/deals");
 const { getLatestUserReputation } = require("../db/integrity");
 const { mainMenu, mainMenuListPayload } = require("../messages/copy");
@@ -166,6 +171,99 @@ function profileSummaryBody(user, profiles, listings, completedTrades, reputatio
   ].filter(Boolean).join("\n");
 }
 
+function accountCountTargets(text) {
+  const value = compactText(text);
+  const countQuestion = /\b(how many|count|total|number of|overview|summary|breakdown)\b/.test(value);
+  if (!countQuestion) return null;
+
+  const listings = /\b(listings?|offers?|ads?|posts?)\b/.test(value);
+  const payouts = /\b(payouts?|payout details?|payout accounts?|payment details?|bank accounts?|momo accounts?|mobile money accounts?|saved accounts?)\b/.test(value);
+  const completedTrades = /\b(completed|successful|finished)\b.{0,25}\b(trades?|transactions?|exchanges?|deals?)\b/.test(value)
+    || /\b(trades?|transactions?|exchanges?|deals?)\b.{0,25}\b(completed|successful|finished)\b/.test(value);
+
+  if (!listings && !payouts && !completedTrades) return null;
+  return { value, listings, payouts, completedTrades };
+}
+
+async function accountOverviewQuestionReply(user, text) {
+  const targets = accountCountTargets(text);
+  if (!targets) return null;
+
+  const listingStatuses = [
+    "active",
+    "reserved",
+    "paused",
+    "cancelled",
+    "expired",
+    "completed",
+    "flagged",
+    "draft",
+  ];
+  const [listings, profiles, completedTrades] = await Promise.all([
+    targets.listings
+      ? getUserListings(user.id, 1000, { statuses: listingStatuses })
+      : Promise.resolve([]),
+    targets.payouts ? getPaymentProfiles(user.id) : Promise.resolve([]),
+    targets.completedTrades ? getCompletedTradeCount(user.id) : Promise.resolve(0),
+  ]);
+
+  const lines = [];
+  if (targets.listings) {
+    const count = (status) => listings.filter((listing) => listing.status === status).length;
+    const requestedStatuses = {
+      active: /\b(live|active|open|opened)\b/.test(targets.value),
+      paused: /\b(paused|hidden|on hold)\b/.test(targets.value),
+      reserved: /\b(in trade|reserved|taken)\b/.test(targets.value),
+      closed: /\b(closed|cancelled|canceled|expired)\b/.test(targets.value),
+      completed: /\bcompleted listings?|listings? completed|successful listings?\b/.test(targets.value),
+    };
+    const hasSpecificStatus = Object.values(requestedStatuses).some(Boolean);
+
+    if (!hasSpecificStatus) {
+      lines.push(labeled("Total listings", String(listings.length)));
+      lines.push(labeled("🟢 Live", String(count("active"))));
+      lines.push(labeled("⏸️ Paused", String(count("paused"))));
+      lines.push(labeled("🔒 In trade", String(count("reserved"))));
+      lines.push(labeled("⚫ Closed", String(count("cancelled") + count("expired"))));
+      lines.push(labeled("✅ Completed", String(count("completed"))));
+    } else {
+      if (requestedStatuses.active) lines.push(labeled("🟢 Live listings", String(count("active"))));
+      if (requestedStatuses.paused) lines.push(labeled("⏸️ Paused listings", String(count("paused"))));
+      if (requestedStatuses.reserved) lines.push(labeled("🔒 Listings in trade", String(count("reserved"))));
+      if (requestedStatuses.closed) lines.push(labeled("⚫ Closed listings", String(count("cancelled") + count("expired"))));
+      if (requestedStatuses.completed) lines.push(labeled("✅ Completed listings", String(count("completed"))));
+    }
+  }
+
+  if (targets.payouts) {
+    lines.push(labeled("🏦 Saved payout details", String(profiles.length)));
+  }
+  if (targets.completedTrades) {
+    lines.push(labeled("✅ Completed exchanges", String(completedTrades)));
+  }
+
+  const body = [
+    title("Account overview"),
+    "",
+    ...lines,
+    "",
+    caption("Open the records behind these numbers whenever you need them."),
+  ].join("\n");
+  const buttons = [
+    ...(targets.listings ? [{ id: "my_listings", title: "View listings" }] : []),
+    ...(targets.payouts ? [{ id: "view_payouts", title: "View payouts" }] : []),
+    { id: "main_menu", title: "Main menu" },
+  ].slice(0, 3);
+
+  return whatsappButtonsReply(body, buttons, [
+    body,
+    "",
+    ...(targets.listings ? [action("my listings")] : []),
+    ...(targets.payouts ? [action("payouts")] : []),
+    action("menu"),
+  ].join("\n"));
+}
+
 // Scoped view: just who the user is on Akara. Payouts and listings each have
 // their own view, so asking for "my profile" never dumps everything.
 async function viewProfileReply(user) {
@@ -205,6 +303,8 @@ async function viewPayoutsReply(user, intro = "") {
     intro,
     title("Bank & payout details"),
     caption("Where your trade partners send your money."),
+    "",
+    labeled("Total saved", String(profiles.length)),
     "",
     payoutBlock,
   ].filter(Boolean).join("\n");
@@ -512,7 +612,7 @@ async function listingManagementReply(listing, number) {
     "",
     labeled("Send", formatMoney(listing.have_amount, listing.have_currency)),
     labeled("Receive", formatMoney(listing.want_amount, listing.want_currency)),
-    labeled("Status", listingStatusLabel(listing.status)),
+    labeled("Status", listingStatusDisplay(listing.status)),
   ].join("\n");
 
   if (listing.status === "active") {
@@ -561,7 +661,7 @@ async function selectedListingReply(user, listing, number) {
     shareUrl,
     shareUrl
       ? caption("Share this link to open the listing in Akara.")
-      : caption(`Status: ${listingStatusLabel(listing.status)}`),
+      : caption(`Status: ${listingStatusDisplay(listing.status)}`),
   ].filter(Boolean).join("\n\n");
 
   try {
@@ -1102,6 +1202,7 @@ function shouldLeaveSettingsForFreshCommand(text) {
 module.exports = {
   viewProfileReply,
   viewPayoutsReply,
+  accountOverviewQuestionReply,
   profileSettingsReply,
   requestBulkListingCancel,
   requestBulkPayoutDelete,

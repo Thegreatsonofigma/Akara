@@ -132,6 +132,23 @@ function listingStatusLabel(status) {
   }[status] || status;
 }
 
+function listingStatusCue(status) {
+  return {
+    active: "🟢",
+    reserved: "🔒",
+    paused: "⏸️",
+    completed: "✅",
+    cancelled: "⚫",
+    expired: "⌛",
+    flagged: "⚠️",
+    draft: "📝",
+  }[status] || "•";
+}
+
+function listingStatusDisplay(status) {
+  return `${listingStatusCue(status)} ${listingStatusLabel(status)}`;
+}
+
 async function getUserListings(userId, limit = 10, options = {}) {
   const statuses = Array.isArray(options.statuses)
     ? options.statuses.filter(Boolean)
@@ -175,6 +192,64 @@ async function createResidualListing(sourceListing, usedHaveAmount, usedWantAmou
   return rows[0] || null;
 }
 
+async function createRatePreservingResidualListing(sourceListing, usedHaveAmount) {
+  const sourceHaveAmount = moneyNumber(sourceListing.have_amount);
+  const sourceWantAmount = moneyNumber(sourceListing.want_amount);
+  const remainingHaveAmount = positiveMoney(sourceHaveAmount - moneyNumber(usedHaveAmount));
+  if (!remainingHaveAmount || sourceHaveAmount <= 0 || sourceWantAmount <= 0) return null;
+
+  const remainingWantAmount = positiveMoney(
+    remainingHaveAmount * (sourceWantAmount / sourceHaveAmount)
+  );
+  if (!remainingWantAmount) return null;
+
+  const listingCode = await generateReferenceCode("listing");
+  const rows = await supabaseRequest("listings", {
+    method: "POST",
+    body: JSON.stringify({
+      owner_user_id: sourceListing.owner_user_id,
+      listing_code: listingCode,
+      have_currency: sourceListing.have_currency,
+      want_currency: sourceListing.want_currency,
+      have_amount: remainingHaveAmount,
+      want_amount: remainingWantAmount,
+      listing_type: sourceListing.listing_type || "negotiable",
+      status: "active",
+    }),
+  });
+
+  return rows[0] || null;
+}
+
+async function createRatePreservingWantResidualListing(sourceListing, fulfilledWantAmount) {
+  const sourceHaveAmount = moneyNumber(sourceListing.have_amount);
+  const sourceWantAmount = moneyNumber(sourceListing.want_amount);
+  const remainingWantAmount = positiveMoney(sourceWantAmount - moneyNumber(fulfilledWantAmount));
+  if (!remainingWantAmount || sourceHaveAmount <= 0 || sourceWantAmount <= 0) return null;
+
+  const remainingHaveAmount = positiveMoney(
+    remainingWantAmount * (sourceHaveAmount / sourceWantAmount)
+  );
+  if (!remainingHaveAmount) return null;
+
+  const listingCode = await generateReferenceCode("listing");
+  const rows = await supabaseRequest("listings", {
+    method: "POST",
+    body: JSON.stringify({
+      owner_user_id: sourceListing.owner_user_id,
+      listing_code: listingCode,
+      have_currency: sourceListing.have_currency,
+      want_currency: sourceListing.want_currency,
+      have_amount: remainingHaveAmount,
+      want_amount: remainingWantAmount,
+      listing_type: sourceListing.listing_type || "negotiable",
+      status: "active",
+    }),
+  });
+
+  return rows[0] || null;
+}
+
 module.exports = {
   displayReference,
   generateReferenceCode,
@@ -184,7 +259,11 @@ module.exports = {
   listingWaOpenUrl,
   listingTypeLabel,
   listingStatusLabel,
+  listingStatusCue,
+  listingStatusDisplay,
   getUserListings,
   listingHasEnoughForDeal,
   createResidualListing,
+  createRatePreservingResidualListing,
+  createRatePreservingWantResidualListing,
 };

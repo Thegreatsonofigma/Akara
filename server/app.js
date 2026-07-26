@@ -103,10 +103,10 @@ async function sendAkaraReply(to, reply) {
   const splitMenu = splitReplyWithMainMenu(reply);
   if (splitMenu) {
     try {
-      return await sendWhatsAppList(to, mainMenuListPayload("Choose what you want to do next on Akara."));
+      return await sendWhatsAppList(to, mainMenuListPayload(splitMenu.intro));
     } catch (error) {
       console.error(`[webhook] menu list failed for ${to}: ${error.message}`);
-      return sendWhatsAppText(to, splitMenu.menu);
+      return sendWhatsAppText(to, reply);
     }
   }
 

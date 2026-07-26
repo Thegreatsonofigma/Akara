@@ -1,5 +1,5 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
-const { title, caption, action, fieldBlock, formatMoney, formatCooldown } = require("../lib/format");
+const { title, caption, action, labeled, fieldBlock, formatMoney, formatCooldown } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { parseCurrencyAmountPairs } = require("../nlp/currency");
 const { hasDirectionalExchangeText } = require("../nlp/exchange");
@@ -45,6 +45,7 @@ const { FEE_BILLING_THRESHOLD, feeLedgerNote, recordDealFees } = require("../db/
 const { recordCompletedDealIntegrity } = require("../db/integrity");
 const { markLiquidityRouteDealCompleted } = require("../db/liquidity");
 const { applyDisputeHolds, releaseDisputeHolds } = require("../db/dispute-holds");
+const { requeueCancelledAutoMatch } = require("./listing");
 
 const REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 const receiptDeadlineTimers = new Map();
@@ -301,16 +302,26 @@ function paymentNotedReply(dealCode, youSend, youReceive, proof, sideComplete = 
   ].join("\n"), !sideComplete);
 }
 
-function receiptMismatchReply(dealCode, receiptCheck) {
-  return [
-    title("Receipt does not match"),
+function receiptRejectedReply(dealCode, youSend, receiptCheck) {
+  const isMismatch = receiptCheck.ocr_status === "mismatch";
+  const body = [
+    title(isMismatch ? "Receipt does not match" : "Receipt could not be verified"),
     "",
-    fieldBlock("Transaction ref", dealCode),
+    labeled("Transaction ref", dealCode),
+    labeled("Expected payment", formatMoney(youSend.amount, youSend.currency)),
     "",
-    receiptCheck.ocr_mismatch_reason || "The receipt amount or currency does not match the locked trade.",
+    isMismatch
+      ? receiptCheck.ocr_mismatch_reason || "The amount or currency does not match this trade."
+      : "I could not clearly verify the payment amount and currency from this file.",
     "",
-    "Upload the correct receipt before I notify your trade partner.",
+    "No payment update was sent to the other party.",
+    "Upload a clear bank or MoMo receipt showing the amount, currency, recipient and successful payment status.",
   ].join("\n");
+
+  return whatsappButtonsReply(body, [
+    { id: "retry_receipt", title: "Upload another" },
+    { id: "dispute", title: "Dispute" },
+  ]);
 }
 
 function receiptEvidenceNote(proof) {
@@ -329,10 +340,15 @@ async function analyzeIncomingReceipt(youSend, incoming) {
 
 async function storePaymentReceiptOrReply(user, dealId, dealCode, youSend, incoming) {
   const receiptCheck = await analyzeIncomingReceipt(youSend, incoming);
-  if (receiptCheck.ocr_status === "mismatch") {
+  console.info(
+    `[receipt-ocr] ${dealCode} status=${receiptCheck.ocr_status}`
+      + ` amount=${receiptCheck.ocr_amount || "unreadable"}`
+      + ` currency=${receiptCheck.ocr_currency || "unreadable"}`
+  );
+  if (receiptCheck.ocr_status !== "matched") {
     return {
       blocked: true,
-      reply: receiptMismatchReply(dealCode, receiptCheck),
+      reply: receiptRejectedReply(dealCode, youSend, receiptCheck),
       proof: null,
     };
   }
@@ -589,15 +605,17 @@ async function handleDealRoom(text, user, session, incoming = {}) {
   }
 
   if (await expireDealIfElapsed(deal)) {
+    const requeued = await requeueCancelledAutoMatch(deal, null, "payment_window_elapsed");
     await clearSession(user, user.whatsapp_phone);
     return [
       title("Trade window elapsed"),
       "",
       "That reserved Akara Trade has expired because no payment activity was recorded within the window.",
+      requeued.length ? "The locked portions were restored, and eligible listings are being checked against the next compatible peers." : "",
       "",
       `${action("find offers")} to look again`,
       `${action("history")} to view your records`,
-    ].join("\n");
+    ].filter(Boolean).join("\n");
   }
 
   const role = userRoleInDeal(user, deal);
@@ -819,8 +837,11 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     });
 
     await clearSession(user, user.whatsapp_phone);
+    const requeued = await requeueCancelledAutoMatch(deal, user.id, "trade_cancelled_before_payment");
     if (holdUntil) return `Deal cancelled. Your account is paused until ${new Date(holdUntil).toLocaleString()} due to repeated cancellations.`;
-    return "Deal cancelled. Repeated cancellations may temporarily limit your account.";
+    return requeued.length
+      ? "Deal cancelled. The locked portions were restored, and eligible listings are being checked against the next compatible peers."
+      : "Deal cancelled. Repeated cancellations may temporarily limit your account.";
   }
 
   if (session.current_step === "awaiting_dispute_reason") {
@@ -864,6 +885,24 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       dispute_reason: reason,
     });
     return disputeProofPrompt(dealCode, reason);
+  }
+
+  if (command === "upload receipt" || command === "retry_receipt") {
+    const receiptDueAt = context.receipt_due_at || new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    await upsertSession(user, user.whatsapp_phone, "deal_room", "awaiting_receipt", {
+      ...context,
+      deal_id: dealId,
+      deal_code: deal.deal_code || context.deal_code,
+      awaiting_receipt_user_id: user.id,
+      receipt_due_at: receiptDueAt,
+    });
+    return [
+      title("Upload receipt"),
+      "",
+      labeled("Expected payment", formatMoney(youSend.amount, youSend.currency)),
+      "",
+      "Send a clear bank or MoMo receipt showing the amount, currency, recipient and successful payment status.",
+    ].join("\n");
   }
 
   if (session.current_step === "awaiting_receipt" && context.awaiting_receipt_user_id === user.id && !incoming.media?.id) {
@@ -1150,11 +1189,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     "",
     dealMiniSummary(deal, role),
     "",
-    `${action("paid")} after sending your side`,
-    `${action("received")} when your money lands`,
-    `${action("remind")} if your trade partner is taking too long`,
-    `${action("cancel trade")} to close this trade`,
-    `${action("dispute")} if something looks wrong`,
+    caption("Use the buttons below to update this trade. You can also type remind or cancel trade."),
   ].join("\n"));
 }
 

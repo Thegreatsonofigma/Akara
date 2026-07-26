@@ -1,7 +1,7 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
-const { sendWhatsAppText } = require("../lib/whatsapp");
+const { sendWhatsAppText, sendWhatsAppButtons } = require("../lib/whatsapp");
 const { config } = require("../config");
-const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber, formatCooldown } = require("../lib/format");
+const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber, positiveMoney, formatCooldown } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { normalizeCurrency, parseAmount, parseCurrencyAmountPairs } = require("../nlp/currency");
 const {
@@ -18,7 +18,7 @@ const {
   isListingPublishIntent,
   isReminderIntent,
 } = require("../nlp/intents");
-const { getUserById, updateUser, isVerified, tierLimitBlockForAmount, tierLimitBlockForListing } = require("../db/users");
+const { getUserById, updateUser, isVerified, isOnHold, tierLimitBlockForAmount, tierLimitBlockForListing } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { getDefaultPaymentProfile, getPaymentProfiles, formatPaymentProfile, paymentDestinationTitle, paymentExpectationLine } = require("../db/payments");
 const { sendListingCard } = require("../lib/listing-card");
@@ -27,14 +27,23 @@ const {
   generateReferenceCode,
   listingShareUrl,
   listingTypeLabel,
+  listingStatusDisplay,
   listingHasEnoughForDeal,
-  createResidualListing,
+  createRatePreservingResidualListing,
+  createRatePreservingWantResidualListing,
 } = require("../db/listings");
 const { mainMenu, feeIncludedText, listingShareCopy, explainMissingListing, currencyListReply } = require("../messages/copy");
 const { startPaymentProfileForCurrency } = require("./payment-profile");
 const { createLockedQuote, attachQuoteToDeal } = require("../db/quotes");
+const {
+  buildClearingPlan,
+  buildNegotiationPlan,
+  compareClearingPlans,
+  compareNegotiationPlans,
+} = require("../lib/matching-engine");
 
 const NEGOTIATION_REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
+const autoMatchRequeueTasks = new Map();
 
 function promptTextPart(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -289,35 +298,52 @@ function tradeOpenedMessage({
   firstInstruction,
   quoteCode = "",
 }) {
-  return [
+  const facts = [
+    labeled("You send", formatMoney(youSend.amount, youSend.currency)),
+    labeled("You receive", formatMoney(youReceive.amount, youReceive.currency)),
+    labeled("Payment window", "15 minutes"),
+    quoteCode ? labeled("Terms locked", quoteCode) : "",
+    labeled("Service fee", feeIncludedText()),
+    residualLine ? labeled("Still listed", residualLine) : "",
+  ].filter(Boolean).join("\n");
+
+  const body = [
     title(`${heading} ${dealCode}`),
     intro ? caption(intro) : "",
-    "",
-    fieldBlock("You send", formatMoney(youSend.amount, youSend.currency)),
-    "",
-    fieldBlock("You receive", formatMoney(youReceive.amount, youReceive.currency)),
-    "",
-    fieldBlock("Payment window", "15 minutes"),
-    "",
-    quoteCode ? fieldBlock("Terms locked", quoteCode) : "",
-    fieldBlock("Service fee", feeIncludedText()),
-    residualLine ? ["", fieldBlock("Still listed", residualLine)].join("\n") : "",
-    "",
+    facts,
     title("Send to"),
     caption(paymentDestinationTitle(paymentProfile)),
     formatPaymentProfile(paymentProfile),
-    "",
     title("Expect in your account"),
     caption(paymentExpectationLine(youReceive.amount, youReceive.currency, expectedProfile)),
-    "",
-    title("Actions"),
-    `${action("paid")} after you send`,
-    `${action("received")} when your money lands`,
-    `${action("dispute")} if anything looks wrong`,
-    "",
     firstInstruction,
     fundsDisclaimer(),
   ].filter(Boolean).join("\n\n");
+
+  return {
+    type: "whatsapp_buttons",
+    body,
+    buttons: [
+      { id: "paid", title: "Paid" },
+      { id: "received", title: "Received" },
+      { id: "dispute", title: "Dispute" },
+    ],
+    preserveLayout: true,
+    fallbackText: [
+      body,
+      "",
+      `${action("paid")} after you send`,
+      `${action("received")} when your money lands`,
+      `${action("dispute")} if anything looks wrong`,
+    ].join("\n"),
+  };
+}
+
+async function sendTradeOpenedNotice(phone, notice) {
+  if (notice?.type === "whatsapp_buttons") {
+    return sendWhatsAppButtons(phone, notice);
+  }
+  return sendWhatsAppText(phone, notice);
 }
 
 function formatListingReview(context) {
@@ -390,7 +416,7 @@ function duplicateListingReply(listing) {
     "You already have this exact offer open on Akara.",
     "",
     labeled("Reference", displayReference(listing.listing_code, "listing")),
-    labeled("Status", listing.status === "active" ? "Live" : listing.status),
+    labeled("Status", listingStatusDisplay(listing.status)),
   ].join("\n");
   return whatsappButtonsReply(body, [
     { id: "my_listings", title: "My listings" },
@@ -706,7 +732,7 @@ async function createListingRecord(user, context) {
       have_amount: context.have_amount,
       want_amount: context.want_amount,
       listing_type: context.listing_type || "negotiable",
-      status: "active",
+      status: context.status || "active",
     }),
   });
   return createdListings[0];
@@ -758,6 +784,10 @@ async function publishListing(user, context) {
 
     const autoMatchReply = await tryAutoMatchListing(user, listing);
     if (autoMatchReply) return autoMatchReply;
+    const negotiationReply = await tryStartReciprocalNegotiation(user, listing);
+    if (negotiationReply) return negotiationReply;
+    const currentListing = await listingById(listing.id);
+    if (currentListing?.status !== "active") return "";
 
     await clearSession(user, user.whatsapp_phone);
     const shareUrl = listingShareUrl(listing);
@@ -774,6 +804,8 @@ async function publishListing(user, context) {
     const deliveryReply = await deliverListingLive(user, listing, listingCode, liveMessage);
     const autoMatchReply = await tryAutoMatchListing(user, listing);
     if (autoMatchReply) return deliveryReply ? [deliveryReply, autoMatchReply] : autoMatchReply;
+    const negotiationReply = await tryStartReciprocalNegotiation(user, listing);
+    if (negotiationReply) return deliveryReply ? [deliveryReply, negotiationReply] : negotiationReply;
 
     await clearSession(user, user.whatsapp_phone);
     return deliveryReply;
@@ -781,6 +813,10 @@ async function publishListing(user, context) {
 
   const autoMatchReply = await tryAutoMatchListing(user, listing);
   if (autoMatchReply) return autoMatchReply;
+  const negotiationReply = await tryStartReciprocalNegotiation(user, listing);
+  if (negotiationReply) return negotiationReply;
+  const currentListing = await listingById(listing.id);
+  if (currentListing?.status !== "active") return "";
 
   await clearSession(user, user.whatsapp_phone);
   const shareUrl = listingShareUrl(listing);
@@ -828,8 +864,10 @@ async function publishBulkListings(user, listings) {
 
   let matchedListingId = null;
   let matchReply = null;
+  await matchingWindowDelay();
   for (const listing of createdListings) {
-    matchReply = await tryAutoMatchListing(user, listing);
+    matchReply = await tryAutoMatchListing(user, listing, { skipBatchWindow: true })
+      || await tryStartReciprocalNegotiation(user, listing);
     if (matchReply) {
       matchedListingId = listing.id;
       break;
@@ -896,90 +934,541 @@ async function handleBulkListing(text, user, session) {
   return publishBulkListings(user, listings);
 }
 
-async function findReciprocalListing(user, listing) {
-  const rows = await supabaseRequest(
+function matchingWindowDelay() {
+  const delay = Number(config.matchingBatchWindowMs || 0);
+  if (!delay) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+async function activeReciprocalListings(user, listing, negotiableOnly = false) {
+  return supabaseRequest(
     [
       "listings?select=id,listing_code,owner_user_id,have_currency,want_currency,have_amount,want_amount,rate,listing_type,created_at",
       "status=eq.active",
+      negotiableOnly ? "listing_type=eq.negotiable" : "",
       `have_currency=eq.${filterValue(listing.want_currency)}`,
       `want_currency=eq.${filterValue(listing.have_currency)}`,
       `owner_user_id=neq.${filterValue(user.id)}`,
       "order=created_at.asc",
-      "limit=20",
-    ].join("&")
+      "limit=100",
+    ].filter(Boolean).join("&")
   );
-
-  return rows.find((candidate) => {
-    if (candidate.owner_user_id === user.id) return false;
-    const candidateCoversListing = listingHasEnoughForDeal(candidate, listing.want_amount, listing.have_amount);
-    const listingCoversCandidate = listingHasEnoughForDeal(listing, candidate.want_amount, candidate.have_amount);
-    return candidateCoversListing || listingCoversCandidate;
-  }) || null;
 }
 
-async function tryAutoMatchListing(user, listing) {
-  const match = await findReciprocalListing(user, listing);
-  if (!match) return null;
+async function matchingUsersById(listings) {
+  const ids = [...new Set(listings.map((row) => row.owner_user_id).filter(Boolean))];
+  if (!ids.length) return {};
+  const users = await supabaseRequest(
+    [
+      "users?select=id,whatsapp_phone,verification_status,risk_status,dispute_hold,hold_until,completed_deals_count,total_cancelled_deals,dispute_count",
+      `id=in.(${ids.map(filterValue).join(",")})`,
+      `limit=${ids.length}`,
+    ].join("&")
+  );
+  return Object.fromEntries(users.map((owner) => [owner.id, owner]));
+}
 
-  const makerReceiveProfile = await getDefaultPaymentProfile(match.owner_user_id, match.want_currency);
+function matchingOwnerIsEligible(owner) {
+  return Boolean(
+    owner
+    && isVerified(owner)
+    && !isOnHold(owner)
+    && !["limited", "suspended"].includes(owner.risk_status)
+  );
+}
+
+async function excludedReciprocalListingIds(listingId) {
+  const since = new Date(Date.now() - config.matchingPairCooldownMs).toISOString();
+  const rows = await supabaseRequest(
+    [
+      "audit_events?select=event_payload,created_at",
+      "entity_type=eq.listing",
+      `entity_id=eq.${filterValue(listingId)}`,
+      "event_name=eq.match_pair_excluded",
+      `created_at=gte.${filterValue(since)}`,
+      "order=created_at.desc",
+      "limit=100",
+    ].join("&")
+  );
+  return new Set(rows.map((row) => row.event_payload?.excluded_listing_id).filter(Boolean));
+}
+
+async function recordMatchPairExclusion(leftListingId, rightListingId, actorUserId, reason) {
+  if (!leftListingId || !rightListingId) return;
+  const rows = [
+    { entity_id: leftListingId, excluded_listing_id: rightListingId },
+    { entity_id: rightListingId, excluded_listing_id: leftListingId },
+  ].map((entry) => ({
+    actor_user_id: actorUserId || null,
+    actor_type: actorUserId ? "user" : "system",
+    entity_type: "listing",
+    entity_id: entry.entity_id,
+    event_name: "match_pair_excluded",
+    event_payload: {
+      excluded_listing_id: entry.excluded_listing_id,
+      reason,
+      cooldown_ms: config.matchingPairCooldownMs,
+    },
+  }));
+  await supabaseRequest("audit_events", {
+    method: "POST",
+    body: JSON.stringify(rows),
+  }).catch((error) => {
+    console.warn(`[matching] pair exclusion audit failed for ${leftListingId}/${rightListingId}: ${error.message}`);
+  });
+}
+
+async function openNegotiationListingIds() {
+  const rows = await supabaseRequest(
+    [
+      "negotiable_offers?select=id,listing_id,message,status,created_at",
+      "status=in.(pending,countered)",
+      "order=created_at.desc",
+      "limit=1000",
+    ].join("&")
+  );
+  const ids = new Set();
+  for (const row of rows) {
+    const createdAt = new Date(row.created_at || 0).getTime();
+    const expired = createdAt > 0 && createdAt + config.negotiationWindowMs <= Date.now();
+    if (expired) {
+      await supabaseRequest(`negotiable_offers?id=eq.${filterValue(row.id)}&status=in.(pending,countered)`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "withdrawn",
+          message: row.message || "Negotiation window elapsed.",
+        }),
+      });
+      const sourceId = reciprocalSourceListingId(row);
+      if (sourceId && row.listing_id) {
+        await recordMatchPairExclusion(sourceId, row.listing_id, null, "negotiation_window_elapsed");
+      }
+      continue;
+    }
+    if (row.listing_id) ids.add(row.listing_id);
+    const sourceId = reciprocalSourceListingId(row);
+    if (sourceId) ids.add(sourceId);
+  }
+  return ids;
+}
+
+async function findReciprocalPlan(user, listing, kind, options = {}) {
+  if (isOnHold(user) || ["limited", "suspended"].includes(user.risk_status)) return null;
+  const sourceRows = await supabaseRequest(
+    `listings?id=eq.${filterValue(listing.id)}&status=eq.active&limit=1`
+  );
+  if (!sourceRows.length) return null;
+  listing = sourceRows[0];
+  const rows = await activeReciprocalListings(user, listing, kind === "negotiation");
+  const usersById = await matchingUsersById(rows);
+  const exclusions = await excludedReciprocalListingIds(listing.id);
+  const busyListings = await openNegotiationListingIds();
+  if (busyListings.has(listing.id)) return null;
+  for (const id of options.excludeListingIds || []) exclusions.add(id);
+
+  const plans = rows
+    .filter((candidate) => (
+      candidate.owner_user_id !== user.id
+      && !exclusions.has(candidate.id)
+      && !busyListings.has(candidate.id)
+      && matchingOwnerIsEligible(usersById[candidate.owner_user_id])
+    ))
+    .map((candidate) => (
+      kind === "clearing"
+        ? buildClearingPlan(candidate, listing)
+        : buildNegotiationPlan(candidate, listing, config.negotiationMaxGapPercent)
+    ))
+    .filter(Boolean)
+    .sort((left, right) => (
+      kind === "clearing"
+        ? compareClearingPlans(left, right, usersById)
+        : compareNegotiationPlans(left, right, usersById)
+    ));
+
+  for (const plan of plans) {
+    if (await linkedAccountBlock(user, plan.candidate)) continue;
+    const makerReceiveProfile = await getDefaultPaymentProfile(
+      plan.candidate.owner_user_id,
+      plan.candidate.want_currency
+    );
+    if (!makerReceiveProfile) continue;
+    return {
+      ...plan,
+      owner: usersById[plan.candidate.owner_user_id],
+      makerReceiveProfile,
+    };
+  }
+  return null;
+}
+
+function reciprocalSourceListingId(offer) {
+  return String(offer?.message || "").match(/^reciprocal_source:([0-9a-f-]{36})$/i)?.[1] || null;
+}
+
+function reciprocalNegotiationOwnerReply(listing, offer, plan = {}) {
+  const body = [
+    title("Potential exchange"),
+    caption("The currencies and values line up. Akara suggested a fair middle rate for both sides."),
+    "",
+    labeled("They send you", formatMoney(offerWantAmount(listing, offer), listing.want_currency)),
+    labeled("You send them", formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)),
+    "",
+    "Accept these values, suggest new ones, or pass.",
+  ].join("\n");
+  return {
+    ...whatsappButtonsReply(body, [
+      { id: "accept", title: "Accept" },
+      { id: "counter", title: "Counter" },
+      { id: "decline", title: "Decline" },
+    ]),
+    preserveLayout: true,
+  };
+}
+
+function reciprocalNegotiationPublisherReply(listing, offer, plan = {}) {
+  const body = [
+    title("Listing live · negotiation opened"),
+    caption("I found a close reciprocal listing and suggested a fair middle rate."),
+    "",
+    labeled("You propose", formatMoney(offerWantAmount(listing, offer), listing.want_currency)),
+    labeled("You receive", formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)),
+    "",
+    "I sent this proposal to the listing owner. You can send different values here at any time.",
+  ].join("\n");
+  return {
+    ...whatsappButtonsReply(body, [
+      { id: "change_proposal", title: "Change proposal" },
+      { id: "remind", title: "Remind" },
+      { id: "cancel", title: "Withdraw" },
+    ]),
+    preserveLayout: true,
+  };
+}
+
+async function tryStartReciprocalNegotiation(user, sourceListing, options = {}) {
+  const plan = await findReciprocalPlan(user, sourceListing, "negotiation", options);
+  if (!plan) return null;
+  sourceListing = plan.source;
+  const candidate = plan.candidate;
+
+  const offer = await createNegotiationOffer(user, candidate, {
+    want_amount: plan.source_units,
+    have_amount: plan.reciprocal_units,
+    message: `reciprocal_source:${sourceListing.id}`,
+  });
+  await supabaseRequest("audit_events", {
+    method: "POST",
+    body: JSON.stringify({
+      actor_type: "system",
+      entity_type: "negotiable_offer",
+      entity_id: offer.id,
+      event_name: "smart_match_negotiation_suggested",
+      event_payload: {
+        strategy: "geometric_midpoint_v1",
+        source_listing_id: sourceListing.id,
+        reciprocal_listing_id: candidate.id,
+        source_limit_rate: plan.source_limit_rate,
+        candidate_limit_rate: plan.candidate_limit_rate,
+        suggested_rate: plan.suggested_rate,
+        gap_percent: Number(plan.gap_percent.toFixed(4)),
+        source_coverage: plan.source_coverage,
+        candidate_coverage: plan.candidate_coverage,
+      },
+    }),
+  }).catch((error) => {
+    console.warn(`[matching] negotiation audit failed for ${offer.id}: ${error.message}`);
+  });
+
+  await upsertSession(user, user.whatsapp_phone, "negotiation", "taker_waiting", {
+    offer_id: offer.id,
+    listing_id: candidate.id,
+    reciprocal_source_listing_id: sourceListing.id,
+  });
+
+  const owner = await getUserById(candidate.owner_user_id);
+  if (owner?.whatsapp_phone) {
+    await upsertSession(owner, owner.whatsapp_phone, "negotiation", "owner_review", {
+      offer_id: offer.id,
+      listing_id: candidate.id,
+      taker_user_id: user.id,
+      reciprocal_source_listing_id: sourceListing.id,
+    });
+    sendWhatsAppButtons(
+      owner.whatsapp_phone,
+      reciprocalNegotiationOwnerReply(candidate, offer, plan)
+    ).catch((error) => {
+      console.error(`[negotiation] reciprocal notice failed: ${error.message}`);
+    });
+  }
+
+  return reciprocalNegotiationPublisherReply(candidate, offer, plan);
+}
+
+async function sendMatchingReply(phone, reply) {
+  if (!phone || !reply) return;
+  if (Array.isArray(reply)) {
+    for (const part of reply) await sendMatchingReply(phone, part);
+    return;
+  }
+  if (reply?.type === "whatsapp_buttons") {
+    await sendWhatsAppButtons(phone, reply);
+    return;
+  }
+  await sendWhatsAppText(phone, typeof reply === "string" ? reply : reply.fallbackText || reply.body || "");
+}
+
+async function rematchLiveListing(listingId, excludeListingIds = []) {
+  const listing = await getActiveListingById(listingId);
+  if (!listing) return null;
+  const owner = await getUserById(listing.owner_user_id);
+  if (!matchingOwnerIsEligible(owner)) return null;
+
+  const options = { excludeListingIds, skipBatchWindow: true };
+  const reply = await tryAutoMatchListing(owner, listing, options)
+    || await tryStartReciprocalNegotiation(owner, listing, options);
+  if (!reply) return null;
+
+  await sendMatchingReply(
+    owner.whatsapp_phone,
+    prependPromptText(reply, "I moved past the previous proposal and found the next compatible option.")
+  );
+  return { listing, owner, reply };
+}
+
+async function rematchNegotiationPair(sourceListingId, candidateListingId, actorUserId, reason) {
+  if (!sourceListingId || !candidateListingId) return [];
+  await recordMatchPairExclusion(sourceListingId, candidateListingId, actorUserId, reason);
+
+  const results = [];
+  const sourceResult = await rematchLiveListing(sourceListingId, [candidateListingId]);
+  if (sourceResult) results.push(sourceResult);
+  const candidateResult = await rematchLiveListing(candidateListingId, [sourceListingId]);
+  if (candidateResult) results.push(candidateResult);
+  return results;
+}
+
+async function listingById(listingId) {
+  const rows = await supabaseRequest(`listings?id=eq.${filterValue(listingId)}&limit=1`);
+  return rows[0] || null;
+}
+
+async function performAutoMatchRequeue(deal, actorUserId = null, reason = "trade_cancelled") {
+  if (!deal?.id) return [];
+  const [matchEvents, requeueEvents] = await Promise.all([
+    supabaseRequest(
+      [
+        "audit_events?select=id,event_payload,created_at",
+        "entity_type=eq.deal",
+        `entity_id=eq.${filterValue(deal.id)}`,
+        "event_name=eq.smart_match_cleared",
+        "order=created_at.desc",
+        "limit=1",
+      ].join("&")
+    ),
+    supabaseRequest(
+      [
+        "audit_events?select=id",
+        "entity_type=eq.deal",
+        `entity_id=eq.${filterValue(deal.id)}`,
+        "event_name=eq.smart_match_requeued",
+        "limit=1",
+      ].join("&")
+    ),
+  ]);
+  if (!matchEvents.length || requeueEvents.length) return [];
+
+  const event = matchEvents[0].event_payload || {};
+  const [sourceListing, reciprocalListing] = await Promise.all([
+    listingById(event.source_listing_id),
+    listingById(event.reciprocal_listing_id),
+  ]);
+  if (!sourceListing || !reciprocalListing) return [];
+
+  const sourceUnits = positiveMoney(deal.want_amount);
+  const sourceReceiveMinimum = positiveMoney(sourceUnits * moneyNumber(event.source_limit_rate));
+  const reciprocalHaveMaximum = positiveMoney(sourceUnits * moneyNumber(event.candidate_limit_rate));
+  if (!sourceUnits || !sourceReceiveMinimum || !reciprocalHaveMaximum) return [];
+
+  const [sourceOwner, reciprocalOwner] = await Promise.all([
+    getUserById(sourceListing.owner_user_id),
+    getUserById(reciprocalListing.owner_user_id),
+  ]);
+  if (!sourceOwner || !reciprocalOwner) return [];
+
+  const sourceReplacement = await createListingRecord(sourceOwner, {
+    have_currency: sourceListing.have_currency,
+    want_currency: sourceListing.want_currency,
+    have_amount: sourceUnits,
+    want_amount: sourceReceiveMinimum,
+    listing_type: sourceListing.listing_type || "negotiable",
+    status: matchingOwnerIsEligible(sourceOwner) ? "active" : "paused",
+  });
+  const reciprocalReplacement = await createListingRecord(reciprocalOwner, {
+    have_currency: reciprocalListing.have_currency,
+    want_currency: reciprocalListing.want_currency,
+    have_amount: reciprocalHaveMaximum,
+    want_amount: sourceUnits,
+    listing_type: reciprocalListing.listing_type || "negotiable",
+    status: matchingOwnerIsEligible(reciprocalOwner) ? "active" : "paused",
+  });
+
+  await supabaseRequest("audit_events", {
+    method: "POST",
+    body: JSON.stringify({
+      actor_user_id: actorUserId,
+      actor_type: actorUserId ? "user" : "system",
+      entity_type: "deal",
+      entity_id: deal.id,
+      event_name: "smart_match_requeued",
+      event_payload: {
+        reason,
+        source_replacement_listing_id: sourceReplacement.id,
+        reciprocal_replacement_listing_id: reciprocalReplacement.id,
+      },
+    }),
+  });
+  await recordMatchPairExclusion(
+    sourceReplacement.id,
+    reciprocalReplacement.id,
+    actorUserId,
+    reason
+  );
+
+  const results = [];
+  const sourceResult = await rematchLiveListing(sourceReplacement.id, [reciprocalReplacement.id]);
+  if (sourceResult) results.push(sourceResult);
+  const reciprocalResult = await rematchLiveListing(reciprocalReplacement.id, [sourceReplacement.id]);
+  if (reciprocalResult) results.push(reciprocalResult);
+  return [sourceReplacement, reciprocalReplacement, ...results];
+}
+
+async function requeueCancelledAutoMatch(deal, actorUserId = null, reason = "trade_cancelled") {
+  if (!deal?.id) return [];
+  if (autoMatchRequeueTasks.has(deal.id)) return autoMatchRequeueTasks.get(deal.id);
+
+  const task = performAutoMatchRequeue(deal, actorUserId, reason)
+    .finally(() => autoMatchRequeueTasks.delete(deal.id));
+  autoMatchRequeueTasks.set(deal.id, task);
+  return task;
+}
+
+async function tryAutoMatchListing(user, listing, options = {}) {
+  if (!options.skipBatchWindow) await matchingWindowDelay();
+  const plan = await findReciprocalPlan(user, listing, "clearing", options);
+  if (!plan) return null;
+  listing = plan.source;
+  const match = plan.candidate;
+  const makerReceiveProfile = plan.makerReceiveProfile;
   const takerReceiveProfile = await getDefaultPaymentProfile(user.id, match.have_currency);
   if (!makerReceiveProfile || !takerReceiveProfile) return null;
 
-  const matchCoversListing = listingHasEnoughForDeal(match, listing.want_amount, listing.have_amount);
-  const listingCoversMatch = listingHasEnoughForDeal(listing, match.want_amount, match.have_amount);
-  if (!matchCoversListing && !listingCoversMatch) return null;
-
-  const dealHaveAmount = matchCoversListing ? moneyNumber(listing.want_amount) : moneyNumber(match.have_amount);
-  const dealWantAmount = matchCoversListing ? moneyNumber(listing.have_amount) : moneyNumber(match.want_amount);
+  const dealWantAmount = plan.source_units;
+  const dealHaveAmount = plan.reciprocal_units;
+  const improvedForBoth = plan.source_improvement > 0 && plan.candidate_savings > 0;
   let matchResidual = null;
   let listingResidual = null;
 
   const dealCode = await generateReferenceCode("deal");
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-  const lockedQuote = await createLockedQuote({
-    listing: match,
-    makerUserId: match.owner_user_id,
-    takerUserId: user.id,
-    sendAmount: dealWantAmount,
-    receiveAmount: dealHaveAmount,
-    quoteType: "auto_match",
-    expiresAt,
-  });
-  const deals = await supabaseRequest("deals", {
-    method: "POST",
-    body: JSON.stringify({
-      deal_code: dealCode,
-      listing_id: match.id,
-      maker_user_id: match.owner_user_id,
-      taker_user_id: user.id,
-      have_currency: match.have_currency,
-      want_currency: match.want_currency,
-      have_amount: dealHaveAmount,
-      want_amount: dealWantAmount,
-      status: "reserved",
-      reservation_expires_at: expiresAt,
-      ...(lockedQuote?.id ? { locked_quote_id: lockedQuote.id } : {}),
-    }),
-  });
-  const deal = deals[0];
-  await attachQuoteToDeal(lockedQuote, deal.id);
+  const claimedMatch = await supabaseRequest(
+    `listings?id=eq.${filterValue(match.id)}&status=eq.active`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ status: "reserved" }),
+    }
+  );
+  if (!claimedMatch.length) return null;
 
-  await supabaseRequest(`listings?id=eq.${filterValue(match.id)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ status: "reserved" }),
-  });
-
-  await supabaseRequest(`listings?id=eq.${filterValue(listing.id)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ status: "reserved" }),
-  });
-
-  if (matchCoversListing) {
-    matchResidual = await createResidualListing(match, dealHaveAmount, dealWantAmount);
+  const claimedSource = await supabaseRequest(
+    `listings?id=eq.${filterValue(listing.id)}&status=eq.active`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ status: "reserved" }),
+    }
+  );
+  if (!claimedSource.length) {
+    await supabaseRequest(`listings?id=eq.${filterValue(match.id)}&status=eq.reserved`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "active" }),
+    });
+    return null;
   }
 
-  if (listingCoversMatch) {
-    listingResidual = await createResidualListing(listing, dealWantAmount, dealHaveAmount);
+  let lockedQuote = null;
+  let deal = null;
+  try {
+    lockedQuote = await createLockedQuote({
+      listing: match,
+      makerUserId: match.owner_user_id,
+      takerUserId: user.id,
+      sendAmount: dealWantAmount,
+      receiveAmount: dealHaveAmount,
+      quoteType: "auto_match",
+      expiresAt,
+    });
+    const deals = await supabaseRequest("deals", {
+      method: "POST",
+      body: JSON.stringify({
+        deal_code: dealCode,
+        listing_id: match.id,
+        maker_user_id: match.owner_user_id,
+        taker_user_id: user.id,
+        have_currency: match.have_currency,
+        want_currency: match.want_currency,
+        have_amount: dealHaveAmount,
+        want_amount: dealWantAmount,
+        status: "reserved",
+        reservation_expires_at: expiresAt,
+        ...(lockedQuote?.id ? { locked_quote_id: lockedQuote.id } : {}),
+      }),
+    });
+    deal = deals[0];
+    await attachQuoteToDeal(lockedQuote, deal.id);
+  } catch (error) {
+    await Promise.allSettled([
+      supabaseRequest(`listings?id=eq.${filterValue(match.id)}&status=eq.reserved`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "active" }),
+      }),
+      supabaseRequest(`listings?id=eq.${filterValue(listing.id)}&status=eq.reserved`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "active" }),
+      }),
+    ]);
+    throw error;
+  }
+
+  await supabaseRequest("audit_events", {
+    method: "POST",
+    body: JSON.stringify({
+      actor_type: "system",
+      entity_type: "deal",
+      entity_id: deal.id,
+      event_name: "smart_match_cleared",
+      event_payload: {
+        strategy: "geometric_midpoint_v1",
+        source_listing_id: listing.id,
+        reciprocal_listing_id: match.id,
+        source_limit_rate: plan.source_limit_rate,
+        candidate_limit_rate: plan.candidate_limit_rate,
+        clearing_rate: plan.clearing_rate,
+        source_improvement: plan.source_improvement,
+        candidate_savings: plan.candidate_savings,
+        source_coverage: plan.source_coverage,
+        candidate_coverage: plan.candidate_coverage,
+      },
+    }),
+  });
+
+  if (
+    dealHaveAmount < moneyNumber(match.have_amount)
+    || dealWantAmount < moneyNumber(match.want_amount)
+  ) {
+    matchResidual = await createRatePreservingWantResidualListing(match, dealWantAmount);
+  }
+
+  if (dealWantAmount < moneyNumber(listing.have_amount)) {
+    listingResidual = await createRatePreservingResidualListing(listing, dealWantAmount);
   }
 
   await upsertSession(user, user.whatsapp_phone, "deal_room", "reserved", {
@@ -996,7 +1485,9 @@ async function tryAutoMatchListing(user, listing) {
 
     const makerNotice = tradeOpenedMessage({
       heading: "Akara Trade opened ✅",
-      intro: "Akara matched your live listing with a compatible reciprocal listing.",
+      intro: improvedForBoth
+        ? "Akara cleared this inside both rate limits, so you pay less than your listing allowed."
+        : "The currencies, available value and rates are compatible.",
       dealCode,
       youSend: { amount: dealHaveAmount, currency: match.have_currency },
       youReceive: { amount: dealWantAmount, currency: match.want_currency },
@@ -1007,14 +1498,16 @@ async function tryAutoMatchListing(user, listing) {
       quoteCode: lockedQuote?.quote_code || "",
     });
 
-    sendWhatsAppText(maker.whatsapp_phone, makerNotice).catch((error) => {
+    sendTradeOpenedNotice(maker.whatsapp_phone, makerNotice).catch((error) => {
       console.error(`[deal] auto-match notice failed for ${maker.whatsapp_phone}: ${error.message}`);
     });
   }
 
   return tradeOpenedMessage({
     heading: "Akara Trade opened ✅",
-    intro: "Your listing matched a compatible reciprocal listing, so I opened the trade room.",
+    intro: improvedForBoth
+      ? "Akara cleared this inside both rate limits, so you receive more than your minimum."
+      : "The currencies, available value and rates are compatible.",
     dealCode,
     youSend: { amount: dealWantAmount, currency: match.want_currency },
     youReceive: { amount: dealHaveAmount, currency: match.have_currency },
@@ -1249,6 +1742,26 @@ async function openListingTrade(user, listing, options = {}) {
   const listingHaveAmount = moneyNumber(listing.have_amount);
   const listingWantAmount = moneyNumber(listing.want_amount);
   const isPartialFill = dealHaveAmount < listingHaveAmount || dealWantAmount < listingWantAmount;
+  let reciprocalSourceListing = null;
+
+  if (options.reciprocalSourceListingId) {
+    const sourceRows = await supabaseRequest(
+      [
+        "listings?select=id,listing_code,owner_user_id,have_currency,want_currency,have_amount,want_amount,listing_type,status",
+        `id=eq.${filterValue(options.reciprocalSourceListingId)}`,
+        `owner_user_id=eq.${filterValue(user.id)}`,
+        "status=eq.active",
+        "limit=1",
+      ].join("&")
+    );
+    reciprocalSourceListing = sourceRows[0] || null;
+    if (!reciprocalSourceListing) {
+      return "Your reciprocal listing is no longer live. Review your listings before accepting these terms.";
+    }
+    if (!listingHasEnoughForDeal(reciprocalSourceListing, dealWantAmount, dealHaveAmount)) {
+      return "These proposed values now exceed your live listing. Send a smaller counter proposal.";
+    }
+  }
 
   if (isPartialFill && listing.listing_type !== "negotiable") {
     return "This fixed-rate listing can only open with the posted terms. Ask the owner to edit it, or choose another offer.";
@@ -1327,6 +1840,12 @@ async function openListingTrade(user, listing, options = {}) {
     method: "PATCH",
     body: JSON.stringify({ status: "reserved" }),
   });
+  if (reciprocalSourceListing) {
+    await supabaseRequest(`listings?id=eq.${filterValue(reciprocalSourceListing.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "reserved" }),
+    });
+  }
 
   const deal = deals[0];
   await attachQuoteToDeal(lockedQuote, deal.id);
@@ -1348,10 +1867,20 @@ async function openListingTrade(user, listing, options = {}) {
     });
   }
   const residualListing = shouldCreateResidualListing
-    ? await createResidualListing(listing, dealHaveAmount, dealWantAmount)
+    ? await createRatePreservingResidualListing(listing, dealHaveAmount)
+    : null;
+  const reciprocalResidualListing = reciprocalSourceListing
+    && (
+      dealWantAmount < moneyNumber(reciprocalSourceListing.have_amount)
+      || dealHaveAmount < moneyNumber(reciprocalSourceListing.want_amount)
+    )
+    ? await createRatePreservingResidualListing(reciprocalSourceListing, dealWantAmount)
     : null;
   const residualLine = residualListing
     ? `${formatMoney(residualListing.have_amount, residualListing.have_currency)} for ${formatMoney(residualListing.want_amount, residualListing.want_currency)}`
+    : "";
+  const reciprocalResidualLine = reciprocalResidualListing
+    ? `${formatMoney(reciprocalResidualListing.have_amount, reciprocalResidualListing.have_currency)} for ${formatMoney(reciprocalResidualListing.want_amount, reciprocalResidualListing.want_currency)}`
     : "";
 
   await upsertSession(user, user.whatsapp_phone, "deal_room", "reserved", {
@@ -1383,6 +1912,7 @@ async function openListingTrade(user, listing, options = {}) {
     paymentProfile: makerReceiveProfile,
     expectedProfile: takerReceiveProfile,
     firstInstruction: "Name check: the account name should match the verified person you are trading with.",
+    residualLine: reciprocalSourceListing ? reciprocalResidualLine : "",
     quoteCode: lockedQuote?.quote_code || "",
   });
 
@@ -1394,10 +1924,10 @@ async function openListingTrade(user, listing, options = {}) {
 
     const makerShouldReceiveNotice = options.returnRole !== "maker";
     const takerShouldReceiveNotice = options.returnRole === "maker";
-    if (makerShouldReceiveNotice) sendWhatsAppText(maker.whatsapp_phone, makerNotice).catch((error) => {
+    if (makerShouldReceiveNotice) sendTradeOpenedNotice(maker.whatsapp_phone, makerNotice).catch((error) => {
       console.error(`[deal] maker notice failed for ${maker.whatsapp_phone}: ${error.message}`);
     });
-    if (takerShouldReceiveNotice && user.whatsapp_phone) sendWhatsAppText(user.whatsapp_phone, takerNotice).catch((error) => {
+    if (takerShouldReceiveNotice && user.whatsapp_phone) sendTradeOpenedNotice(user.whatsapp_phone, takerNotice).catch((error) => {
       console.error(`[deal] taker notice failed for ${user.whatsapp_phone}: ${error.message}`);
     });
   }
@@ -1473,6 +2003,18 @@ async function handleNegotiation(text, user, session) {
   const command = compactText(text);
   const messageProposal = parseCurrencyAmountPairs(text).length || parseBareNegotiationAmount(text);
 
+  if (["change proposal", "change_proposal"].includes(command)) {
+    const offer = context.offer_id ? await getNegotiableOfferById(context.offer_id) : null;
+    const listing = offer ? await getActiveListingById(offer.listing_id) : null;
+    if (!offer || !listing) return "That proposal is no longer available.";
+    return [
+      title("Change proposal"),
+      caption("Send one amount or both values in a natural sentence."),
+      "",
+      `Example: I can send ${formatMoney(offerWantAmount(listing, offer), listing.want_currency)} for ${formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)}.`,
+    ].join("\n");
+  }
+
   if (isReminderIntent(command) && context.offer_id) {
     const offer = await getNegotiableOfferById(context.offer_id);
     if (!offer || !["pending", "countered"].includes(offer.status)) {
@@ -1492,7 +2034,13 @@ async function handleNegotiation(text, user, session) {
   }
 
   if (!messageProposal && (isCancelIntent(text) || isDeclineIntent(text))) {
+    let reciprocalPair = null;
     if (context.offer_id) {
+      const offer = await getNegotiableOfferById(context.offer_id);
+      const sourceListingId = reciprocalSourceListingId(offer);
+      if (offer?.listing_id && sourceListingId) {
+        reciprocalPair = { sourceListingId, candidateListingId: offer.listing_id };
+      }
       await supabaseRequest(`negotiable_offers?id=eq.${filterValue(context.offer_id)}`, {
         method: "PATCH",
         body: JSON.stringify({
@@ -1502,11 +2050,20 @@ async function handleNegotiation(text, user, session) {
       }).catch(() => {});
     }
     await clearSession(user, user.whatsapp_phone);
+    if (reciprocalPair) {
+      await rematchNegotiationPair(
+        reciprocalPair.sourceListingId,
+        reciprocalPair.candidateListingId,
+        user.id,
+        "negotiation_withdrawn"
+      );
+    }
     return [
       title("Negotiation closed"),
       "",
-      "No trade was opened.",
-      `${action("find offers")} to browse again.`,
+      "No trade was opened. Both listings remain live.",
+      "",
+      "Akara has moved past this pairing and is checking the next compatible options.",
     ].join("\n");
   }
 
@@ -1595,6 +2152,7 @@ async function handleNegotiation(text, user, session) {
         force: true,
         want_amount: offer.offered_amount,
         have_amount: offer.receive_amount,
+        reciprocalSourceListingId: reciprocalSourceListingId(offer),
         negotiableOfferId: offer.id,
         quoteType: "negotiated",
         returnRole: "maker",
@@ -1616,11 +2174,20 @@ async function handleNegotiation(text, user, session) {
             title("Proposal declined"),
             "",
             "The listing owner passed on your proposal.",
-            `${action("find offers")} to browse another one.`,
+            "Your listing remains live while Akara checks the next compatible option.",
           ].join("\n")
         ).catch((error) => console.error(`[negotiation] decline notice failed: ${error.message}`));
       }
-      return "Proposal declined. No trade was opened.";
+      const sourceListingId = reciprocalSourceListingId(offer);
+      if (sourceListingId) {
+        await rematchNegotiationPair(
+          sourceListingId,
+          listing.id,
+          user.id,
+          "proposal_declined"
+        );
+      }
+      return "Proposal declined. No trade was opened. Your listing remains live while Akara checks the next option.";
     }
 
     if (!proposal) {
@@ -1639,7 +2206,7 @@ async function handleNegotiation(text, user, session) {
       body: JSON.stringify({
         status: "countered",
         ...patch,
-        message: text,
+        message: reciprocalSourceListingId(offer) ? offer.message : text,
       }),
     }))[0] || { ...offer, ...patch };
 
@@ -1699,6 +2266,7 @@ async function handleNegotiation(text, user, session) {
         force: true,
         want_amount: offer.offered_amount,
         have_amount: offer.receive_amount,
+        reciprocalSourceListingId: reciprocalSourceListingId(offer),
         negotiableOfferId: offer.id,
         quoteType: "negotiated",
         takerIntro: "You accepted the counter proposal.",
@@ -1714,9 +2282,18 @@ async function handleNegotiation(text, user, session) {
       await clearSession(user, user.whatsapp_phone);
       const owner = await getUserById(listing.owner_user_id);
       if (owner?.whatsapp_phone) {
-        sendWhatsAppText(owner.whatsapp_phone, "The trader declined your counter proposal. No trade was opened.").catch(() => {});
+        sendWhatsAppText(owner.whatsapp_phone, "The other peer declined your counter. Your listing remains live while Akara checks the next option.").catch(() => {});
       }
-      return "Counter declined. No trade was opened.";
+      const sourceListingId = reciprocalSourceListingId(offer);
+      if (sourceListingId) {
+        await rematchNegotiationPair(
+          sourceListingId,
+          listing.id,
+          user.id,
+          "counter_declined"
+        );
+      }
+      return "Counter declined. No trade was opened. Akara is checking the next compatible option.";
     }
 
     if (!proposal) return negotiationCounterMessage(listing, offer);
@@ -1727,7 +2304,7 @@ async function handleNegotiation(text, user, session) {
       body: JSON.stringify({
         status: "pending",
         ...patch,
-        message: text,
+        message: reciprocalSourceListingId(offer) ? offer.message : text,
       }),
     }))[0] || { ...offer, ...patch };
     const owner = await getUserById(listing.owner_user_id);
@@ -1991,4 +2568,5 @@ module.exports = {
   handleCreateListing,
   handleBulkListing,
   handleNegotiation,
+  requeueCancelledAutoMatch,
 };
