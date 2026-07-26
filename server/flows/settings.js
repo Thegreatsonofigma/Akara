@@ -421,7 +421,7 @@ async function requestSingleListingClose(user, context, listing) {
     "This removes the listing from search and stops new offers for it.",
   ].join("\n");
   return whatsappButtonsReply(body, [
-    { id: "confirm", title: "Close listing" },
+    { id: "confirm", title: "Confirm" },
     { id: "keep", title: "Keep live" },
   ], [
     body,
@@ -729,7 +729,7 @@ async function handleSettings(text, user, session) {
       "Close this listing and remove it from search?",
     ].join("\n");
     return whatsappButtonsReply(body, [
-      { id: "confirm", title: "Close listing" },
+      { id: "confirm", title: "Confirm" },
       { id: "keep", title: "Keep live" },
     ], [
       body,
@@ -829,6 +829,7 @@ async function handleSettings(text, user, session) {
       have_amount: listing.have_amount,
       want_amount: listing.want_amount,
       listing_type: listing.listing_type || "negotiable",
+      republished_from_listing_id: listing.id,
     }, [
       title("Republish listing"),
       caption("I copied the old terms into a new listing with a fresh reference."),

@@ -95,7 +95,10 @@ function tierLimitBlockForListing(user, context) {
 }
 
 function isOnHold(user) {
-  return user.hold_until && new Date(user.hold_until).getTime() > Date.now();
+  return Boolean(
+    user.dispute_hold
+    || (user.hold_until && new Date(user.hold_until).getTime() > Date.now())
+  );
 }
 
 function firstName(user) {

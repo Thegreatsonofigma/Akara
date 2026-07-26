@@ -16,7 +16,7 @@ const { handleListingCardRoute } = require("./lib/listing-card");
 const { handleSecurityRoute, handleSecurityFlowResponse } = require("./lib/security");
 const { handleVerificationFlowResponse } = require("./flows/verification");
 const { findOrCreateUser, getUserById, isVerified } = require("./db/users");
-const { getSession } = require("./db/sessions");
+const { getSession, rememberFailedMessage } = require("./db/sessions");
 const { buildReply } = require("./router");
 const { handleAdminApi, adminFilePath } = require("./admin");
 const { supabaseRequest, filterValue } = require("./lib/supabase");
@@ -279,6 +279,7 @@ async function handleWebhookPost(req, res) {
   let failedMessages = 0;
   for (const incoming of messages) {
     let stopTyping = () => {};
+    let processingCompleted = false;
     try {
       console.log(`[webhook] incoming ${incoming.type} message from ${incoming.from}`);
 
@@ -312,6 +313,7 @@ async function handleWebhookPost(req, res) {
       const session = await getSession(incoming.from);
       const securityFlowReply = await handleSecurityFlowResponse(incoming, user);
       if (securityFlowReply !== undefined) {
+        processingCompleted = true;
         await sendAkaraReply(incoming.from, securityFlowReply);
         await markInboundMessageProcessed(incoming).catch((error) => {
           console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
@@ -321,6 +323,7 @@ async function handleWebhookPost(req, res) {
       }
       const verificationFlowReply = await handleVerificationFlowResponse(incoming, user);
       if (verificationFlowReply !== undefined) {
+        processingCompleted = true;
         await sendAkaraReply(incoming.from, verificationFlowReply);
         await markInboundMessageProcessed(incoming).catch((error) => {
           console.error(`[webhook] inbound dedupe save failed for ${incoming.messageId}: ${error.message}`);
@@ -329,6 +332,7 @@ async function handleWebhookPost(req, res) {
         continue;
       }
       const reply = await buildReply(incoming.text, user, session, incoming);
+      processingCompleted = true;
       // console.log({reply})
       await sendAkaraReply(incoming.from, reply);
       await markInboundMessageProcessed(incoming).catch((error) => {
@@ -341,10 +345,27 @@ async function handleWebhookPost(req, res) {
       console.error(error.stack || error);
 
       try {
-        await sendWhatsAppText(
-          incoming.from,
-          "Akara hit a temporary issue while handling that message. Please try again in a moment."
-        );
+        if (processingCompleted) {
+          await sendWhatsAppText(
+            incoming.from,
+            "Your action was recorded, but its confirmation could not be delivered. Reply status to check the latest record."
+          );
+        } else {
+          const user = await findOrCreateUser(incoming.from, incoming.displayName);
+          await rememberFailedMessage(user, incoming.from, incoming);
+          await sendAkaraReply(incoming.from, {
+            type: "whatsapp_buttons",
+            body: [
+              "That message did not finish processing.",
+              "",
+              "I saved where you stopped. Tap Try again and I will continue from the same step.",
+            ].join("\n"),
+            buttons: [
+              { id: "retry_last_message", title: "Try again" },
+            ],
+            fallbackText: "That message did not finish processing. Reply retry and I will continue from the same step.",
+          });
+        }
       } catch (sendError) {
         console.error(`[webhook] fallback reply failed for ${incoming.from}: ${sendError.message}`);
       }

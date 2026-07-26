@@ -30,6 +30,7 @@ const {
   getComplianceDashboard,
 } = require("./db/compliance");
 const { listSupportRequests, updateSupportRequest } = require("./db/support");
+const { releaseDisputeHolds } = require("./db/dispute-holds");
 
 function requireAdmin(req) {
   const token = req.headers["x-akara-admin-token"];
@@ -399,7 +400,7 @@ async function notifyDisputeExchangeCompleted(dispute) {
 
 async function getAdminOverview() {
   const [users, listings, deals, disputes, verifications, supportRequests, compliance] = await Promise.all([
-    supabaseRequest("users?select=id,verification_status,risk_status,created_at&limit=1000"),
+    supabaseRequest("users?select=id,verification_status,risk_status,dispute_hold,created_at&limit=1000"),
     supabaseRequest("listings?select=id,status,have_currency,want_currency,have_amount,want_amount,created_at&limit=1000"),
     supabaseRequest("deals?select=id,status,have_currency,want_currency,have_amount,want_amount,created_at&limit=1000"),
     supabaseRequest("disputes?select=id,status,created_at&limit=1000"),
@@ -412,7 +413,11 @@ async function getAdminOverview() {
   const openDisputes = disputes.filter((item) => ["open", "waiting_for_user", "under_review"].includes(item.status));
   const pendingVerifications = verifications.filter((item) => ["pending_input", "pending_review"].includes(item.status));
   const openSupportRequests = supportRequests.filter((item) => ["open", "in_review"].includes(item.status));
-  const flaggedUsers = users.filter((item) => ["watch", "limited", "suspended"].includes(item.risk_status) || item.verification_status === "suspended");
+  const flaggedUsers = users.filter((item) =>
+    item.dispute_hold
+    || ["watch", "limited", "suspended"].includes(item.risk_status)
+    || item.verification_status === "suspended"
+  );
   const completedDeals = deals.filter((item) => ["completed_pending_fee", "closed"].includes(item.status));
   const lastSevenDays = buildLastSevenDays();
 
@@ -752,7 +757,7 @@ async function handleAdminApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/admin/api/users") {
     const users = await supabaseRequest(
-      "users?select=id,whatsapp_phone,display_name,legal_name,verification_status,verification_score,completed_deals_count,cancelled_deals_24h,total_cancelled_deals,dispute_count,risk_status,hold_until,created_at,payment_profiles(id,currency,method,account_name,bank_name,momo_network,created_at)&order=created_at.desc&limit=100"
+      "users?select=id,whatsapp_phone,display_name,legal_name,verification_status,verification_score,completed_deals_count,cancelled_deals_24h,total_cancelled_deals,dispute_count,risk_status,dispute_hold,hold_until,created_at,payment_profiles(id,currency,method,account_name,bank_name,momo_network,created_at)&order=created_at.desc&limit=100"
     );
     return jsonResponse(res, 200, { ok: true, data: users });
   }
@@ -896,6 +901,12 @@ async function handleAdminApi(req, res, url) {
     const allowedOutcomes = ["none", "keep_reviewing", "resume_trade", "close_refunded", "close_completed"];
     const outcome = allowedOutcomes.includes(body.deal_outcome) ? body.deal_outcome : "none";
     if (!allowed.includes(body.status)) return jsonResponse(res, 400, { ok: false, error: "Invalid dispute status." });
+    if (body.status === "resolved" && !["resume_trade", "close_refunded", "close_completed"].includes(outcome)) {
+      return jsonResponse(res, 400, {
+        ok: false,
+        error: "Choose whether the trade resumes, closes after a refund, or closes as completed.",
+      });
+    }
     const rows = await supabaseRequest(`disputes?id=eq.${filterValue(disputeStatusMatch[1])}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -917,6 +928,7 @@ async function handleAdminApi(req, res, url) {
           : dispute.resolved_at,
       };
       if (["resolved", "rejected"].includes(body.status)) {
+        await releaseDisputeHolds(dispute.deals);
         await recordDisputeOutcomeIntegrity(updatedDispute, outcome).catch((error) => {
           console.error(`[stellar-integrity] dispute record failed for ${dispute.id}: ${error.message}`);
         });

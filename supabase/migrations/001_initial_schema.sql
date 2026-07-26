@@ -91,6 +91,7 @@ create table public.users (
   total_cancelled_deals integer not null default 0,
   dispute_count integer not null default 0,
   risk_status risk_status not null default 'normal',
+  dispute_hold boolean not null default false,
   hold_until timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -158,6 +159,7 @@ create table public.listings (
   rate numeric(18, 8) generated always as (want_amount / have_amount) stored,
   listing_type listing_type not null default 'fixed',
   status listing_status not null default 'draft',
+  dispute_paused boolean not null default false,
   payment_profile_id uuid references public.payment_profiles(id) on delete set null,
   expires_at timestamptz,
   created_at timestamptz not null default now(),

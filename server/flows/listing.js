@@ -485,6 +485,9 @@ async function prepareListingPreview(user, details, intro = "") {
     listing_code: details.listing_code || await generateReferenceCode("listing"),
     ...(details.editing_listing_id ? { editing_listing_id: details.editing_listing_id } : {}),
     ...(details.previous_listing_status ? { previous_listing_status: details.previous_listing_status } : {}),
+    ...(details.republished_from_listing_id
+      ? { republished_from_listing_id: details.republished_from_listing_id }
+      : {}),
   };
 
   const duplicate = await findActiveDuplicateListing(user, context);
@@ -581,6 +584,17 @@ async function publishListing(user, context) {
     }),
   });
   const listing = createdListings[0];
+
+  if (context.republished_from_listing_id) {
+    const shareUrl = listingShareUrl(listing);
+    const liveMessage = listingLiveMessage("Listing reopened ✅", listingCode, listing, shareUrl);
+    const deliveryReply = await deliverListingLive(user, listing, listingCode, liveMessage);
+    const autoMatchReply = await tryAutoMatchListing(user, listing);
+    if (autoMatchReply) return deliveryReply ? [deliveryReply, autoMatchReply] : autoMatchReply;
+
+    await clearSession(user, user.whatsapp_phone);
+    return deliveryReply;
+  }
 
   const autoMatchReply = await tryAutoMatchListing(user, listing);
   if (autoMatchReply) return autoMatchReply;

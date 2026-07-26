@@ -44,6 +44,7 @@ const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
 const { FEE_BILLING_THRESHOLD, feeLedgerNote, recordDealFees } = require("../db/fees");
 const { recordCompletedDealIntegrity } = require("../db/integrity");
 const { markLiquidityRouteDealCompleted } = require("../db/liquidity");
+const { applyDisputeHolds, releaseDisputeHolds } = require("../db/dispute-holds");
 
 const REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 const receiptDeadlineTimers = new Map();
@@ -87,7 +88,9 @@ async function openMissingReceiptDispute(dealId, userId, reason = "Payment was m
     }),
   });
 
-  return rows[0] || null;
+  const dispute = rows[0] || null;
+  if (dispute) await applyDisputeHolds(deal);
+  return dispute;
 }
 
 async function getOpenDisputeForDeal(dealId) {
@@ -395,6 +398,7 @@ async function openUserDispute(user, deal, role, reason) {
   });
 
   const dispute = rows[0] || null;
+  if (dispute) await applyDisputeHolds(deal);
 
   await notifyDealUser(otherUserId, disputeGuidance(otherRole, dealCode, deal, reason)).catch((error) => {
     console.error(`[deal] dispute notice failed for ${dealCode}: ${error.message}`);
@@ -728,6 +732,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
       method: "PATCH",
       body: JSON.stringify({ status: resumedStatus }),
     });
+    await releaseDisputeHolds(deal);
 
     await notifyDealUser(otherUserId, [
       title(`Dispute withdrawn ${dealCode}`),

@@ -37,7 +37,7 @@ const {
 const { interpretMessage, isFreshRequestAction } = require("./nlp/interpreter");
 const { recordMessage, historyTranscript } = require("./nlp/history");
 const { isVerified, isOnHold } = require("./db/users");
-const { getSession, upsertSession, clearSession } = require("./db/sessions");
+const { getSession, upsertSession, clearSession, clearFailedMessage } = require("./db/sessions");
 const { extractListingCode, extractDealCode } = require("./db/listings");
 const { getDealByCodeForUser, getLatestOpenDealForUser } = require("./db/deals");
 const {
@@ -88,6 +88,15 @@ const {
 } = require("./flows/support");
 
 function accountOnHoldReply(user) {
+  if (user.dispute_hold) {
+    return [
+      title("Account temporarily paused"),
+      "",
+      "An open dispute is being reviewed. Your listings are hidden and you cannot open another exchange until it is resolved.",
+      "",
+      "You can still open the disputed transaction to add evidence or check its status.",
+    ].join("\n");
+  }
   return `Your account is paused until ${new Date(user.hold_until).toLocaleString()}.`;
 }
 
@@ -184,11 +193,30 @@ function isHumanSupportRequest(text, session = null) {
 
 function supportCategory(text) {
   const value = String(text || "").toLowerCase();
+  if (/\b(move|migrate|transfer|change)\b.*\b(akara account|phone|device|whatsapp number)\b/.test(value)) return "account_migration";
   if (/\b(dispute|conflict|scam|fraud|payment|receipt|not received|no alert)\b/.test(value)) return "trade";
   if (/\b(verify|verification|kyc|id|selfie)\b/.test(value)) return "verification";
   if (/\b(payout|bank|momo|account)\b/.test(value)) return "payout";
   if (/\b(listing|offer)\b/.test(value)) return "listing";
   return "general";
+}
+
+function isAccountMigrationQuestion(text) {
+  const value = String(text || "").trim().toLowerCase();
+  return /\b(new|another|change|changing|move|moving|migrate|migration|transfer)\b.*\b(phone|device|whatsapp number)\b/.test(value)
+    || /\b(move|moving|migrate|migration|transfer)\b.*\b(akara account|my account)\b/.test(value)
+    || /\b(phone|device|whatsapp number)\b.*\b(change|move|migrate|transfer)\b/.test(value);
+}
+
+function isAccountMigrationAction(text) {
+  const value = String(text || "").trim().toLowerCase();
+  if (/^(how|what|will|would|can|could|do i)\b/.test(value)) return false;
+  return /\b(move|migrate|transfer|change)\b.*\b(my\s+)?(?:akara account|whatsapp number|phone number)\b/.test(value);
+}
+
+function isExplicitMarketplaceBrowse(text) {
+  const value = String(text || "").trim().toLowerCase();
+  return /^(?:please\s+)?(?:show|see|view|browse|find|list)(?:\s+me)?\s+(?:all|available|live|current)\s+(?:(?:ngn|naira|rwf|rwandan francs?|xaf|cfa|kes|kenyan shillings?|ghs|ghanaian? cedis?)\s+)?(?:offers?|listings?|deals?)$/.test(value);
 }
 
 // Handles a numeric reply that quotes an earlier Akara message (menu, offer
@@ -437,6 +465,23 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   if (interpretedAction === "bulk_cancel_listings" || isBulkListingCancelIntent(command)) return requestBulkListingCancel(user);
   if (interpretedAction === "bulk_delete_payouts" || isBulkPayoutDeleteIntent(command)) return requestBulkPayoutDelete(user);
 
+  if (isAccountMigrationAction(text)) {
+    return submitSupportRequest(user, text, {
+      category: "account_migration",
+      source: "whatsapp_account_migration",
+    });
+  }
+
+  if (isExplicitMarketplaceBrowse(text) && !isMyListingsCommand(command)) {
+    await clearSession(user, user.whatsapp_phone);
+    return showBrowseOrPairMatches(user, text);
+  }
+
+  if (isAccountMigrationQuestion(text)) {
+    await clearSession(user, user.whatsapp_phone);
+    return scopedAssistantReply(text, user);
+  }
+
   if (interpretedAction === "view_trust_record" || isTrustRecordCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return reputationAssistantReply(text, user);
@@ -457,7 +502,10 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return viewPayoutsReply(user);
   }
 
-  if (interpretedAction === "my_listings" || isMyListingsCommand(command)) {
+  if (
+    isMyListingsCommand(command)
+    || (interpretedAction === "my_listings" && !isBrowseAllOffersIntent(text))
+  ) {
     await clearSession(user, user.whatsapp_phone);
     return getMyListingsReply(user);
   }
@@ -620,6 +668,9 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
         ...(flowContext.listing_code ? { listing_code: flowContext.listing_code } : {}),
         ...(flowContext.editing_listing_id ? { editing_listing_id: flowContext.editing_listing_id } : {}),
         ...(flowContext.previous_listing_status ? { previous_listing_status: flowContext.previous_listing_status } : {}),
+        ...(flowContext.republished_from_listing_id
+          ? { republished_from_listing_id: flowContext.republished_from_listing_id }
+          : {}),
       }, updates);
 
       if (!missingListingFields(revisedDraft).length && revisedDraft.have_currency !== revisedDraft.want_currency) {
@@ -878,6 +929,26 @@ function paymentProfileInterrupt(interpretedAction) {
 
 async function routeMessage(text, user, session, incoming = {}) {
   const command = normalizeInteractiveCommand(text.trim().toLowerCase());
+
+  if (["retry", "try again", "retry_last_message"].includes(command)) {
+    const savedIncoming = session?.context_json?.pending_retry?.incoming;
+    if (!savedIncoming) {
+      return [
+        title("Nothing waiting to retry"),
+        "",
+        "Your last action is already complete. Choose what you would like to do next.",
+      ].join("\n");
+    }
+
+    const reply = await routeMessage(
+      savedIncoming.text || "",
+      user,
+      session,
+      { ...savedIncoming, from: user.whatsapp_phone }
+    );
+    await clearFailedMessage(user, user.whatsapp_phone);
+    return reply;
+  }
 
   if (!command && session?.current_flow === "verification") {
     return handleVerification(text, user, session, incoming);

@@ -270,21 +270,21 @@ function trustCredentialMessage(credential, heading = "Akara Trust Record") {
     title(heading),
     caption("Your activity and reliability on Akara."),
     "",
-    `*Reference*\n${credential.credential_code}`,
+    `*Reference:* ${credential.credential_code}`,
     "",
-    `*🏅 Trust level*\n${String(credential.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())}`,
+    `*🏅 Trust level:* ${String(credential.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())}`,
     "",
-    `*✅ Completed trades*\n${claims.completed_trades || 0}`,
+    `*✅ Completed trades:* ${claims.completed_trades || 0}`,
     "",
-    `*📈 Completion rate*\n${Number(claims.completion_rate || 0).toFixed(0)}%`,
+    `*📈 Completion rate:* ${Number(claims.completion_rate || 0).toFixed(0)}%`,
     "",
-    `*⚠️ Open disputes*\n${claims.unresolved_disputes || 0}`,
+    `*⚠️ Open disputes:* ${claims.unresolved_disputes || 0}`,
     "",
-    `*🔐 Record integrity*\n${claims.integrity_status === "verified" ? "Stellar verified" : "Updating"}`,
+    `*🔐 Record integrity:* ${claims.integrity_status === "verified" ? "Stellar verified" : "Updating"}`,
     "",
-    `*Valid until*\n${new Date(credential.expires_at).toLocaleDateString("en-GB")}`,
+    `*Valid until:* ${new Date(credential.expires_at).toLocaleDateString("en-GB")}`,
     "",
-    link ? `*🔗 Share record*\n${link}` : "",
+    link ? `*🔗 Share record:* ${link}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -311,16 +311,30 @@ async function reputationAssistantReply(text, user) {
       title("Your trust record"),
       caption("Your activity and reliability on Akara."),
       "",
-      `*🏅 Trust level*\n${String(reputation.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())}`,
+      `*🏅 Trust level:* ${String(reputation.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())}`,
       "",
-      `*✅ Completed trades*\n${reputation.completed_trades || 0}`,
+      `*✅ Completed trades:* ${reputation.completed_trades || 0}`,
       "",
-      `*📈 Completion rate*\n${Number(reputation.completion_rate || 0).toFixed(0)}%`,
+      `*📈 Completion rate:* ${Number(reputation.completion_rate || 0).toFixed(0)}%`,
       "",
-      `*⚠️ Open disputes*\n${reputation.open_disputes || 0}`,
+      `*⚠️ Open disputes:* ${reputation.open_disputes || 0}`,
     ].join("\n");
   }
   return trustCredentialMessage(credential);
+}
+
+function accountMigrationReply() {
+  return [
+    title("Moving to another phone"),
+    "",
+    "If you keep the same WhatsApp number, your Akara account, verification, listings, and history move with it. You do not need to verify again.",
+    "",
+    title("Changing your WhatsApp number"),
+    "",
+    "Akara must securely transfer the account. We confirm the old number where possible, check that no trade or dispute is open, verify the account owner, then revoke access from the old number.",
+    "",
+    caption("Ask Akara to move your account when the new number is ready. Support will open a protected migration review."),
+  ].join("\n");
 }
 
 async function scopedAssistantReply(text, user, options = {}) {
@@ -331,6 +345,10 @@ async function scopedAssistantReply(text, user, options = {}) {
     return reputationAssistantReply(text, user);
   }
   if (isRateQuestion(text)) return rateAssistantReply(text);
+  if (/\b(new|another|change|changing|move|moving|migrate|migration|transfer)\b.*\b(phone|device|whatsapp number|number|account)\b/.test(value)
+      || /\b(phone|device|whatsapp number|number|account)\b.*\b(change|move|migrate|transfer)\b/.test(value)) {
+    return accountMigrationReply();
+  }
   if (/\b(what is akara|who are you|what do you do|how does akara work|explain akara)\b/.test(value)) return explainAkaraReply();
   if (/\b(refer|referral|referrals|invite|inviting|free trades?)\b/.test(value)) return referralAssistantReply();
   if (/\b(fee|fees|charge|charges|cost|costs|pricing|service fee|akara credits)\b/.test(value)) return feeAssistantReply();

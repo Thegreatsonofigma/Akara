@@ -90,7 +90,7 @@ function lastButtonPayload() {
 const { buildReply } = require("../router");
 const { sendIdleMenus } = require("../app");
 const { findOrCreateUser } = require("../db/users");
-const { getSession } = require("../db/sessions");
+const { getSession, rememberFailedMessage } = require("../db/sessions");
 const intents = require("../nlp/intents");
 const { clearHistory } = require("../nlp/history");
 const { config } = require("../config");
@@ -471,6 +471,14 @@ async function run() {
   check("trust record shows concise activity", reply.includes("Completed trades") && reply.includes("Completion rate"), reply);
   check("trust record uses restrained visual cues", reply.includes("✅") && reply.includes("📈") && reply.includes("⚠️"), reply);
   check(
+    "trust record keeps each label and value on one row",
+    /\*🏅 Trust level:\*\s+\w+/.test(reply)
+      && /\*✅ Completed trades:\*\s+\d+/.test(reply)
+      && /\*📈 Completion rate:\*\s+\d+%/.test(reply)
+      && /\*⚠️ Open disputes:\*\s+\d+/.test(reply),
+    reply
+  );
+  check(
     "trust record omits unnecessary hidden-data disclaimer",
     !reply.includes("phone number") && !reply.includes("payout detail") && !reply.includes("transaction amount"),
     reply
@@ -480,6 +488,29 @@ async function run() {
     interpret: { action: "view_profile", answer: "Here is your profile." },
   });
   check("trust record wording overrides a generic profile classification", !reply.includes("*Your profile*"), reply);
+
+  reply = await send(ALICE, "How do I move my Akara account to a new phone?");
+  check(
+    "device migration keeps the same-number account intact",
+    reply.includes("same WhatsApp number") && reply.includes("do not need to verify again"),
+    reply
+  );
+
+  reply = await send(ALICE, "Please move my Akara account to my new WhatsApp number");
+  check("new-number migration opens a protected support review", reply.includes("*Support request received*"), reply);
+  check(
+    "new-number migration reaches the admin queue with its own category",
+    __table("audit_events").some((row) =>
+      row.entity_type === "support_request"
+      && row.event_payload?.category === "account_migration"
+    ),
+    JSON.stringify(__table("audit_events").filter((row) => row.entity_type === "support_request"))
+  );
+
+  await rememberFailedMessage(aliceRow, ALICE, { text: "my trust record", type: "text" });
+  reply = await send(ALICE, "retry_last_message");
+  check("retry resumes the saved action from its original context", reply.includes("Trust Record") || reply.includes("trust record"), reply);
+  check("successful retry clears the saved failure", !(await getSession(ALICE))?.context_json?.pending_retry, JSON.stringify(await getSession(ALICE)));
 
   reply = await send(ALICE, "okay thanks");
   check("session closure is conversational", reply.includes("You are welcome, Test"), reply);
@@ -925,6 +956,11 @@ async function run() {
   reply = await send(ALICE, "show me ngn offers");
   check("browse shows bob listing", reply.includes("AKR-LIST-090"), reply);
   check("browse enters search_results", (await sessionFlow(ALICE)) === "search_results");
+  reply = await send(ALICE, "show me all NGN offers", {
+    interpret: { action: "my_listings" },
+  });
+  check("explicit marketplace browse overrides mistaken my-listings interpretation", !reply.includes("*Your listings*"), reply);
+  check("marketplace browse still excludes the requesting user's listings", !reply.includes("AKR-LIST-001"), reply);
   const fixedOfferNumber = reply.match(/(?:^|\n)\*?\s*(\d+)\.\s+\*?AKR-LIST-090\b/i)?.[1];
 
   reply = await send(ALICE, "9");
@@ -955,6 +991,20 @@ async function run() {
   const recalledDeal = __table("deals").find((row) => row.deal_code === openedDealCode);
   check("recalled deal exists", Boolean(recalledDeal), JSON.stringify({ openedDealCode, deals: __table("deals").map((row) => row.deal_code) }));
   if (recalledDeal) recalledDeal.taker_sent_at = new Date().toISOString();
+  const aliceDisputeHoldListing = seedListing(aliceRow, {
+    code: "AKR-LIST-HOLD-A",
+    have_currency: "KES",
+    have_amount: 1000,
+    want_currency: "GHS",
+    want_amount: 80,
+  });
+  const bobDisputeHoldListing = seedListing(bobRow, {
+    code: "AKR-LIST-HOLD-B",
+    have_currency: "GHS",
+    have_amount: 90,
+    want_currency: "KES",
+    want_amount: 1100,
+  });
   reply = await send(ALICE, "cancel");
   check("active trade cancel stays deal-specific", reply.includes("Cannot close from chat"), reply);
   check("active trade cancel points to dispute", reply.includes(`dispute ${openedDealCode}`), reply);
@@ -968,12 +1018,36 @@ async function run() {
     media: { id: "proof-media-001", mimeType: "image/png", filename: "receipt.png" },
   });
   check("dispute opens after proof", reply.includes("*Dispute opened ✅*") && reply.includes("amount did not arrive"), reply);
+  check("open dispute pauses both participant accounts", aliceRow.dispute_hold === true && bobRow.dispute_hold === true, JSON.stringify({ aliceRow, bobRow }));
+  check(
+    "open dispute hides both participants' live listings",
+    aliceDisputeHoldListing.status === "paused"
+      && aliceDisputeHoldListing.dispute_paused === true
+      && bobDisputeHoldListing.status === "paused"
+      && bobDisputeHoldListing.dispute_paused === true,
+    JSON.stringify({ aliceDisputeHoldListing, bobDisputeHoldListing })
+  );
+  reply = await send(BOB, "make offer");
+  check("dispute hold blocks either participant from opening a new exchange", reply.includes("*Account temporarily paused*"), reply);
 
   reply = await send(BOB, "close dispute");
   check("non opener cannot close dispute", reply.includes("Only the person who opened this dispute"), reply);
 
   reply = await send(ALICE, "close dispute");
   check("opener can withdraw dispute", reply.includes("Dispute withdrawn"), reply);
+  check("withdrawing the last dispute releases both accounts", !aliceRow.dispute_hold && !bobRow.dispute_hold, JSON.stringify({ aliceRow, bobRow }));
+  check(
+    "dispute-paused listings return to search after resolution",
+    aliceDisputeHoldListing.status === "active"
+      && aliceDisputeHoldListing.dispute_paused === false
+      && bobDisputeHoldListing.status === "active"
+      && bobDisputeHoldListing.dispute_paused === false,
+    JSON.stringify({ aliceDisputeHoldListing, bobDisputeHoldListing })
+  );
+  for (const listing of [aliceDisputeHoldListing, bobDisputeHoldListing]) {
+    const index = __table("listings").indexOf(listing);
+    if (index >= 0) __table("listings").splice(index, 1);
+  }
 
   // ---------- negotiable listing negotiation
   scenario("negotiable listing negotiation");
@@ -1196,6 +1270,7 @@ async function run() {
   check("single listing cancel prompt is scoped", !reply.includes("Manage payout details") && !reply.includes("*Payouts*"), reply);
   listingButtonIds = (lastButtonPayload()?.buttons || []).map((button) => button.id);
   check("single listing confirmation uses reply buttons", listingButtonIds.join(",") === "confirm,keep", JSON.stringify(lastButtonPayload()));
+  check("single listing close uses a concise confirm label", lastButtonPayload()?.buttons?.[0]?.title === "Confirm", JSON.stringify(lastButtonPayload()));
 
   reply = await send(ALICE, "confirm");
   check("single listing cancel completes", reply.includes("*Listing closed") && reply.includes("off search"), reply);
@@ -1241,7 +1316,30 @@ async function run() {
   check("republish opens a fresh listing review", reply.includes("*Republish listing*") && reply.includes("*Review listing*"), reply);
   check("republish preserves the old terms", reply.includes("5,000 NGN") && reply.includes("5,600 RWF"), reply);
   check("republish generates a fresh reference", !reply.includes("AKR-LIST-778"), reply);
-  await send(ALICE, "cancel");
+  const listingsBeforeRepublish = new Set(__table("listings").map((listing) => listing.id));
+  const dealsBeforeRepublish = new Set(__table("deals").map((deal) => deal.id));
+  const quotesBeforeRepublish = new Set(__table("market_quotes").map((quote) => quote.id));
+  reply = await send(ALICE, "publish");
+  const republishReply = Array.isArray(reply) ? reply.join("\n") : String(reply || "");
+  check("republished listing confirms that it reopened", republishReply.includes("Listing reopened ✅") && republishReply.includes("swap card is attached"), republishReply);
+  const republishedListing = __table("listings").find((listing) => !listingsBeforeRepublish.has(listing.id));
+  check(
+    "republished listing carries the original values into a fresh live record",
+    ["active", "reserved"].includes(republishedListing?.status)
+      && Number(republishedListing?.have_amount) === 5000
+      && Number(republishedListing?.want_amount) === 5600,
+    JSON.stringify(republishedListing)
+  );
+  for (const [tableName, previousIds] of [
+    ["listings", listingsBeforeRepublish],
+    ["deals", dealsBeforeRepublish],
+    ["market_quotes", quotesBeforeRepublish],
+  ]) {
+    const rows = __table(tableName);
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      if (!previousIds.has(rows[index].id)) rows.splice(index, 1);
+    }
+  }
 
   seedListing(aliceRow, {
     code: "AKR-LIST-779",
