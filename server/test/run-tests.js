@@ -23,6 +23,7 @@ process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_RECEIPT_OCR = "off";
 process.env.AKARA_ID_OCR = "off";
 process.env.AKARA_PUBLIC_URL = "https://akara-share.example";
+process.env.AKARA_SHARE_URL = "https://akara-share.example";
 
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -53,6 +54,7 @@ stubModule("lib/openai.js", openaiStub);
 // Menu lists are sent directly (the reply is null); capture the payloads so
 // scenarios can assert on the list body instead of the returned text.
 const whatsapp = require("../lib/whatsapp");
+const { containsPreviewableUrl } = whatsapp;
 const listSends = [];
 const buttonSends = [];
 whatsapp.sendWhatsAppList = async (to, payload) => {
@@ -95,6 +97,7 @@ const { config } = require("../config");
 const { findNigerianBanks } = require("../lib/coinprofile");
 const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
 const { normalizeMobileMoneyNumber } = require("../lib/mobile-number");
+const { handlePaymentProfile } = require("../flows/payment-profile");
 
 const { __table, __reset } = fakeSupabase;
 
@@ -305,6 +308,8 @@ async function run() {
   check("show my records → history", intents.isHistoryCommand("show my records"));
   check("find offers not listings", !intents.isMyListingsCommand("find offers"));
   check("delete all payouts not payouts view", !intents.isPayoutsCommand("delete all my payouts"));
+  check("https listing links enable WhatsApp previews", containsPreviewableUrl("Open https://www.tryakara.com/l/AKR-LIST-001"));
+  check("ordinary chat does not request a link preview", !containsPreviewableUrl("Show me my listings"));
 
   // ---------- mobile money number formatting
   scenario("mobile money number formatting");
@@ -520,6 +525,14 @@ async function run() {
   const doraRwfPayout = __table("payment_profiles").find((row) => row.user_id === doraRow.id && row.currency === "RWF");
   check("saved momo number uses local digits only", doraRwfPayout?.momo_number_encrypted === "0788123456", JSON.stringify(doraRwfPayout));
 
+  const recoveredPaymentReply = await handlePaymentProfile("continue", doraRow, {
+    current_flow: "payment_profile",
+    current_step: "legacy_payment_step",
+    context_json: {},
+  });
+  check("stale payout session recovers with the payout picker", recoveredPaymentReply?.type === "whatsapp_list", JSON.stringify(recoveredPaymentReply));
+  check("stale payout recovery does not expose reset copy", !String(recoveredPaymentReply?.fallbackText || "").includes("reset payment setup"), JSON.stringify(recoveredPaymentReply));
+
   const TIER = "250700000005";
   const tierRow = seedVerifiedUser(TIER, "Tier One User");
   tierRow.verification_status = "verified_auto";
@@ -572,7 +585,7 @@ async function run() {
   );
   check(
     "listing share page includes the dynamic card preview and WhatsApp deep link",
-    previewPage.includes('property="og:image" content="https://akara-share.example/l/AKR-LIST-321.png')
+    previewPage.includes('property="og:image" content="https://akara-share.example/l/AKR-LIST-321/card')
       && previewPage.includes("https://wa.me/")
       && previewPage.includes("open%20AKR-LIST-321"),
     previewPage.slice(0, 600)

@@ -3,7 +3,7 @@ const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const opentype = require("opentype.js");
-const { rootDir, config, getPublicUrl } = require("../config");
+const { rootDir, config, getShareUrl } = require("../config");
 const { supabaseRequest, filterValue } = require("./supabase");
 const { uploadWhatsAppMedia, sendWhatsAppMedia } = require("./whatsapp");
 const { displayReference, listingWaOpenUrl } = require("../db/listings");
@@ -912,11 +912,10 @@ async function exchangeCompletionPng(deal, role) {
 
 function listingSharePage(listing) {
   const code = displayReference(listing.listing_code, "listing");
-  const publicUrl = String(getPublicUrl() || "").replace(/\/+$/, "");
+  const publicUrl = String(getShareUrl() || "").replace(/\/+$/, "");
   const version = listingCardVersion(listing);
   const versionQuery = version ? `?v=${encodeURIComponent(version)}` : "";
-  const imageUrl = publicUrl ? `${publicUrl}/l/${encodeURIComponent(code)}.png${versionQuery}` : `/l/${encodeURIComponent(code)}.svg${versionQuery}`;
-  const svgUrl = publicUrl ? `${publicUrl}/l/${encodeURIComponent(code)}.svg${versionQuery}` : `/l/${encodeURIComponent(code)}.svg${versionQuery}`;
+  const imageUrl = publicUrl ? `${publicUrl}/l/${encodeURIComponent(code)}/card${versionQuery}` : `/l/${encodeURIComponent(code)}.png${versionQuery}`;
   const shareUrl = publicUrl
     ? `${publicUrl}/l/${encodeURIComponent(code)}${versionQuery}`
     : `/l/${encodeURIComponent(code)}${versionQuery}`;
@@ -954,7 +953,7 @@ function listingSharePage(listing) {
 </head>
 <body>
   <main>
-    <img src="${escapeXml(svgUrl)}" alt="${escapeXml(title)}">
+    <img src="${escapeXml(imageUrl)}" alt="${escapeXml(title)}">
     <p>Opening ${escapeXml(code)} in your Akara WhatsApp chat.</p>
     <a href="${escapeXml(openUrl)}">Open this listing on Akara</a>
   </main>

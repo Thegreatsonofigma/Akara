@@ -2,6 +2,10 @@ const path = require("node:path");
 const { config } = require("../config");
 const { supabaseRequest, filterValue } = require("./supabase");
 
+function containsPreviewableUrl(message) {
+  return /https:\/\/[^\s]+/i.test(String(message || ""));
+}
+
 async function sendWhatsAppText(to, message) {
   if (config.sendMode === "log") {
     console.log(`\nAkara -> ${to}\n${message}\n`);
@@ -25,7 +29,7 @@ async function sendWhatsAppText(to, message) {
       to,
       type: "text",
       text: {
-        preview_url: false,
+        preview_url: containsPreviewableUrl(message),
         body: message,
       },
     }),
@@ -505,6 +509,7 @@ function getMessageText(message) {
 }
 
 module.exports = {
+  containsPreviewableUrl,
   sendWhatsAppText,
   sendWhatsAppList,
   sendWhatsAppButtons,

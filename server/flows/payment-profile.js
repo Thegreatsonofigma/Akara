@@ -964,8 +964,14 @@ async function handlePaymentProfile(text, user, session) {
   });
   if (stepReply) return stepReply;
 
-  await clearSession(user, user.whatsapp_phone);
-  return "I reset payment setup. Type add payment to start again.";
+  await upsertSession(user, user.whatsapp_phone, "payment_profile", "payment_currency", {});
+  return paymentChoicePromptReply(
+    null,
+    [
+      title("Continue payout setup"),
+      "Choose the account where you want to receive money.",
+    ].join("\n")
+  );
 }
 
 module.exports = {
