@@ -1,5 +1,10 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
-const { isCoinProfileEnabled, findNigerianBanks, resolveBankAccount } = require("../lib/coinprofile");
+const {
+  isCoinProfileEnabled,
+  listNigerianBanks,
+  findNigerianBanks,
+  resolveBankAccount,
+} = require("../lib/coinprofile");
 const { title, caption, action, labeled, normalizeShortText, digitsOnly } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { paymentOptionLines, parsePaymentCurrency } = require("../nlp/currency");
@@ -195,14 +200,114 @@ function paymentProfileStartPrompt(currency) {
       ].join("\n");
 }
 
+const BANK_LIST_PAGE_SIZE = 7;
+
+function parseBankListAction(input) {
+  const value = String(input || "").trim();
+  const bank = value.match(/^payout_bank:(.+)$/i);
+  if (bank) return { type: "bank", value: bank[1] };
+  const page = value.match(/^payout_bank_page:(\d+)$/i);
+  if (page) return { type: "page", value: Number(page[1]) };
+  if (/^payout_bank_search$/i.test(value)) return { type: "search", value: null };
+  return null;
+}
+
+function bankSearchPrompt() {
+  return [
+    title("Search Nigerian banks"),
+    "",
+    "Send the bank name or a familiar short name.",
+    caption("Examples: GTBank, Access, Kuda, Zenith, UBA"),
+  ].join("\n");
+}
+
+async function bankSelectionPromptReply(flow, user, context, requestedPage = 0) {
+  if (!isCoinProfileEnabled()) {
+    await upsertSession(user, user.whatsapp_phone, flow, "payment_bank_name", context);
+    return paymentProfileStartPrompt("NGN");
+  }
+
+  let banks;
+  try {
+    banks = await listNigerianBanks();
+  } catch (error) {
+    console.error("CoinProfile bank list failed:", error.message);
+    await upsertSession(user, user.whatsapp_phone, flow, "payment_bank_name", context);
+    return paymentProfileStartPrompt("NGN");
+  }
+
+  if (!banks.length) {
+    await upsertSession(user, user.whatsapp_phone, flow, "payment_bank_name", context);
+    return paymentProfileStartPrompt("NGN");
+  }
+
+  const displayBanks = banks.map((bank) => ({
+    ...bank,
+    name: /\bpaycom\b/i.test(bank.name) ? "Opay" : bank.name,
+  }));
+  const pageCount = Math.max(1, Math.ceil(displayBanks.length / BANK_LIST_PAGE_SIZE));
+  const page = Math.min(Math.max(0, Number(requestedPage) || 0), pageCount - 1);
+  const pageBanks = displayBanks.slice(page * BANK_LIST_PAGE_SIZE, (page + 1) * BANK_LIST_PAGE_SIZE);
+  context.payment_bank_page = page;
+  context.payment_bank_page_options = pageBanks;
+  await upsertSession(user, user.whatsapp_phone, flow, "payment_bank_name", context);
+
+  const rows = pageBanks.map((bank) => ({
+    id: `payout_bank:${bank.code}`,
+    title: bank.name.slice(0, 24),
+    description: "Use this Nigerian bank.",
+  }));
+  rows.push({
+    id: "payout_bank_search",
+    title: "Search bank",
+    description: "Type a bank name or familiar short name.",
+  });
+  if (page > 0) {
+    rows.push({
+      id: `payout_bank_page:${page - 1}`,
+      title: "Previous banks",
+      description: `Go to page ${page}.`,
+    });
+  }
+  if (page + 1 < pageCount) {
+    rows.push({
+      id: `payout_bank_page:${page + 1}`,
+      title: "More banks",
+      description: `Go to page ${page + 2} of ${pageCount}.`,
+    });
+  }
+
+  const body = [
+    title("Choose your Nigerian bank"),
+    `Page ${page + 1} of ${pageCount}. Select a bank or search by name.`,
+  ].join("\n");
+  return whatsappListReply(
+    {
+      body,
+      button: "Choose bank",
+      sections: [{ title: "Nigerian banks", rows }],
+    },
+    [
+      body,
+      "",
+      ...pageBanks.map((bank, index) => `${index + 1}. ${bank.name}`),
+      "",
+      "You can also send the bank name.",
+    ].join("\n")
+  );
+}
+
 async function startPaymentProfileForCurrency(user, currency, context = {}) {
   const paymentContext = {
     ...context,
     payment_currency: currency,
   };
   const nextStep = paymentMethodForCurrency(currency) === "bank" ? "payment_bank_name" : "payment_network";
+  if (nextStep === "payment_bank_name") {
+    return bankSelectionPromptReply("payment_profile", user, paymentContext);
+  }
   await upsertSession(user, user.whatsapp_phone, "payment_profile", nextStep, paymentContext);
-  return nextStep === "payment_network" ? networkPromptReply(currency) : paymentProfileStartPrompt(currency);
+  return networkPromptReply(currency);
 }
 
 async function startPaymentProfileFlow(user, context = {}) {
@@ -832,6 +937,7 @@ async function handlePaymentSteps(flow, text, user, session, context, { onDeclin
 
     await upsertSession(user, user.whatsapp_phone, flow, nextStep, context);
     if (nextStep === "payment_network") return networkPromptReply(context.payment_currency);
+    if (nextStep === "payment_bank_name") return bankSelectionPromptReply(flow, user, context);
     return [
       title("Let's update that"),
       "",
@@ -845,11 +951,45 @@ async function handlePaymentSteps(flow, text, user, session, context, { onDeclin
 
     context.payment_currency = currency;
     const nextStep = paymentMethodForCurrency(currency) === "bank" ? "payment_bank_name" : "payment_network";
+    if (nextStep === "payment_bank_name") {
+      return bankSelectionPromptReply(flow, user, context);
+    }
     await upsertSession(user, user.whatsapp_phone, flow, nextStep, context);
-    return nextStep === "payment_network" ? networkPromptReply(currency) : paymentProfileStartPrompt(currency);
+    return networkPromptReply(currency);
   }
 
   if (step === "payment_bank_name") {
+    const bankAction = parseBankListAction(text);
+    if (bankAction?.type === "page") {
+      return bankSelectionPromptReply(flow, user, context, bankAction.value);
+    }
+    if (bankAction?.type === "search") {
+      await upsertSession(user, user.whatsapp_phone, flow, "payment_bank_name", context);
+      return bankSearchPrompt();
+    }
+    if (bankAction?.type === "bank") {
+      let selected = (context.payment_bank_page_options || [])
+        .find((bank) => String(bank.code) === String(bankAction.value));
+      if (!selected) {
+        try {
+          selected = (await listNigerianBanks())
+            .map((bank) => ({
+              ...bank,
+              name: /\bpaycom\b/i.test(bank.name) ? "Opay" : bank.name,
+            }))
+            .find((bank) => String(bank.code) === String(bankAction.value));
+        } catch (error) {
+          console.error("CoinProfile bank selection failed:", error.message);
+        }
+      }
+      if (!selected) return bankSelectionPromptReply(flow, user, context, context.payment_bank_page || 0);
+
+      context.payment_bank_name = selected.name;
+      context.payment_bank_code = selected.code;
+      delete context.payment_bank_page_options;
+      return proceedAfterBankChosen(flow, user, context);
+    }
+
     if (looksLikeAccountNumber(text)) {
       const status = bankAccountNumberStatus(text);
       if (!status.valid) return bankAccountNumberPrompt(status);

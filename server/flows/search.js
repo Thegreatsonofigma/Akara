@@ -7,6 +7,7 @@ const {
   missingListingFields,
   nextSearchStep,
   hasDirectionalExchangeText,
+  mentionedCurrencyRole,
   mergePresentDetails,
   listingDraftFromSearch,
 } = require("../nlp/exchange");
@@ -90,14 +91,18 @@ function searchPromptForStep(step, details = {}) {
 }
 
 function hasActionableSearchDetails(details = {}) {
-  return Boolean(
-    (details.have_currency && details.want_currency)
-    || (details.want_currency && (details.want_amount || details.amount))
-    || (details.have_currency && (details.have_amount || details.amount)),
-  );
+  return Boolean(details.have_currency || details.want_currency);
 }
 
 async function continueSearchOrShowMatches(user, details) {
+  if (details.want_currency && !details.have_currency && !details.want_amount && !details.amount) {
+    return showDirectionalCurrencyOffers(user, details.want_currency, "receive");
+  }
+
+  if (details.have_currency && !details.want_currency && !details.have_amount && !details.amount) {
+    return showDirectionalCurrencyOffers(user, details.have_currency, "send");
+  }
+
   if (details.want_currency && (details.want_amount || details.amount) && !details.have_currency) {
     return showNeedOnlyOfferMatches(user, details);
   }
@@ -107,6 +112,10 @@ async function continueSearchOrShowMatches(user, details) {
   }
 
   if (details.have_currency && details.want_currency && details.max_want_amount) {
+    return showOfferMatches(user, details);
+  }
+
+  if (details.have_currency && details.want_currency && !details.have_amount && !details.want_amount) {
     return showOfferMatches(user, details);
   }
 
@@ -600,6 +609,100 @@ async function showBrowseOffers(user, currency = null, page = 0) {
   ].filter(Boolean).join("\n\n");
 }
 
+async function showDirectionalCurrencyOffers(user, currency, direction = "receive", page = 0) {
+  const receiving = direction === "receive";
+  const pageSize = 10;
+  const offset = Math.max(0, Number(page || 0)) * pageSize;
+  const currencyColumn = receiving ? "have_currency" : "want_currency";
+  const query = [
+    LISTING_SEARCH_SELECT,
+    "status=eq.active",
+    `${currencyColumn}=eq.${filterValue(currency)}`,
+    `owner_user_id=neq.${filterValue(user.id)}`,
+    "order=listing_type.desc,created_at.desc",
+    `limit=${pageSize + 1}`,
+    `offset=${offset}`,
+  ].join("&");
+
+  const fetched = (await supabaseRequest(query)).filter((listing) => listing.owner_user_id !== user.id);
+  const ordered = fetched.slice().sort((a, b) => {
+    const aPriority = a.listing_type === "negotiable" ? 0 : 1;
+    const bPriority = b.listing_type === "negotiable" ? 0 : 1;
+    if (aPriority !== bPriority) return aPriority - bPriority;
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  });
+  const hasMore = ordered.length > pageSize;
+  const listings = await attachOwnerReputations(ordered.slice(0, pageSize));
+
+  if (!listings.length) {
+    if (page) {
+      return [
+        title("No more offers"),
+        "",
+        "You have reached the end of the current list.",
+      ].join("\n");
+    }
+
+    const nextStep = receiving ? "have_currency" : "want_currency";
+    const context = receiving
+      ? { want_currency: currency }
+      : { have_currency: currency };
+    await upsertSession(user, user.whatsapp_phone, "find_offer", nextStep, context);
+
+    return currencyListReply({
+      mode: receiving ? "have" : "want",
+      body: [
+        title(`No live offers ${receiving ? "paying" : "accepting"} ${currency}`),
+        "",
+        receiving
+          ? `No current listing is offering ${currency}.`
+          : `No current listing is requesting ${currency}.`,
+        "",
+        title("Create your own listing"),
+        receiving
+          ? `What currency will you give in exchange for ${currency}?`
+          : `What currency would you like to receive for your ${currency}?`,
+      ].join("\n"),
+      excludeCurrency: currency,
+    });
+  }
+
+  const resultMap = {};
+  listings.forEach((listing, index) => {
+    resultMap[String(index + 1)] = listing.id;
+  });
+  await upsertSession(user, user.whatsapp_phone, "search_results", "select", {
+    browse_mode: true,
+    browse_direction: receiving ? "receive" : "send",
+    browse_currency: currency,
+    browse_page: page,
+    has_more: hasMore,
+    result_map: resultMap,
+  });
+
+  return [
+    title(receiving ? `Offers paying ${currency}` : `Offers accepting ${currency}`),
+    caption(
+      page
+        ? `Page ${page + 1}. Negotiable offers appear first.`
+        : "Negotiable offers appear first. Choose one if its terms work for you."
+    ),
+    "",
+    listings.map((listing, index) => [
+      title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
+      labeled("You receive", formatMoney(listing.have_amount, listing.have_currency)),
+      labeled("You send", formatMoney(listing.want_amount, listing.want_currency)),
+      labeled("Terms", listingTypeLabel(listing.listing_type)),
+      labeled("Owner record", ownerRecordLabel(listing)),
+    ].join("\n")).join("\n\n"),
+    "",
+    title("Actions"),
+    `${action("1")} or ${action("open 1")} to start an Akara Trade`,
+    hasMore ? `${action("view more")} to see more offers` : "",
+    `${action("search again")} to narrow it down`,
+  ].filter(Boolean).join("\n\n");
+}
+
 // Users often mix a directional request with browse words, like "I have 2k
 // naira and want rwf, show me available deals". When both sides of the pair
 // are known we show matched offers for that pair instead of a generic browse.
@@ -607,6 +710,13 @@ async function showBrowseOrPairMatches(user, text, fallbackCurrency = null) {
   const details = parseSearchDetails(text);
   if (details.have_currency && details.want_currency) {
     return showOfferMatches(user, details);
+  }
+  const currencyRole = mentionedCurrencyRole(text);
+  if (details.want_currency && currencyRole === "want") {
+    return showDirectionalCurrencyOffers(user, details.want_currency, "receive");
+  }
+  if (details.have_currency && currencyRole === "have") {
+    return showDirectionalCurrencyOffers(user, details.have_currency, "send");
   }
   return showBrowseOffers(user, browseOfferCurrency(text) || fallbackCurrency);
 }
@@ -770,6 +880,14 @@ async function handleSearchResults(text, user, session) {
 
   if (session.context_json?.browse_mode && isMoreResultsIntent(text)) {
     const context = session.context_json || {};
+    if (context.browse_direction) {
+      return showDirectionalCurrencyOffers(
+        user,
+        context.browse_currency,
+        context.browse_direction,
+        Number(context.browse_page || 0) + 1
+      );
+    }
     return showBrowseOffers(user, context.browse_currency || null, Number(context.browse_page || 0) + 1);
   }
 
@@ -830,6 +948,7 @@ module.exports = {
   continueSearchOrShowMatches,
   showOfferMatches,
   showBrowseOffers,
+  showDirectionalCurrencyOffers,
   showBrowseOrPairMatches,
   handleFindOffer,
   handleSearchResults,

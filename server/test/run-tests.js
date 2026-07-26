@@ -793,6 +793,34 @@ async function run() {
   check("linked profile cannot open owner listing", reply.includes("Trade paused for safety"), reply);
   check("linked profile is risk flagged", linkedRow.risk_status === "watch", linkedRow.risk_status);
 
+  reply = await send(ALICE, "Good morning, please, I also need Naira.", {
+    interpret: { action: "greeting", answer: "Good morning!" },
+  });
+  check(
+    "implied receive currency overrides a greeting classification",
+    reply.includes("*Offers paying NGN*") && reply.includes("AKR-LIST-089") && reply.includes("AKR-LIST-090"),
+    reply
+  );
+  check("receive-only browse excludes listings asking for NGN", !reply.includes("AKR-LIST-088"), reply);
+  check(
+    "receive-only browse does not repeat the receive-currency question",
+    !reply.includes("Tell me what currency you want to receive") && !reply.includes("What currency do you need"),
+    reply
+  );
+
+  reply = await send(ALICE, "please I also need Kenyan shillings", {
+    interpret: { action: "greeting", answer: "Sure." },
+  });
+  check("empty receive-currency search explains the result", reply.includes("*No live offers paying KES*"), reply);
+  check("empty receive-currency search asks only what the user will give", reply.includes("What currency will you give in exchange for KES?"), reply);
+  check(
+    "empty receive-currency search preserves KES and opens the have-currency tray",
+    (await getSession(ALICE))?.context_json?.want_currency === "KES"
+      && lastListPayload()?.sections?.[0]?.rows?.every((row) => row.id !== "currency:KES"),
+    JSON.stringify({ reply, session: await getSession(ALICE), list: lastListPayload() })
+  );
+  await send(ALICE, "cancel");
+
   reply = await send(ALICE, "Hello Akara, Please I need naira 30k");
   check("need-only search shows eligible NGN offers", reply.includes("AKR-LIST-089") && reply.includes("AKR-LIST-090"), reply);
   check("need-only search ranks flexible first", reply.indexOf("AKR-LIST-089") !== -1 && reply.indexOf("AKR-LIST-089") < reply.indexOf("AKR-LIST-090"), reply);
@@ -1370,6 +1398,14 @@ async function run() {
           { Name: "Guaranty Trust Bank", Code: "058" },
           { Name: "Paycom", Code: "305" },
           { Name: "Opay", Code: "999" },
+          { Name: "Access Bank", Code: "044" },
+          { Name: "Zenith Bank", Code: "057" },
+          { Name: "United Bank for Africa", Code: "033" },
+          { Name: "Kuda Microfinance Bank", Code: "50211" },
+          { Name: "First Bank of Nigeria", Code: "011" },
+          { Name: "First City Monument Bank", Code: "214" },
+          { Name: "Stanbic IBTC Bank", Code: "221" },
+          { Name: "Wema Bank", Code: "035" },
         ],
       });
     }
@@ -1391,6 +1427,32 @@ async function run() {
     const opayMatches = await findNigerianBanks("Opay Bank");
     check("opay bank matches CoinProfile's Paycom entry", opayMatches.length === 1 && opayMatches[0].code === "305", JSON.stringify(opayMatches));
     check("opay match displays as Opay", opayMatches[0]?.name === "Opay", JSON.stringify(opayMatches));
+
+    reply = await send(CHIDI, "add NGN payout");
+    const bankRows = lastListPayload()?.sections?.[0]?.rows || [];
+    check("NGN payout setup opens the native bank tray", lastListPayload()?.button === "Choose bank", JSON.stringify(lastListPayload()));
+    check(
+      "bank tray provides supported banks and a search action",
+      bankRows.some((row) => row.id === "payout_bank:058")
+        && bankRows.some((row) => row.title === "Opay")
+        && bankRows.some((row) => row.id === "payout_bank_search")
+        && bankRows.some((row) => row.id === "payout_bank_page:1"),
+      JSON.stringify(bankRows)
+    );
+
+    reply = await send(CHIDI, "payout_bank_page:1");
+    check(
+      "bank tray paginates through the full supported list",
+      lastListPayload()?.body?.includes("Page 2 of 2")
+        && lastListPayload()?.sections?.[0]?.rows?.some((row) => row.id === "payout_bank_page:0"),
+      JSON.stringify(lastListPayload())
+    );
+
+    reply = await send(CHIDI, "payout_bank_search");
+    check("bank search action asks for a typed bank name", reply.includes("*Search Nigerian banks*"), reply);
+    reply = await send(CHIDI, "opay");
+    check("typed bank search selects the bank", reply.includes("*Bank:* Opay") && reply.includes("account number"), reply);
+    await send(CHIDI, "cancel");
 
     reply = await send(CHIDI, "bank details");
     reply = await send(CHIDI, "edit payout 1");

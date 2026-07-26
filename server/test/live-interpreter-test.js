@@ -26,6 +26,11 @@ const CASES = [
     expect: ["create_listing", "find_offer"],
     slots: { have_currency: "NGN", have_amount: 50000, want_currency: "RWF", want_amount: 55000 },
   },
+  {
+    text: "Good morning, please, I also need Naira.",
+    expect: ["find_offer"],
+    slots: { want_currency: "NGN" },
+  },
   { text: "who get rwf make we exchange", expect: ["find_offer", "browse_offers"] },
   { text: "show me available deals", expect: ["browse_offers"] },
   { text: "open akr-list-104", expect: ["reserve_listing"] },

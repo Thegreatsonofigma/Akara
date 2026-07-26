@@ -539,14 +539,27 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     want_amount: details.want_amount || null,
   };
   const freshListingDetails = mergePresentDetails(parseListingDetails(text), interpretedExchangeDetails);
+  const freshSearchDetails = mergePresentDetails(parseSearchDetails(text), interpretedExchangeDetails);
   if (freshListingDetails.have_currency && freshListingDetails.have_currency === freshListingDetails.want_currency) {
     freshListingDetails.want_currency = null;
     freshListingDetails.want_amount = null;
   }
   const hasFreshCompleteListing = missingListingFields(freshListingDetails).length === 0;
+  const deterministicSearchEligible = [
+    "unknown",
+    "greeting",
+    "question",
+    "wellbeing",
+    "find_offer",
+    "browse_offers",
+  ].includes(interpretedAction);
+  const impliedSearchRequest = deterministicSearchEligible
+    && inferIntent(text) === "find_offer"
+    && Boolean(freshSearchDetails.have_currency || freshSearchDetails.want_currency);
   const freshDirectional = hasDirectionalExchangeText(text)
     || interpretedAction === "create_listing"
-    || interpretedAction === "find_offer";
+    || interpretedAction === "find_offer"
+    || impliedSearchRequest;
 
   // "publish it" / "go ahead" at the review step must reach the flow handler
   // and publish — even when the model re-extracted the draft's details from
@@ -554,6 +567,15 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const confirmingDraft = session?.current_flow === "create_listing"
     && session.current_step === "confirm"
     && isListingPublishIntent(text);
+
+  // A currency and a demand statement are already enough context to search.
+  // This deterministic path takes priority when a greeting prefix makes the
+  // model classify "good morning, I also need naira" as casual conversation.
+  if (impliedSearchRequest && !confirmingDraft) {
+    if (isOnHold(user)) return accountOnHoldReply(user);
+    await clearSession(user, user.whatsapp_phone);
+    return continueSearchOrShowMatches(user, freshSearchDetails);
+  }
 
   // "Who needs naira? 50k for 54k rwf" hunts for a counterparty for money the
   // user already holds. It reads like a listing (and the model sometimes
@@ -563,7 +585,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   if (isDemandSeekingQuestion(text) && freshDirectional && !confirmingDraft) {
     if (isOnHold(user)) return accountOnHoldReply(user);
     await clearSession(user, user.whatsapp_phone);
-    return continueSearchOrShowMatches(user, freshListingDetails);
+    return continueSearchOrShowMatches(user, freshSearchDetails);
   }
 
   if (session?.current_flow === "create_listing" && hasFreshCompleteListing && freshDirectional && !confirmingDraft) {
@@ -818,10 +840,8 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
       return showBrowseOffers(user);
     }
 
-    const searchDetails = mergePresentDetails(parseSearchDetails(text), interpretedExchangeDetails);
-    if ((searchDetails.have_currency && searchDetails.want_currency)
-        || (searchDetails.want_currency && (searchDetails.want_amount || searchDetails.amount))
-        || (searchDetails.have_currency && (searchDetails.have_amount || searchDetails.amount))) {
+    const searchDetails = freshSearchDetails;
+    if (searchDetails.have_currency || searchDetails.want_currency) {
       return continueSearchOrShowMatches(user, searchDetails);
     }
 
