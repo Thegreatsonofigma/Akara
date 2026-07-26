@@ -228,9 +228,17 @@ function isHumanSupportRequest(text, session = null) {
 function bulkListingRequest(text, interpretedAction, session = null) {
   const pairs = parseCurrencyAmountPairs(text);
   const listings = parseBulkListingDetails(text);
-  const looksLikeSearch = interpretedAction === "find_offer"
-    || interpretedAction === "browse_offers"
-    || /\b(find|search|show|browse|available|who\s+(?:has|gets?|needs?|wants?))\b/i.test(text);
+  const hasCompleteBatch = listings.length >= 2;
+  const explicitlyBrowsesOffers = (
+    /\b(find|search|show|browse|view|check)\b.{0,45}\b(offers?|listings?|matches?|marketplace|deals?)\b/i.test(text)
+    || /\b(offers?|listings?|matches?|marketplace|deals?)\b.{0,30}\b(find|search|show|browse|view|check)\b/i.test(text)
+  );
+  const looksLikeSearch = explicitlyBrowsesOffers
+    || (!hasCompleteBatch && (
+      interpretedAction === "find_offer"
+      || interpretedAction === "browse_offers"
+      || /\b(find|search|show|browse|available|who\s+(?:has|gets?|needs?|wants?))\b/i.test(text)
+    ));
   const protectedFlow = ["deal_room", "negotiation"].includes(session?.current_flow);
   const explicitSupportContext = /\b(dispute|complaint|conflict|scam|fraud|support ticket|customer care|customer service|admin review)\b/i.test(text);
 

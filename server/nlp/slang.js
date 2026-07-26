@@ -30,7 +30,9 @@ const SLANG_REPLACEMENTS = [
 ];
 
 function expandSlang(text) {
-  let value = String(text || "");
+  let value = String(text || "")
+    .replace(/₦/g, " NGN ")
+    .replace(/₵/g, " GHS ");
   for (const [pattern, replacement] of SLANG_REPLACEMENTS) {
     value = value.replace(pattern, replacement);
   }

@@ -768,6 +768,21 @@ async function run() {
       && numberedBulkListings.map((listing) => listing.want_amount).join(",") === "55000,66000,77000",
     JSON.stringify(numberedBulkListings)
   );
+  const naturalTenOfferMessage = "Hi Akara, got a few exchanges I'm trying to sort out. I have **RWF 6,500,000** and I'm looking for **₦780,000**. I also have **GHS 15,000** and I need **KES 175,000**. Looking to swap **XAF 2,200,000** for **RWF 5,100,000**. I have **KES 95,000** and I'd like **₦1,050,000**. Another one, I have **₦850,000** and I'm looking for **GHS 11,500**. I've also got **RWF 3,800,000** and I want **XAF 1,650,000**. I have **KES 140,000** available if anyone can do **RWF 1,750,000**. I also have **GHS 8,500** and I'm after **XAF 1,900,000**. Looking to exchange **XAF 4,500,000** for **KES 165,000**, and finally I have **₦2,000,000** that I'd like to swap for **RWF 1,250,000**. Everything is ready from my side, so if any of these work for you, let's trade.";
+  const naturalTenListings = parseBulkListingDetails(naturalTenOfferMessage);
+  check("natural paragraph parser finds all ten offers", naturalTenListings.length === 10, JSON.stringify(naturalTenListings));
+  check(
+    "naira symbols remain attached to their four offers",
+    naturalTenListings[0]?.want_currency === "NGN"
+      && naturalTenListings[0]?.want_amount === 780000
+      && naturalTenListings[3]?.want_currency === "NGN"
+      && naturalTenListings[3]?.want_amount === 1050000
+      && naturalTenListings[4]?.have_currency === "NGN"
+      && naturalTenListings[4]?.have_amount === 850000
+      && naturalTenListings[9]?.have_currency === "NGN"
+      && naturalTenListings[9]?.have_amount === 2000000,
+    JSON.stringify(naturalTenListings)
+  );
 
   const BULK_ROUTING = "250700000015";
   const bulkRoutingUser = seedVerifiedUser(BULK_ROUTING, "Bulk Routing User");
@@ -798,6 +813,33 @@ async function run() {
   );
   reply = await send(BULK_ROUTING, "cancel");
   check("ten-listing review can be cancelled", (await sessionFlow(BULK_ROUTING)) === null);
+
+  const NATURAL_BULK = "250700000022";
+  const naturalBulkUser = seedVerifiedUser(NATURAL_BULK, "Natural Bulk User");
+  for (const currency of ["NGN", "RWF", "GHS", "KES", "XAF"]) {
+    seedPayout(naturalBulkUser, currency);
+  }
+  reply = await send(NATURAL_BULK, naturalTenOfferMessage, {
+    interpret: { action: "find_offer" },
+  });
+  check("complete natural paragraph overrides a mistaken search classification", reply.includes("*Review 10 listings*"), reply);
+  const naturalBulkSession = await getSession(NATURAL_BULK);
+  check("all ten natural offers reach the combined review state", naturalBulkSession?.context_json?.listings?.length === 10, JSON.stringify(naturalBulkSession));
+  reply = await send(NATURAL_BULK, "cancel");
+  check("natural ten-offer review can be cancelled", (await sessionFlow(NATURAL_BULK)) === null);
+
+  const EXPLICIT_BULK_SEARCH = "250700000023";
+  const explicitBulkSearchUser = seedVerifiedUser(EXPLICIT_BULK_SEARCH, "Explicit Search User");
+  seedPayout(explicitBulkSearchUser, "NGN");
+  seedPayout(explicitBulkSearchUser, "RWF");
+  seedPayout(explicitBulkSearchUser, "GHS");
+  seedPayout(explicitBulkSearchUser, "XAF");
+  reply = await send(
+    EXPLICIT_BULK_SEARCH,
+    "Find offers for 50k NGN for 55k RWF and 20k GHS for 300k XAF",
+    { interpret: { action: "find_offer" } }
+  );
+  check("an explicit multi-pair marketplace search is not published as a batch", !reply.includes("*Review 2 listings*") && (await sessionFlow(EXPLICIT_BULK_SEARCH)) !== "bulk_listing", reply);
 
   const BULK_SHORTHAND = "250700000021";
   const bulkShorthandUser = seedVerifiedUser(BULK_SHORTHAND, "Bulk Shorthand User");
