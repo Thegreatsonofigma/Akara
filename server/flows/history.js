@@ -12,7 +12,6 @@ function listingStatusMarker(status) {
     reserved: "🔒",
     completed: "✅",
     cancelled: "⚫",
-    closed: "⚫",
     expired: "⚫",
     flagged: "🔴",
   }[status] || "•";
@@ -30,7 +29,7 @@ function listingPickerRow(listing) {
 }
 
 function listingPickerReply(listings, body, nextPage = null, remaining = 0) {
-  const closedStatuses = new Set(["cancelled", "closed", "expired", "completed"]);
+  const closedStatuses = new Set(["cancelled", "expired", "completed"]);
   const openListings = listings.filter((listing) => !closedStatuses.has(listing.status));
   const closedListings = listings.filter((listing) => closedStatuses.has(listing.status));
   const sections = [
@@ -74,7 +73,7 @@ function listingPickerReply(listings, body, nextPage = null, remaining = 0) {
 async function getMyListingsReply(user, options = {}) {
   const page = Math.max(0, Number(options.page) || 0);
   const pageSize = 9;
-  const statuses = ["active", "reserved", "paused", "cancelled", "closed", "expired", "completed", "flagged", "draft"];
+  const statuses = ["active", "reserved", "paused", "cancelled", "expired", "completed", "flagged", "draft"];
   const [allListings, completedTrades] = await Promise.all([
     getUserListings(user.id, 1000, { statuses }),
     getCompletedTradeCount(user.id),
@@ -118,7 +117,7 @@ async function getMyListingsReply(user, options = {}) {
   });
 
   const count = (status) => allListings.filter((listing) => listing.status === status).length;
-  const closedCount = count("cancelled") + count("closed") + count("expired");
+  const closedCount = count("cancelled") + count("expired");
   const body = [
     title("Your listings"),
     caption(`Showing ${offset + 1}-${offset + listings.length} of ${allListings.length}. Choose one to view or manage it.`),
@@ -128,6 +127,7 @@ async function getMyListingsReply(user, options = {}) {
     labeled("Paused", String(count("paused"))),
     labeled("In trade", String(count("reserved"))),
     labeled("Closed", String(closedCount)),
+    labeled("Completed listings", String(count("completed"))),
     labeled("Completed exchanges", String(completedTrades)),
   ].join("\n");
 

@@ -620,7 +620,7 @@ async function run() {
     "active", "active", "active", "active",
     "paused", "paused",
     "reserved",
-    "cancelled", "cancelled", "closed", "expired",
+    "cancelled", "cancelled", "completed", "expired",
   ];
   overviewStatuses.forEach((status, index) => {
     seedListing(overviewUser, {
@@ -651,7 +651,8 @@ async function run() {
       && reply.includes("*Live:* 4")
       && reply.includes("*Paused:* 2")
       && reply.includes("*In trade:* 1")
-      && reply.includes("*Closed:* 4")
+      && reply.includes("*Closed:* 3")
+      && reply.includes("*Completed listings:* 1")
       && reply.includes("*Completed exchanges:* 1"),
     reply
   );
