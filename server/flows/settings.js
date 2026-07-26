@@ -18,7 +18,7 @@ const { getPaymentProfiles, formatPaymentProfileCompact } = require("../db/payme
 const { getUserListings, displayReference, listingShareUrl, listingStatusLabel } = require("../db/listings");
 const { getCompletedTradeCount } = require("../db/deals");
 const { getLatestUserReputation } = require("../db/integrity");
-const { mainMenu, mainMenuListPayload, referralPitch } = require("../messages/copy");
+const { mainMenu, mainMenuListPayload } = require("../messages/copy");
 const {
   startPaymentProfileFlow,
   paymentEditMenuPrompt,
@@ -58,21 +58,90 @@ function verificationStatusLabel(user) {
   return labels[user.verification_status] || "Not verified";
 }
 
-// Scoped view: just who the user is on Akara. Payouts and listings each have
-// their own view, so asking for "my profile" never dumps everything.
-async function viewProfileReply(user) {
-  await clearSession(user, user.whatsapp_phone);
+function profileActionsReply(body) {
+  return {
+    type: "whatsapp_list",
+    list: {
+      body,
+      button: "Manage profile",
+      sections: [
+        {
+          title: "Payout details",
+          rows: [
+            {
+              id: "profile_add_payout",
+              title: "Add payout",
+              description: "Save a bank or mobile money account.",
+            },
+            {
+              id: "profile_edit_payout",
+              title: "Edit payout",
+              description: "Update one saved payout detail.",
+            },
+            {
+              id: "profile_delete_payout",
+              title: "Delete payout",
+              description: "Remove one saved payout detail.",
+            },
+            {
+              id: "profile_delete_all_payouts",
+              title: "Delete all payouts",
+              description: "Remove every saved payout detail.",
+            },
+          ],
+        },
+        {
+          title: "Listings",
+          rows: [
+            {
+              id: "profile_listings",
+              title: "Manage listings",
+              description: "View and manage individual listings.",
+            },
+            {
+              id: "profile_pause_all_listings",
+              title: "Pause all listings",
+              description: "Temporarily hide every live listing.",
+            },
+            {
+              id: "profile_reopen_all_listings",
+              title: "Reopen all listings",
+              description: "Return every paused listing to search.",
+            },
+            {
+              id: "profile_close_all_listings",
+              title: "Close all listings",
+              description: "Permanently close all open listings.",
+            },
+          ],
+        },
+        {
+          title: "Records",
+          rows: [
+            {
+              id: "profile_history",
+              title: "Transaction history",
+              description: "Review your previous Akara exchanges.",
+            },
+            {
+              id: "profile_trust",
+              title: "Trust record",
+              description: "See your activity and completion record.",
+            },
+          ],
+        },
+      ],
+    },
+    fallbackText: body,
+  };
+}
 
-  const [profiles, listings, completedTrades, reputation] = await Promise.all([
-    getPaymentProfiles(user.id),
-    getUserListings(user.id, 20),
-    getCompletedTradeCount(user.id),
-    getLatestUserReputation(user.id),
-  ]);
+function profileSummaryBody(user, profiles, listings, completedTrades, reputation, intro = "") {
   const liveListings = listings.filter((listing) => ["active", "paused"].includes(listing.status)).length;
   const name = (user.display_name || user.legal_name || "").trim();
 
   return [
+    intro,
     title("Your profile"),
     "",
     name ? labeled("Name", name) : "",
@@ -93,15 +162,23 @@ async function viewProfileReply(user) {
     labeled("Completed trades", String(completedTrades)),
     labeled("Live listings", String(liveListings)),
     labeled("Saved payout details", String(profiles.length)),
-    "",
-    referralPitch(),
-    "",
-    title("See more"),
-    `${action("bank details")} for your payout information`,
-    `${action("my listings")} for your posted offers`,
-    `${action("history")} for your transactions`,
-    `${action("my trust record")} to view your shareable reputation`,
-  ].filter(Boolean).join("\n\n");
+  ].filter(Boolean).join("\n");
+}
+
+// Scoped view: just who the user is on Akara. Payouts and listings each have
+// their own view, so asking for "my profile" never dumps everything.
+async function viewProfileReply(user) {
+  await clearSession(user, user.whatsapp_phone);
+
+  const [profiles, listings, completedTrades, reputation] = await Promise.all([
+    getPaymentProfiles(user.id),
+    getUserListings(user.id, 20),
+    getCompletedTradeCount(user.id),
+    getLatestUserReputation(user.id),
+  ]);
+  const body = profileSummaryBody(user, profiles, listings, completedTrades, reputation);
+  const isVerified = ["verified_auto", "verified_manual"].includes(user.verification_status);
+  return isVerified ? profileActionsReply(body) : body;
 }
 
 // Scoped view: only the saved bank / mobile money details, with the numbered
@@ -188,9 +265,11 @@ function payoutActionPickerReply(profiles, operation) {
 }
 
 async function profileSettingsReply(user, intro = "") {
-  const [profiles, listings] = await Promise.all([
+  const [profiles, listings, completedTrades, reputation] = await Promise.all([
     getPaymentProfiles(user.id),
-    getUserListings(user.id, 5),
+    getUserListings(user.id, 20),
+    getCompletedTradeCount(user.id),
+    getLatestUserReputation(user.id),
   ]);
 
   const payoutMap = {};
@@ -208,40 +287,9 @@ async function profileSettingsReply(user, intro = "") {
     listing_map: listingMap,
   });
 
-  const payoutBlock = profiles.length
-    ? profiles.map((profile, index) => formatPaymentProfileCompact(profile, index + 1)).join("\n\n")
-    : ["No payout details saved yet.", "Reply add payout to add one."].join("\n");
-
-  const listingLines = listings.length
-    ? listings.map((listing, index) => [
-        `${index + 1}. ${displayReference(listing.listing_code, "listing")}`,
-        `${formatMoney(listing.have_amount, listing.have_currency)} for ${formatMoney(listing.want_amount, listing.want_currency)}`,
-        `Status: ${listingStatusLabel(listing.status)}`,
-      ].join("\n"))
-    : [caption("No active listings.")];
-
-  return [
-    intro,
-    title("Profile"),
-    caption("Manage payout details and your live listings."),
-    "",
-    title("Payouts"),
-    payoutBlock,
-    "",
-    title("Listings"),
-    ...listingLines,
-    "",
-    title("Actions"),
-    action("add payout"),
-    action("edit payout 1"),
-    action("delete payout 1"),
-    action("edit listing 1"),
-    action("pause listing 1"),
-    action("reopen listing 1"),
-    action("close listing 1"),
-    action("cancel all listings"),
-    action("delete all payouts"),
-  ].filter(Boolean).join("\n");
+  return profileActionsReply(
+    profileSummaryBody(user, profiles, listings, completedTrades, reputation, intro)
+  );
 }
 
 async function requestBulkListingCancel(user) {
@@ -257,9 +305,9 @@ async function requestBulkListingCancel(user) {
   if (!rows.length) {
     await clearSession(user, user.whatsapp_phone);
     return [
-      title("No live listings"),
+      title("No open listings"),
       "",
-      "You do not have any live or paused listings to cancel.",
+      "You do not have any live or paused listings to close.",
     ].join("\n");
   }
 
@@ -269,7 +317,7 @@ async function requestBulkListingCancel(user) {
   });
 
   const body = [
-    title("Cancel all listings?"),
+    title("Close all listings?"),
     "",
     `This will close ${rows.length} live or paused listing${rows.length === 1 ? "" : "s"}.`,
     "They will stop appearing in search immediately.",
@@ -313,15 +361,16 @@ async function requestBulkPayoutDelete(user) {
     bulk_count: rows.length,
   });
 
-  return [
+  const body = [
     title("Delete all payout details?"),
     "",
     `This will remove ${rows.length} saved payout detail${rows.length === 1 ? "" : "s"}.`,
     "You will need to add payout details again before opening trades for those currencies.",
-    "",
-    `${action("confirm")} to delete them`,
-    `${action("keep")} to leave them saved`,
   ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "confirm", title: "Delete all" },
+    { id: "keep", title: "Keep payouts" },
+  ], body);
 }
 
 function menuCompletionReply(user, body) {
@@ -599,6 +648,46 @@ async function completeBulkAction(user, context = {}) {
   return "That confirmation has expired. Tell Akara what you want to do next.";
 }
 
+async function completeBulkListingStatus(user, mode) {
+  const isPause = mode === "pause";
+  const sourceStatus = isPause ? "active" : "paused";
+  const targetStatus = isPause ? "paused" : "active";
+  const rows = await supabaseRequest(
+    [
+      `listings?owner_user_id=eq.${filterValue(user.id)}`,
+      `status=eq.${sourceStatus}`,
+    ].join("&"),
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: targetStatus,
+        updated_at: new Date().toISOString(),
+      }),
+    }
+  );
+
+  await clearSession(user, user.whatsapp_phone);
+  if (!rows.length) {
+    return profileSettingsReply(
+      user,
+      isPause
+        ? "You do not have any live listings to pause."
+        : "You do not have any paused listings to reopen."
+    );
+  }
+
+  const body = [
+    title(isPause ? "Listings paused" : "Listings reopened"),
+    "",
+    isPause
+      ? `${rows.length} listing${rows.length === 1 ? "" : "s"} removed from search. You can reopen them anytime.`
+      : `${rows.length} listing${rows.length === 1 ? "" : "s"} returned to search and can receive new offers.`,
+    "",
+    caption("What would you like to do next?"),
+  ].join("\n");
+  return menuCompletionReply(user, body);
+}
+
 async function handleSettings(text, user, session) {
   const command = compactText(text);
   const context = session.context_json || {};
@@ -619,7 +708,7 @@ async function handleSettings(text, user, session) {
       "",
       context.bulk_action === "delete_payouts"
         ? "Reply confirm to delete all payout details, or keep to leave them saved."
-        : "Reply confirm to cancel all live listings, or keep to leave them active.",
+        : "Reply confirm to close all open listings, or keep to leave them unchanged.",
     ].join("\n");
   }
 
@@ -693,6 +782,12 @@ async function handleSettings(text, user, session) {
 
   if (isBulkListingCancelIntent(text)) return requestBulkListingCancel(user);
   if (isBulkPayoutDeleteIntent(text)) return requestBulkPayoutDelete(user);
+  if (/\b(pause|hide|take off search)\b.*\b(all|every)\b.*\b(listing|offer)s?\b/.test(normalizedCommand)) {
+    return completeBulkListingStatus(user, "pause");
+  }
+  if (/\b(reopen|resume|activate|restore)\b.*\b(all|every)\b.*\b(listing|offer)s?\b/.test(normalizedCommand)) {
+    return completeBulkListingStatus(user, "reopen");
+  }
 
   if (/\b(add|new)\b/.test(normalizedCommand) && /\b(payout|payment|bank|momo|details?)\b/.test(normalizedCommand)) {
     const currency = parsePaymentCurrency(normalizedCommand);
@@ -955,15 +1050,9 @@ async function handleSettings(text, user, session) {
   }
 
   return [
-    "Profile actions I understand:",
+    title("Choose an account action"),
     "",
-    "add payout",
-    "edit payout 1",
-    "delete payout 1",
-    "edit listing 1",
-    "pause listing 1",
-    "reopen listing 1",
-    "close listing 1",
+    "Open Manage profile to choose what you want to update.",
   ].join("\n");
 }
 
@@ -974,6 +1063,7 @@ function isSettingsCommand(text) {
   if (/\b(profile|settings|account|menu|show profile|view profile|payouts)\b/.test(command)) return true;
   if (/\b(done|close|back|exit)\b/.test(command) && !/\b(offer|listing)\b/.test(command)) return true;
   if (/\b(add|new|edit|update|change|delete|remove)\b.*\b(payout|payment|bank|momo|details?)\b/.test(command)) return true;
+  if (/\b(pause|hide|reopen|resume|activate|restore)\b.*\b(all|every)\b.*\b(offer|listing)s?\b/.test(command)) return true;
   if (/\b(edit|modify|update|change|pause|reopen|resume|activate|close|delete|remove|cancel)\b.*\b(offer|listing)\b/.test(command)) return true;
   if (/\b(republish|relist|repost|publish again|list again|use this again|make a new listing)\b/.test(command)) return true;
   if (/^(yes|no|confirm|delete|remove)$/.test(command)) return true;

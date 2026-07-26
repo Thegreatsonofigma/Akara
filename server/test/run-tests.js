@@ -414,6 +414,34 @@ async function run() {
   check("profile counts completed deals from records", reply.includes("*Completed trades:* 3"), reply);
   check("profile has no bank numbers", !reply.includes("0123456789"), reply);
   check("profile has no payout list", !reply.includes("*Payouts*"), reply);
+  const profileRows = (lastListPayload()?.sections || []).flatMap((section) => section.rows || []);
+  const profileActionIds = profileRows.map((row) => row.id);
+  check("profile uses one native management tray", lastListPayload()?.button === "Manage profile", JSON.stringify(lastListPayload()));
+  check(
+    "profile tray contains the core payout and listing actions",
+    [
+      "profile_add_payout",
+      "profile_delete_payout",
+      "profile_delete_all_payouts",
+      "profile_pause_all_listings",
+      "profile_reopen_all_listings",
+      "profile_close_all_listings",
+    ].every((id) => profileActionIds.includes(id)),
+    JSON.stringify(profileActionIds)
+  );
+  check(
+    "profile tray has one canonical close-all action",
+    profileActionIds.filter((id) => id === "profile_close_all_listings").length === 1
+      && !profileRows.some((row) => /cancel all listings/i.test(row.title || "")),
+    JSON.stringify(profileRows)
+  );
+  check(
+    "profile body does not repeat tray actions as text",
+    !reply.includes("cancel all listings")
+      && !reply.includes("delete all payouts")
+      && !reply.includes("*See more*"),
+    reply
+  );
 
   reply = await send(ALICE, "my trust record");
   check("trust record opens its own view", reply.includes("*Akara Trust Record*") || reply.includes("*Your trust record*"), reply);
@@ -1136,8 +1164,25 @@ async function run() {
   }
 
   seedListing(aliceRow, { code: "AKR-LIST-777", have_currency: "NGN", have_amount: 10000, want_currency: "GHS", want_amount: 200 });
+  reply = await send(ALICE, "profile_pause_all_listings");
+  check("profile tray pauses all live listings", reply.includes("*Listings paused*"), reply);
+  check(
+    "bulk pause only changes live listings",
+    __table("listings").filter((row) => row.owner_user_id === aliceRow.id && row.status === "active").length === 0
+      && __table("listings").some((row) => row.owner_user_id === aliceRow.id && row.status === "paused"),
+    JSON.stringify(__table("listings").filter((row) => row.owner_user_id === aliceRow.id))
+  );
+
+  reply = await send(ALICE, "reopen every listing I paused");
+  check("natural language reopens all paused listings", reply.includes("*Listings reopened*"), reply);
+  check(
+    "bulk reopen returns paused listings to search",
+    __table("listings").some((row) => row.listing_code === "AKR-LIST-777" && row.status === "active"),
+    JSON.stringify(__table("listings").filter((row) => row.owner_user_id === aliceRow.id))
+  );
+
   reply = await send(ALICE, "cancel all my listings");
-  check("bulk cancel asks to confirm", reply.includes("Cancel all listings?"), reply);
+  check("bulk close alias asks to confirm with canonical wording", reply.includes("Close all listings?"), reply);
 
   reply = await send(ALICE, "confirm");
   check("bulk cancel completes", reply.includes("Listings closed"), reply);

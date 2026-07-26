@@ -434,30 +434,30 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return supportOptionsReply();
   }
 
-  if (interpretedAction === "bulk_cancel_listings" || isBulkListingCancelIntent(text)) return requestBulkListingCancel(user);
-  if (interpretedAction === "bulk_delete_payouts" || isBulkPayoutDeleteIntent(text)) return requestBulkPayoutDelete(user);
+  if (interpretedAction === "bulk_cancel_listings" || isBulkListingCancelIntent(command)) return requestBulkListingCancel(user);
+  if (interpretedAction === "bulk_delete_payouts" || isBulkPayoutDeleteIntent(command)) return requestBulkPayoutDelete(user);
 
-  if (interpretedAction === "view_trust_record" || isTrustRecordCommand(text)) {
+  if (interpretedAction === "view_trust_record" || isTrustRecordCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return reputationAssistantReply(text, user);
   }
 
-  if (interpretedAction === "my_deals" || isHistoryCommand(text)) {
+  if (interpretedAction === "my_deals" || isHistoryCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return getMyDealsReply(user);
   }
 
-  if (interpretedAction === "view_profile" || isProfileCommand(text)) {
+  if (interpretedAction === "view_profile" || isProfileCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return viewProfileReply(user);
   }
 
-  if (interpretedAction === "view_payouts" || isPayoutsCommand(text)) {
+  if (interpretedAction === "view_payouts" || isPayoutsCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return viewPayoutsReply(user);
   }
 
-  if (interpretedAction === "my_listings" || isMyListingsCommand(text)) {
+  if (interpretedAction === "my_listings" || isMyListingsCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return getMyListingsReply(user);
   }
@@ -670,11 +670,11 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   if (session?.current_flow === "settings") {
     const settingsText = interpretedSettingsCommand(interpreted, command, session);
-    if (interpretedAction === "unknown" && shouldLeaveSettingsForFreshCommand(settingsText)) {
+    if (isSettingsCommand(settingsText) || ["settings_action", "add_payout", "flow_reply"].includes(interpretedAction)) {
+      return handleSettings(settingsText, user, session);
+    } else if (interpretedAction === "unknown" && shouldLeaveSettingsForFreshCommand(settingsText)) {
       await clearSession(user, user.whatsapp_phone);
       session = null;
-    } else if (isSettingsCommand(settingsText) || ["settings_action", "add_payout", "flow_reply"].includes(interpretedAction)) {
-      return handleSettings(settingsText, user, session);
     } else {
       await clearSession(user, user.whatsapp_phone);
       session = null;
@@ -734,7 +734,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const listingDetails = freshListingDetails;
   const hasCompleteListing = hasFreshCompleteListing;
   const settingsAction = interpretedAction === "settings_action"
-    || /\b(edit|modify|update|change|delete|remove|pause|reopen|resume|activate|close|cancel|share|copy)\b.*\b(payout|payment|bank|momo|details?|offer|listing)\b/.test(command);
+    || /\b(edit|modify|update|change|delete|remove|pause|reopen|resume|activate|close|cancel|share|copy)\b.*\b(payout|payment|bank|momo|details?|offers?|listings?)\b/.test(command);
 
   if (hasCompleteListing && (
     interpretedAction === "create_listing"
@@ -756,7 +756,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     await profileSettingsReply(user);
     const settingsSession = await getSession(user.whatsapp_phone);
     return handleSettings(
-      interpretedSettingsCommand(interpreted, text, settingsSession),
+      interpretedSettingsCommand(interpreted, command, settingsSession),
       user,
       settingsSession
     );
@@ -964,6 +964,16 @@ function normalizeInteractiveCommand(command) {
     manage_payout_add: "add payout",
     manage_payout_edit: "edit payout",
     manage_payout_delete: "delete payout",
+    profile_add_payout: "add payout",
+    profile_edit_payout: "edit payout",
+    profile_delete_payout: "delete payout",
+    profile_delete_all_payouts: "delete all my payouts",
+    profile_listings: "my listings",
+    profile_pause_all_listings: "pause all my listings",
+    profile_reopen_all_listings: "reopen all my listings",
+    profile_close_all_listings: "close all my listings",
+    profile_history: "history",
+    profile_trust: "my trust record",
     add_payout: "add payout",
     verify: "verify",
   };
