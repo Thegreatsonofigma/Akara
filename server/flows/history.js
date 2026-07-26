@@ -6,7 +6,13 @@ const {
   listingStatusLabel,
   listingStatusCue,
 } = require("../db/listings");
-const { userRoleInDeal, dealPartySummary, readableDealStatus, getCompletedTradeCount } = require("../db/deals");
+const {
+  userRoleInDeal,
+  dealPartySummary,
+  readableDealStatus,
+  getCompletedTradeCount,
+  getOpenDealsForUser,
+} = require("../db/deals");
 const { upsertSession } = require("../db/sessions");
 const { mainMenu, mainMenuListPayload } = require("../messages/copy");
 
@@ -178,7 +184,52 @@ async function getMyDealsReply(user) {
   ].join("\n");
 }
 
+async function getLiveTradeClosePickerReply(user) {
+  const deals = await getOpenDealsForUser(user.id, 10);
+  if (!deals.length) {
+    return [
+      title("No live trades"),
+      "",
+      "There is no open trade to close right now.",
+    ].join("\n");
+  }
+
+  const rows = deals.map((deal) => {
+    const role = userRoleInDeal(user, deal);
+    const { youSend, youReceive } = dealPartySummary(role, deal);
+    return {
+      id: `close_trade_${deal.deal_code}`,
+      title: displayReference(deal.deal_code, "deal").slice(0, 24),
+      description: `${formatMoney(youSend.amount, youSend.currency)} → ${formatMoney(youReceive.amount, youReceive.currency)}`.slice(0, 72),
+    };
+  });
+  const body = [
+    title("Choose a live trade"),
+    caption("Select the trade you want to close. Completed, cancelled, and expired trades are not shown."),
+  ].join("\n");
+
+  return {
+    type: "whatsapp_list",
+    list: {
+      body,
+      button: "Choose trade",
+      sections: [
+        {
+          title: "Live trades",
+          rows,
+        },
+      ],
+    },
+    fallbackText: [
+      body,
+      "",
+      deals.map((deal, index) => `${index + 1}. ${displayReference(deal.deal_code, "deal")}`).join("\n"),
+    ].join("\n"),
+  };
+}
+
 module.exports = {
   getMyListingsReply,
   getMyDealsReply,
+  getLiveTradeClosePickerReply,
 };
