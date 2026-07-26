@@ -15,7 +15,7 @@ const { handleReceiptRedirect } = require("./lib/receipts");
 const { handleListingCardRoute } = require("./lib/listing-card");
 const { handleSecurityRoute, handleSecurityFlowResponse } = require("./lib/security");
 const { handleVerificationFlowResponse } = require("./flows/verification");
-const { runSmartMatchingSweep } = require("./flows/listing");
+const { runSmartMatchingSweep, runPendingMatchReminderSweep } = require("./flows/listing");
 const { findOrCreateUser, getUserById, isVerified } = require("./db/users");
 const { getSession, rememberFailedMessage } = require("./db/sessions");
 const { buildReply } = require("./router");
@@ -239,19 +239,29 @@ function startStellarIntegrityScheduler() {
 function startSmartMatchingScheduler() {
   if (smartMatchingTimer || !config.matchingSweepEnabled) return;
 
-  const sweep = () => {
-    runSmartMatchingSweep().then((result) => {
-      if (result.matched || result.negotiations || result.failed) {
+  const sweep = async () => {
+    try {
+      const result = await runSmartMatchingSweep();
+      const reminders = await runPendingMatchReminderSweep();
+      if (
+        result.matched
+        || result.negotiations
+        || result.failed
+        || reminders.sent
+        || reminders.failed
+      ) {
         console.log(
-          `[matching] sweep scanned=${result.scanned} matched=${result.matched} negotiations=${result.negotiations} failed=${result.failed}`
+          `[matching] sweep scanned=${result.scanned} matched=${result.matched} negotiations=${result.negotiations} reminders=${reminders.sent} failed=${result.failed + reminders.failed}`
         );
       }
-    }).catch((error) => {
+    } catch (error) {
       console.error(`[matching] scheduled sweep failed: ${error.message}`);
-    });
+    }
   };
 
-  smartMatchingTimer = setInterval(sweep, config.matchingSweepIntervalMs);
+  smartMatchingTimer = setInterval(() => {
+    sweep();
+  }, config.matchingSweepIntervalMs);
   smartMatchingTimer.unref?.();
   sweep();
 }

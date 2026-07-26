@@ -105,7 +105,11 @@ function lastMediaPayload() {
 
 const { buildReply } = require("../router");
 const { sendIdleMenus } = require("../app");
-const { reserveListingById, runSmartMatchingSweep } = require("../flows/listing");
+const {
+  reserveListingById,
+  runSmartMatchingSweep,
+  runPendingMatchReminderSweep,
+} = require("../flows/listing");
 const { findOrCreateUser } = require("../db/users");
 const { getSession, rememberFailedMessage } = require("../db/sessions");
 const intents = require("../nlp/intents");
@@ -2711,6 +2715,123 @@ async function run() {
     "repeated sweeps do not duplicate an already claimed match",
     __table("deals").length === dealsBeforeSweep + 1,
     JSON.stringify(__table("deals").slice(dealsBeforeSweep))
+  );
+
+  scenario("restart-safe automatic match reminders");
+  const reminderMaker = seedVerifiedUser("250700000093", "Reminder Maker");
+  const reminderTaker = seedVerifiedUser("250700000094", "Reminder Taker");
+  const reminderListing = seedListing(reminderMaker, {
+    code: "AKR-LIST-RM1",
+    have_currency: "RWF",
+    have_amount: 150000,
+    want_currency: "KES",
+    want_amount: 18000,
+    listing_type: "fixed",
+    status: "reserved",
+  });
+  const reminderNow = Date.parse("2026-07-26T12:10:00.000Z");
+  const reminderCreatedAt = new Date(reminderNow - 6 * 60 * 1000).toISOString();
+  const reminderDeal = {
+    id: crypto.randomUUID(),
+    deal_code: "AKR-TXN-RM1",
+    listing_id: reminderListing.id,
+    maker_user_id: reminderMaker.id,
+    taker_user_id: reminderTaker.id,
+    have_currency: "RWF",
+    want_currency: "KES",
+    have_amount: 150000,
+    want_amount: 18000,
+    status: "reserved",
+    reservation_expires_at: new Date(reminderNow + 9 * 60 * 1000).toISOString(),
+    created_at: reminderCreatedAt,
+  };
+  __table("deals").push(reminderDeal);
+  __table("audit_events").push({
+    id: crypto.randomUUID(),
+    actor_type: "system",
+    entity_type: "deal",
+    entity_id: reminderDeal.id,
+    event_name: "smart_match_cleared",
+    event_payload: {},
+    created_at: reminderCreatedAt,
+  });
+  const buttonsBeforeAutomaticReminder = buttonSends.length;
+  const automaticReminderResult = await runPendingMatchReminderSweep({
+    nowMs: reminderNow,
+    reminderAfterMs: 5 * 60 * 1000,
+  });
+  const automaticReminderSends = buttonSends.slice(buttonsBeforeAutomaticReminder);
+  check(
+    "five-minute sweep reminds both inactive peers without a chat message",
+    automaticReminderResult.sent === 2
+      && automaticReminderSends.length === 2
+      && automaticReminderSends.every((entry) => entry.payload?.body?.includes("Your matched exchange is waiting")),
+    JSON.stringify({ automaticReminderResult, automaticReminderSends })
+  );
+  const automaticReminderEvents = __table("audit_events").filter(
+    (event) => event.entity_id === reminderDeal.id
+      && event.event_name === "automatic_match_reminder_sent"
+  );
+  check(
+    "automatic reminder delivery is persisted for restart recovery",
+    automaticReminderEvents.length === 2,
+    JSON.stringify(automaticReminderEvents)
+  );
+  const buttonsBeforeRepeatedReminder = buttonSends.length;
+  const repeatedAutomaticReminder = await runPendingMatchReminderSweep({
+    nowMs: reminderNow + 30000,
+    reminderAfterMs: 5 * 60 * 1000,
+  });
+  check(
+    "later sweeps do not duplicate an automatic reminder",
+    repeatedAutomaticReminder.sent === 0 && buttonSends.length === buttonsBeforeRepeatedReminder,
+    JSON.stringify(repeatedAutomaticReminder)
+  );
+
+  const reminderNegotiationListing = seedListing(reminderMaker, {
+    code: "AKR-LIST-RM2",
+    have_currency: "GHS",
+    have_amount: 2000,
+    want_currency: "KES",
+    want_amount: 100000,
+    listing_type: "negotiable",
+  });
+  const reminderOffer = {
+    id: crypto.randomUUID(),
+    listing_id: reminderNegotiationListing.id,
+    offering_user_id: reminderTaker.id,
+    offered_amount: 98000,
+    offered_currency: "KES",
+    receive_amount: 2000,
+    receive_currency: "GHS",
+    status: "pending",
+    message: `reciprocal_source:${crypto.randomUUID()}`,
+    created_at: reminderCreatedAt,
+    updated_at: reminderCreatedAt,
+  };
+  __table("negotiable_offers").push(reminderOffer);
+  __table("audit_events").push({
+    id: crypto.randomUUID(),
+    actor_type: "system",
+    entity_type: "negotiable_offer",
+    entity_id: reminderOffer.id,
+    event_name: "smart_match_negotiation_suggested",
+    event_payload: {},
+    created_at: reminderCreatedAt,
+  });
+  const buttonsBeforeNegotiationReminder = buttonSends.length;
+  const negotiationReminderResult = await runPendingMatchReminderSweep({
+    nowMs: reminderNow,
+    reminderAfterMs: 5 * 60 * 1000,
+  });
+  const negotiationReminderSend = buttonSends.at(-1);
+  check(
+    "pending negotiation reminds the peer who owes the decision",
+    negotiationReminderResult.sent === 1
+      && buttonSends.length === buttonsBeforeNegotiationReminder + 1
+      && negotiationReminderSend?.to === reminderMaker.whatsapp_phone
+      && negotiationReminderSend?.payload?.buttons?.map((button) => button.id).join(",") === "accept,counter,decline",
+    JSON.stringify({ negotiationReminderResult, negotiationReminderSend })
   );
 
   clearHistory(ALICE);
