@@ -57,7 +57,16 @@ function parseReceiptEvidenceText(text) {
     amount,
     amounts,
     currency: detectCurrency(text),
+    paymentStatus: detectPaymentStatus(text),
   };
+}
+
+function detectPaymentStatus(text) {
+  const normalized = normalizeText(text);
+  if (/\b(failed|declined|rejected|reversed|cancelled|canceled|unsuccessful)\b/.test(normalized)) return "failed";
+  if (/\b(pending|processing|initiated|in progress)\b/.test(normalized)) return "pending";
+  if (/\b(success|successful|completed|paid|sent|transferred|transfer complete)\b/.test(normalized)) return "successful";
+  return "unknown";
 }
 
 function amountsMatch(expected, actual) {
@@ -81,6 +90,7 @@ function baseReceiptCheck(expected = {}, text = "", parsed = {}) {
     ocr_amount: parsed.amount || null,
     ocr_amounts: parsed.amounts || [],
     ocr_currency: parsed.currency || null,
+    ocr_payment_status: parsed.paymentStatus || "unknown",
     ocr_expected_amount: expectedAmount,
     ocr_expected_currency: expectedCurrency,
     ocr_confidence: parsed.confidence ?? null,
@@ -95,6 +105,24 @@ function scoreParsedReceipt(expected = {}, text = "", parsedEvidence = null) {
   const base = baseReceiptCheck(expected, text, parsed);
   const expectedAmount = base.ocr_expected_amount;
   const expectedCurrency = base.ocr_expected_currency;
+  const matchedAmount = expectedAmount
+    ? (parsed.amounts || []).find((amount) => amountsMatch(expectedAmount, amount)) || null
+    : parsed.amount;
+
+  if (parsed.paymentStatus === "failed") {
+    return {
+      ...base,
+      ocr_status: "mismatch",
+      ocr_mismatch_reason: "This receipt shows a failed, declined, cancelled, or reversed payment.",
+    };
+  }
+
+  if (parsed.paymentStatus === "pending") {
+    return {
+      ...base,
+      ocr_mismatch_reason: "This receipt shows a payment that is still pending or processing.",
+    };
+  }
 
   if (!text) {
     return {
@@ -118,7 +146,7 @@ function scoreParsedReceipt(expected = {}, text = "", parsedEvidence = null) {
     };
   }
 
-  if (expectedAmount && !amountsMatch(expectedAmount, parsed.amount)) {
+  if (expectedAmount && !matchedAmount) {
     return {
       ...base,
       ocr_status: "mismatch",
@@ -128,6 +156,7 @@ function scoreParsedReceipt(expected = {}, text = "", parsedEvidence = null) {
 
   return {
     ...base,
+    ocr_amount: matchedAmount || parsed.amount,
     ocr_status: "matched",
     ocr_matched: true,
   };
@@ -184,9 +213,28 @@ async function recognizeReceiptImage(incoming = {}) {
   const { getWhatsAppMedia } = require("./whatsapp");
   const media = incoming.__receiptOcrMedia || await getWhatsAppMedia(incoming.media.id);
   incoming.__receiptOcrMedia = media;
+  let receiptBuffer = media.buffer;
+  try {
+    const sharp = require("sharp");
+    const metadata = await sharp(media.buffer).metadata();
+    const width = Number(metadata.width || 0);
+    receiptBuffer = await sharp(media.buffer)
+      .rotate()
+      .resize({
+        width: width && width < 1800 ? 1800 : width || 1800,
+        withoutEnlargement: false,
+      })
+      .grayscale()
+      .normalize()
+      .sharpen()
+      .png()
+      .toBuffer();
+  } catch (error) {
+    console.warn(`[receipt-ocr] image preprocessing skipped: ${error.message}`);
+  }
   const worker = await getTesseractWorker();
   const result = await withTimeout(
-    worker.recognize(media.buffer),
+    worker.recognize(receiptBuffer),
     OCR_TIMEOUT_MS,
     "Receipt OCR took too long."
   );
@@ -253,6 +301,7 @@ async function analyzeReceiptEvidence(expected = {}, incoming = {}) {
 module.exports = {
   CURRENCY_ALIASES,
   analyzeReceiptEvidence,
+  detectPaymentStatus,
   parseReceiptEvidenceText,
   scoreParsedReceipt,
 };

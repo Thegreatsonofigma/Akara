@@ -1140,6 +1140,24 @@ async function routeMessage(text, user, session, incoming = {}) {
     if (liveSession?.current_flow === "deal_room") {
       return handleDealRoom(text, user, liveSession, incoming);
     }
+    if (!liveSession?.current_flow) {
+      const latestDeal = await getLatestOpenDealForUser(user.id);
+      if (latestDeal) {
+        const restoredSession = await upsertSession(
+          user,
+          user.whatsapp_phone,
+          "deal_room",
+          "awaiting_receipt",
+          {
+            deal_id: latestDeal.id,
+            deal_code: latestDeal.deal_code,
+            awaiting_receipt_user_id: user.id,
+            receipt_due_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+          }
+        );
+        return handleDealRoom(text, user, restoredSession, incoming);
+      }
+    }
   }
 
   if (command === "cancel" || command === "stop") {

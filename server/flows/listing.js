@@ -931,8 +931,17 @@ async function findReciprocalListing(user, listing) {
     if (candidate.owner_user_id === user.id) return false;
     const candidateCoversListing = listingHasEnoughForDeal(candidate, listing.want_amount, listing.have_amount);
     const listingCoversCandidate = listingHasEnoughForDeal(listing, candidate.want_amount, candidate.have_amount);
-    return candidateCoversListing || listingCoversCandidate;
+    return reciprocalRatesCross(candidate, listing)
+      && (candidateCoversListing || listingCoversCandidate);
   }) || null;
+}
+
+function reciprocalRatesCross(candidate, listing) {
+  const candidateOffersPerListingUnit = moneyNumber(candidate.have_amount) / moneyNumber(candidate.want_amount);
+  const listingRequiresPerUnit = moneyNumber(listing.want_amount) / moneyNumber(listing.have_amount);
+  if (!Number.isFinite(candidateOffersPerListingUnit) || !Number.isFinite(listingRequiresPerUnit)) return false;
+  if (candidateOffersPerListingUnit <= 0 || listingRequiresPerUnit <= 0) return false;
+  return candidateOffersPerListingUnit + Number.EPSILON >= listingRequiresPerUnit;
 }
 
 async function tryAutoMatchListing(user, listing) {
@@ -1014,7 +1023,7 @@ async function tryAutoMatchListing(user, listing) {
 
     const makerNotice = tradeOpenedMessage({
       heading: "Akara Trade opened ✅",
-      intro: "Akara matched your live listing with a compatible reciprocal listing.",
+      intro: "Reverse currency pair, enough available value, and compatible rates.",
       dealCode,
       youSend: { amount: dealHaveAmount, currency: match.have_currency },
       youReceive: { amount: dealWantAmount, currency: match.want_currency },
@@ -1032,7 +1041,7 @@ async function tryAutoMatchListing(user, listing) {
 
   return tradeOpenedMessage({
     heading: "Akara Trade opened ✅",
-    intro: "Your listing matched a compatible reciprocal listing, so I opened the trade room.",
+    intro: "Reverse currency pair, enough available value, and compatible rates.",
     dealCode,
     youSend: { amount: dealWantAmount, currency: match.want_currency },
     youReceive: { amount: dealHaveAmount, currency: match.have_currency },

@@ -339,6 +339,11 @@ async function analyzeIncomingReceipt(youSend, incoming) {
 
 async function storePaymentReceiptOrReply(user, dealId, dealCode, youSend, incoming) {
   const receiptCheck = await analyzeIncomingReceipt(youSend, incoming);
+  console.info(
+    `[receipt-ocr] ${dealCode} status=${receiptCheck.ocr_status}`
+      + ` amount=${receiptCheck.ocr_amount || "unreadable"}`
+      + ` currency=${receiptCheck.ocr_currency || "unreadable"}`
+  );
   if (receiptCheck.ocr_status !== "matched") {
     return {
       blocked: true,

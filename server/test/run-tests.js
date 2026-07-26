@@ -848,6 +848,22 @@ async function run() {
 
   receiptCheck = await analyzeReceiptEvidence(
     { amount: 80000, currency: "NGN" },
+    { text: "Transfer successful\nAmount NGN 80,000\nAccount 0123456789\nReference 20260726001" }
+  );
+  check(
+    "receipt parser finds the locked amount among account and reference numbers",
+    receiptCheck.ocr_status === "matched" && Number(receiptCheck.ocr_amount) === 80000,
+    JSON.stringify(receiptCheck)
+  );
+
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
+    { text: "Transfer failed\nAmount NGN 80,000" }
+  );
+  check("receipt parser rejects failed payment status", receiptCheck.ocr_status === "mismatch", JSON.stringify(receiptCheck));
+
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
     { media: { id: "m1", filename: "receipt.png" } }
   );
   check("receipt parser keeps image-only receipt pending", receiptCheck.ocr_status === "pending", JSON.stringify(receiptCheck));
@@ -1382,6 +1398,12 @@ async function run() {
 
   const dealBeforeInvalidReceipt = __table("deals").find((row) => row.deal_code === openedDealCode);
   const textSendsBeforeInvalidReceipt = textSends.length;
+  const interruptedReceiptSession = __table("message_sessions").find((row) => row.whatsapp_phone === ALICE);
+  Object.assign(interruptedReceiptSession, {
+    current_flow: null,
+    current_step: null,
+    context_json: {},
+  });
   reply = await send(ALICE, "Hi Doreen", {
     media: { id: "unrelated-receipt", mimeType: "image/png", filename: "unrelated.png" },
     interpret: { action: "greeting", answer: "Hi Doreen, good to hear from you." },
@@ -1409,6 +1431,11 @@ async function run() {
   check(
     "receipt rejection keeps the upload step active",
     (await getSession(ALICE))?.current_step === "awaiting_receipt",
+    JSON.stringify(await getSession(ALICE))
+  );
+  check(
+    "receipt media reconstructs a lost trade-room session",
+    (await getSession(ALICE))?.context_json?.deal_code === openedDealCode,
     JSON.stringify(await getSession(ALICE))
   );
 
@@ -1888,12 +1915,38 @@ async function run() {
 
   // ---------- auto-match on publish
   scenario("auto match");
-  seedListing(bobRow, { code: "AKR-LIST-200", have_currency: "NGN", have_amount: 200000, want_currency: "RWF", want_amount: 220000 });
+  const incompatibleReciprocal = seedListing(bobRow, {
+    code: "AKR-LIST-199",
+    have_currency: "NGN",
+    have_amount: 200000,
+    want_currency: "RWF",
+    want_amount: 300000,
+    created_at: "2025-01-01T00:00:00.000Z",
+  });
+  const compatibleReciprocal = seedListing(bobRow, {
+    code: "AKR-LIST-200",
+    have_currency: "NGN",
+    have_amount: 200000,
+    want_currency: "RWF",
+    want_amount: 220000,
+    created_at: "2025-01-02T00:00:00.000Z",
+  });
   reply = await send(ALICE, "i have 220k rwf and want 200k naira");
   check("reciprocal request previews listing", reply.includes("*Review listing*"), reply);
 
   reply = await send(ALICE, "publish");
   check("publish auto-matches reciprocal listing", reply.includes("Akara Trade opened ✅"), reply);
+  const autoMatchedDeal = __table("deals").at(-1);
+  check(
+    "auto-match skips a reciprocal listing whose rate does not cross",
+    autoMatchedDeal?.listing_id === compatibleReciprocal.id && incompatibleReciprocal.status === "active",
+    JSON.stringify({ autoMatchedDeal, incompatibleReciprocal, compatibleReciprocal })
+  );
+  check(
+    "auto-match explains its compatibility basis",
+    reply.includes("Reverse currency pair, enough available value, and compatible rates."),
+    reply
+  );
   await send(ALICE, "cancel trade");
   await send(ALICE, "cancel");
 
