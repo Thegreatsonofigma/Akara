@@ -610,6 +610,78 @@ async function run() {
   check("empty history button opens all offers", reply.includes("*All live offers*") || reply.includes("*No live offers yet*"), reply);
   await send(ALICE, "cancel");
 
+  // ---------- conversational account overviews
+  scenario("conversational account overviews");
+  const OVERVIEW_USER = "250700000024";
+  const overviewUser = seedVerifiedUser(OVERVIEW_USER, "Overview User");
+  seedPayout(overviewUser, "NGN");
+  seedPayout(overviewUser, "RWF");
+  const overviewStatuses = [
+    "active", "active", "active", "active",
+    "paused", "paused",
+    "reserved",
+    "cancelled", "cancelled", "closed", "expired",
+  ];
+  overviewStatuses.forEach((status, index) => {
+    seedListing(overviewUser, {
+      code: `AKR-LIST-8${String(index).padStart(2, "0")}`,
+      have_currency: index % 2 ? "NGN" : "RWF",
+      have_amount: 10000 + index,
+      want_currency: index % 2 ? "RWF" : "NGN",
+      want_amount: 12000 + index,
+      status,
+      created_at: new Date(Date.now() - index * 1000).toISOString(),
+    });
+  });
+  const overviewCompletedDeal = seedCompletedDeal(overviewUser, aliceRow, {
+    deal_code: "AKR-TXN-OVERVIEW",
+  });
+  const overviewCompletedListingIndex = __table("listings")
+    .findIndex((listing) => listing.id === overviewCompletedDeal.listing_id);
+  if (overviewCompletedListingIndex >= 0) __table("listings").splice(overviewCompletedListingIndex, 1);
+
+  reply = await send(OVERVIEW_USER, "Can I see all my listings?", {
+    interpret: { action: "question", answer: "Here are your listings. What would you like to do next?" },
+  });
+  check("natural all-listings request opens the real listing picker", lastListPayload()?.button === "Choose listing" && reply.includes("*Your listings*"), JSON.stringify(lastListPayload()));
+  check("generic model copy cannot replace the real listing records", !reply.includes("What would you like to do next?"), reply);
+  check(
+    "listing overview reports real status counts",
+    reply.includes("*Total listings:* 11")
+      && reply.includes("*Live:* 4")
+      && reply.includes("*Paused:* 2")
+      && reply.includes("*In trade:* 1")
+      && reply.includes("*Closed:* 4")
+      && reply.includes("*Completed exchanges:* 1"),
+    reply
+  );
+  const overviewRows = (lastListPayload()?.sections || []).flatMap((section) => section.rows || []);
+  check("long listing history provides a native see-more action", overviewRows.length === 10 && overviewRows.at(-1)?.id === "my_listings_page_1", JSON.stringify(lastListPayload()));
+
+  reply = await send(OVERVIEW_USER, "my_listings_page_1");
+  check("listing pagination returns the remaining records", reply.includes("Showing 10-11 of 11"), reply);
+
+  reply = await send(OVERVIEW_USER, "How many listings do I have live?", {
+    interpret: { action: "question", answer: "Let me check that for you." },
+  });
+  check("listing count question returns the account overview", reply.includes("*Live:* 4") && !reply.includes("Let me check"), reply);
+
+  reply = await send(OVERVIEW_USER, "How many payout details do I have set up on Akara?", {
+    interpret: { action: "question", answer: "You have some payout accounts." },
+  });
+  check("payout count question returns the real saved count", reply.includes("*Total saved:* 2"), reply);
+  check("payout overview includes the actual saved accounts", reply.includes("NGN bank account") && reply.includes("RWF mobile money"), reply);
+
+  for (const tableName of ["listings", "deals"]) {
+    const rows = __table(tableName);
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const row = rows[index];
+      if (row.owner_user_id === overviewUser.id || row.maker_user_id === overviewUser.id || row.taker_user_id === overviewUser.id) {
+        rows.splice(index, 1);
+      }
+    }
+  }
+
   reply = await send(ALICE, "1");
   check("typed menu 1 opens make offer", reply.includes("Tell me what currency you have"), reply);
   await send(ALICE, "cancel");
@@ -1469,9 +1541,12 @@ async function run() {
   check("my listings opens a listing picker", lastListPayload()?.button === "Choose listing", JSON.stringify(lastListPayload()));
   check("listing picker maps the first listing", lastListPayload()?.sections?.[0]?.rows?.[0]?.id === "manage_listing_1", JSON.stringify(lastListPayload()));
   check(
-    "listing status guide uses separate scannable rows",
-    lastListPayload()?.body?.includes("🟢 Live\n\n🟡 Paused")
-      && lastListPayload()?.body?.includes("🔒 In trade\n\n⚫ Closed"),
+    "listing picker starts with a compact status overview",
+    lastListPayload()?.body?.includes("*Total listings:*")
+      && lastListPayload()?.body?.includes("*Live:*")
+      && lastListPayload()?.body?.includes("*Paused:*")
+      && lastListPayload()?.body?.includes("*In trade:*")
+      && lastListPayload()?.body?.includes("*Closed:*"),
     lastListPayload()?.body
   );
 

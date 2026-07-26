@@ -595,6 +595,12 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return viewPayoutsReply(user);
   }
 
+  const listingsPageMatch = command.match(/^my listings page (\d+)$/);
+  if (listingsPageMatch) {
+    await clearSession(user, user.whatsapp_phone);
+    return getMyListingsReply(user, { page: Number(listingsPageMatch[1]) });
+  }
+
   if (
     isMyListingsCommand(command)
     || (interpretedAction === "my_listings" && !isBrowseAllOffersIntent(text))
@@ -1172,6 +1178,8 @@ function normalizeInteractiveCommand(command) {
   if (map[command]) return map[command];
   const payoutAction = String(command || "").match(/^(edit|delete)_payout_(\d+)$/);
   if (payoutAction) return `${payoutAction[1]} payout ${payoutAction[2]}`;
+  const listingsPage = String(command || "").match(/^my_listings_page_(\d+)$/);
+  if (listingsPage) return `my listings page ${listingsPage[1]}`;
   return command;
 }
 

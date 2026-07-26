@@ -206,6 +206,8 @@ async function viewPayoutsReply(user, intro = "") {
     title("Bank & payout details"),
     caption("Where your trade partners send your money."),
     "",
+    labeled("Total saved", String(profiles.length)),
+    "",
     payoutBlock,
   ].filter(Boolean).join("\n");
 

@@ -1,7 +1,7 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { title, caption, action, labeled, formatMoney } = require("../lib/format");
 const { getUserListings, displayReference, listingStatusLabel } = require("../db/listings");
-const { userRoleInDeal, dealPartySummary, readableDealStatus } = require("../db/deals");
+const { userRoleInDeal, dealPartySummary, readableDealStatus, getCompletedTradeCount } = require("../db/deals");
 const { upsertSession } = require("../db/sessions");
 const { mainMenu, mainMenuListPayload } = require("../messages/copy");
 
@@ -10,7 +10,11 @@ function listingStatusMarker(status) {
     active: "🟢",
     paused: "🟡",
     reserved: "🔒",
+    completed: "✅",
     cancelled: "⚫",
+    closed: "⚫",
+    expired: "⚫",
+    flagged: "🔴",
   }[status] || "•";
 }
 
@@ -25,9 +29,10 @@ function listingPickerRow(listing) {
   };
 }
 
-function listingPickerReply(listings, body) {
-  const openListings = listings.filter((listing) => listing.status !== "cancelled");
-  const closedListings = listings.filter((listing) => listing.status === "cancelled");
+function listingPickerReply(listings, body, nextPage = null, remaining = 0) {
+  const closedStatuses = new Set(["cancelled", "closed", "expired", "completed"]);
+  const openListings = listings.filter((listing) => !closedStatuses.has(listing.status));
+  const closedListings = listings.filter((listing) => closedStatuses.has(listing.status));
   const sections = [
     openListings.length
       ? {
@@ -39,6 +44,18 @@ function listingPickerReply(listings, body) {
       ? {
           title: "Closed history",
           rows: closedListings.map(listingPickerRow),
+        }
+      : null,
+    nextPage !== null
+      ? {
+          title: "More",
+          rows: [
+            {
+              id: `my_listings_page_${nextPage}`,
+              title: "See more listings",
+              description: `${remaining} more record${remaining === 1 ? "" : "s"}`,
+            },
+          ],
         }
       : null,
   ].filter(Boolean);
@@ -54,15 +71,23 @@ function listingPickerReply(listings, body) {
   };
 }
 
-async function getMyListingsReply(user) {
-  const listings = (await getUserListings(user.id, 10, {
-    statuses: ["active", "reserved", "paused", "cancelled"],
-  })).map((listing, index) => ({
+async function getMyListingsReply(user, options = {}) {
+  const page = Math.max(0, Number(options.page) || 0);
+  const pageSize = 9;
+  const statuses = ["active", "reserved", "paused", "cancelled", "closed", "expired", "completed", "flagged", "draft"];
+  const [allListings, completedTrades] = await Promise.all([
+    getUserListings(user.id, 1000, { statuses }),
+    getCompletedTradeCount(user.id),
+  ]);
+  const offset = page * pageSize;
+  const listings = allListings.slice(offset, offset + pageSize).map((listing, index) => ({
     ...listing,
-    menu_number: index + 1,
+    menu_number: offset + index + 1,
   }));
+  const remaining = Math.max(0, allListings.length - (offset + listings.length));
+  const nextPage = remaining > 0 ? page + 1 : null;
 
-  if (listings.length === 0) {
+  if (allListings.length === 0) {
     const body = [
       title("No listings yet"),
       "",
@@ -89,22 +114,24 @@ async function getMyListingsReply(user) {
   await upsertSession(user, user.whatsapp_phone, "settings", "listing_picker", {
     payout_map: {},
     listing_map: listingMap,
+    listings_page: page,
   });
 
+  const count = (status) => allListings.filter((listing) => listing.status === status).length;
+  const closedCount = count("cancelled") + count("closed") + count("expired");
   const body = [
     title("Your listings"),
-    caption("Choose a listing to view its details and available actions."),
+    caption(`Showing ${offset + 1}-${offset + listings.length} of ${allListings.length}. Choose one to view or manage it.`),
     "",
-    `${listingStatusMarker("active")} Live`,
-    "",
-    `${listingStatusMarker("paused")} Paused`,
-    "",
-    `${listingStatusMarker("reserved")} In trade`,
-    "",
-    `${listingStatusMarker("cancelled")} Closed`,
+    labeled("Total listings", String(allListings.length)),
+    labeled("Live", String(count("active"))),
+    labeled("Paused", String(count("paused"))),
+    labeled("In trade", String(count("reserved"))),
+    labeled("Closed", String(closedCount)),
+    labeled("Completed exchanges", String(completedTrades)),
   ].join("\n");
 
-  return listingPickerReply(listings, body);
+  return listingPickerReply(listings, body, nextPage, remaining);
 }
 
 async function getMyDealsReply(user) {
