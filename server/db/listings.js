@@ -135,7 +135,7 @@ async function getUserListings(userId, limit = 10, options = {}) {
     : ["active", "reserved", "paused"];
   return supabaseRequest(
     [
-      "listings?select=id,listing_code,status,have_currency,want_currency,have_amount,want_amount,listing_type,created_at",
+      "listings?select=id,listing_code,status,have_currency,want_currency,have_amount,want_amount,listing_type,created_at,updated_at",
       `owner_user_id=eq.${filterValue(userId)}`,
       statuses.length ? `status=in.(${statuses.map(filterValue).join(",")})` : "",
       "order=created_at.desc",

@@ -5,38 +5,68 @@ const { userRoleInDeal, dealPartySummary, readableDealStatus } = require("../db/
 const { upsertSession } = require("../db/sessions");
 const { mainMenu, mainMenuListPayload } = require("../messages/copy");
 
+function listingStatusMarker(status) {
+  return {
+    active: "🟢",
+    paused: "🟡",
+    reserved: "🔒",
+    cancelled: "⚫",
+  }[status] || "•";
+}
+
+function listingPickerRow(listing) {
+  return {
+    id: `manage_listing_${listing.menu_number}`,
+    title: `${listingStatusMarker(listing.status)} ${displayReference(listing.listing_code, "listing")}`.slice(0, 24),
+    description: [
+      listing.status === "cancelled" ? "CLOSED" : listingStatusLabel(listing.status),
+      `${formatMoney(listing.have_amount, listing.have_currency)} to ${formatMoney(listing.want_amount, listing.want_currency)}`,
+    ].join(" | ").slice(0, 72),
+  };
+}
+
 function listingPickerReply(listings, body) {
+  const openListings = listings.filter((listing) => listing.status !== "cancelled");
+  const closedListings = listings.filter((listing) => listing.status === "cancelled");
+  const sections = [
+    openListings.length
+      ? {
+          title: "Open listings",
+          rows: openListings.map(listingPickerRow),
+        }
+      : null,
+    closedListings.length
+      ? {
+          title: "Closed history",
+          rows: closedListings.map(listingPickerRow),
+        }
+      : null,
+  ].filter(Boolean);
+
   return {
     type: "whatsapp_list",
     list: {
       body,
       button: "Manage listing",
-      sections: [
-        {
-          title: "Your listings",
-          rows: listings.map((listing, index) => ({
-            id: `manage_listing_${index + 1}`,
-            title: displayReference(listing.listing_code, "listing").slice(0, 24),
-            description: [
-              `${formatMoney(listing.have_amount, listing.have_currency)} to ${formatMoney(listing.want_amount, listing.want_currency)}`,
-              listingStatusLabel(listing.status),
-            ].join(" | ").slice(0, 72),
-          })),
-        },
-      ],
+      sections,
     },
     fallbackText: body,
   };
 }
 
 async function getMyListingsReply(user) {
-  const listings = await getUserListings(user.id, 5);
+  const listings = (await getUserListings(user.id, 10, {
+    statuses: ["active", "reserved", "paused", "cancelled"],
+  })).map((listing, index) => ({
+    ...listing,
+    menu_number: index + 1,
+  }));
 
   if (listings.length === 0) {
     const body = [
-      title("No active listings"),
+      title("No listings yet"),
       "",
-      "You have no live, paused, or reserved listings right now.",
+      "Your live and closed listings will appear here.",
       "",
       caption("What would you like to do next?"),
     ].join("\n");
@@ -53,8 +83,8 @@ async function getMyListingsReply(user) {
   }
 
   const listingMap = {};
-  listings.forEach((listing, index) => {
-    listingMap[String(index + 1)] = listing.id;
+  listings.forEach((listing) => {
+    listingMap[String(listing.menu_number)] = listing.id;
   });
   await upsertSession(user, user.whatsapp_phone, "settings", "listing_picker", {
     payout_map: {},
@@ -63,18 +93,11 @@ async function getMyListingsReply(user) {
 
   const body = [
     title("Your listings"),
-    caption("Choose one to edit, close, reopen, or share."),
+    caption("Open listings can be managed. Closed listings are kept as history."),
     "",
-    listings.map((listing, index) => {
-      return [
-        title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
-        labeled("Send", formatMoney(listing.have_amount, listing.have_currency)),
-        labeled("Receive", formatMoney(listing.want_amount, listing.want_currency)),
-        labeled("Status", listingStatusLabel(listing.status)),
-      ].join("\n");
-    }).join("\n\n"),
+    `${listingStatusMarker("active")} Live · ${listingStatusMarker("paused")} Paused · ${listingStatusMarker("reserved")} In trade · ${listingStatusMarker("cancelled")} Closed`,
     "",
-    caption("Tap Manage listing, or type an action like: edit listing 1"),
+    caption("Tap Manage listing to choose one."),
   ].join("\n");
 
   return listingPickerReply(listings, body);

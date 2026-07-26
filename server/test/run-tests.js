@@ -485,7 +485,7 @@ async function run() {
   await send(ALICE, "menu");
 
   reply = await send(ALICE, "my listings");
-  check("listings view empty state", reply.includes("No active listings"), reply);
+  check("listings view empty state", reply.includes("No listings yet"), reply);
 
   reply = await send(ALICE, "my transactions");
   check("history synonym works", reply.includes("No transaction history yet"), reply);
@@ -593,7 +593,13 @@ async function run() {
   check("session cleared after publish", (await sessionFlow(ALICE)) === null);
 
   reply = await send(ALICE, "my listings");
-  check("listing appears in scoped view", reply.includes("AKR-LIST-001"), reply);
+  check(
+    "listing appears in scoped view",
+    (lastListPayload()?.sections || []).some((section) =>
+      (section.rows || []).some((row) => String(row.title || "").includes("AKR-LIST-001"))
+    ),
+    JSON.stringify(lastListPayload())
+  );
 
   reply = await send(ALICE, "I have 50k naira and want 55k RWF");
   check("duplicate live listing is blocked", reply.includes("*Listing already live*"), reply);
@@ -1074,14 +1080,40 @@ async function run() {
   );
 
   reply = await send(ALICE, "my listings");
-  check("closed listing disappears from My Listings immediately", !reply.includes("AKR-LIST-778"), reply);
+  const closedSection = (lastListPayload()?.sections || []).find((section) => section.title === "Closed history");
+  const closedListingRow = (closedSection?.rows || []).find((row) => String(row.title || "").includes("AKR-LIST-778"));
+  check("closed listing moves into a distinct history section", Boolean(closedListingRow), JSON.stringify(lastListPayload()));
   check(
-    "closed listing is absent from listing picker",
-    !(lastListPayload()?.sections || []).some((section) =>
-      (section.rows || []).some((row) => String(row.title || "").includes("AKR-LIST-778"))
-    ),
+    "closed listing is visibly marked as closed",
+    closedListingRow?.title?.startsWith("⚫") && closedListingRow?.description?.startsWith("CLOSED"),
     JSON.stringify(lastListPayload())
   );
+
+  reply = await send(ALICE, closedListingRow?.id || "manage_listing_1");
+  check("closed listing opens a scoped activity record", reply.includes("*⚫ Closed listing*") && reply.includes("*Activity*"), reply);
+  check("closed listing with no activity says so", reply.includes("No negotiations or exchanges were opened"), reply);
+  check("closed listing never dumps profile information", !reply.includes("Manage payout details") && !reply.includes("*Payouts*") && !reply.includes("*Profile*"), reply);
+  listingButtonIds = (lastButtonPayload()?.buttons || []).map((button) => button.id);
+  check("closed listing offers native republish action", listingButtonIds[0] === "republish_listing_1", JSON.stringify(lastButtonPayload()));
+
+  __table("negotiable_offers").push({
+    id: crypto.randomUUID(),
+    listing_id: managedListing.id,
+    offering_user_id: bobRow.id,
+    offered_amount: 5400,
+    offered_currency: "RWF",
+    status: "declined",
+    created_at: new Date().toISOString(),
+  });
+  await send(ALICE, "my listings");
+  reply = await send(ALICE, "manage_listing_1");
+  check("closed listing reports recorded activity", reply.includes("*Negotiations received:* 1"), reply);
+
+  reply = await send(ALICE, "republish_listing_1");
+  check("republish opens a fresh listing review", reply.includes("*Republish listing*") && reply.includes("*Review listing*"), reply);
+  check("republish preserves the old terms", reply.includes("5,000 NGN") && reply.includes("5,600 RWF"), reply);
+  check("republish generates a fresh reference", !reply.includes("AKR-LIST-778"), reply);
+  await send(ALICE, "cancel");
 
   seedListing(aliceRow, {
     code: "AKR-LIST-779",
@@ -1117,7 +1149,13 @@ async function run() {
   );
 
   reply = await send(ALICE, "my listings");
-  check("bulk-closed listings stay out of My Listings", reply.includes("No active listings") && !reply.includes("AKR-LIST-777"), reply);
+  const bulkClosedRows = (lastListPayload()?.sections || [])
+    .find((section) => section.title === "Closed history")?.rows || [];
+  check(
+    "bulk-closed listings move into closed history",
+    bulkClosedRows.some((row) => String(row.title || "").includes("AKR-LIST-777")),
+    JSON.stringify(lastListPayload())
+  );
 
   reply = await send(ALICE, "delete all my payouts");
   check("bulk payout delete asks", reply.includes("Delete all payout details?"), reply);

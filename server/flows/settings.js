@@ -24,7 +24,7 @@ const {
   paymentEditMenuPrompt,
   paymentContextFromProfile,
 } = require("./payment-profile");
-const { startListingEdit } = require("./listing");
+const { startListingEdit, prepareListingPreview } = require("./listing");
 const { requestSecurityAuthorization } = require("../lib/security");
 
 function parseNumberedAction(text, actionWords, nounWords) {
@@ -391,7 +391,71 @@ async function getMappedListing(user, context, number) {
   return rows[0] || null;
 }
 
-function listingManagementReply(listing, number) {
+function listingActivityDate(value) {
+  if (!value) return "Not recorded";
+  return new Date(value).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+async function closedListingActivityReply(listing, number) {
+  const [offers, deals] = await Promise.all([
+    supabaseRequest([
+      "negotiable_offers?select=id,status,created_at,updated_at",
+      `listing_id=eq.${filterValue(listing.id)}`,
+      "order=created_at.desc",
+      "limit=50",
+    ].join("&")),
+    supabaseRequest([
+      "deals?select=id,status,completed_at,cancelled_at,created_at",
+      `listing_id=eq.${filterValue(listing.id)}`,
+      "order=created_at.desc",
+      "limit=50",
+    ].join("&")),
+  ]);
+
+  const completedDeals = deals.filter((deal) => deal.completed_at || deal.status === "completed").length;
+  const endedDeals = deals.filter((deal) => deal.cancelled_at || ["cancelled", "expired"].includes(deal.status)).length;
+  const activityLines = [];
+  if (offers.length) activityLines.push(labeled("Negotiations received", String(offers.length)));
+  if (deals.length) activityLines.push(labeled("Exchanges opened", String(deals.length)));
+  if (completedDeals) activityLines.push(labeled("Completed exchanges", String(completedDeals)));
+  if (endedDeals) activityLines.push(labeled("Cancelled or expired", String(endedDeals)));
+
+  const body = [
+    title("⚫ Closed listing"),
+    caption("This listing is off search and its original record is read-only."),
+    "",
+    labeled("Reference", displayReference(listing.listing_code, "listing")),
+    "",
+    labeled("You offered", formatMoney(listing.have_amount, listing.have_currency)),
+    labeled("You requested", formatMoney(listing.want_amount, listing.want_currency)),
+    "",
+    title("Activity"),
+    activityLines.length
+      ? activityLines.join("\n")
+      : "No negotiations or exchanges were opened before this listing closed.",
+    "",
+    labeled("Created", listingActivityDate(listing.created_at)),
+    labeled("Closed", listingActivityDate(listing.updated_at || listing.created_at)),
+    "",
+    caption("Republish opens a new draft with the same terms and a new reference."),
+  ].join("\n");
+
+  return whatsappButtonsReply(body, [
+    { id: `republish_listing_${number}`, title: "Republish" },
+    { id: "menu", title: "Main menu" },
+  ], [
+    body,
+    "",
+    action(`republish listing ${number}`),
+    action("menu"),
+  ].join("\n"));
+}
+
+async function listingManagementReply(listing, number) {
   const reference = displayReference(listing.listing_code, "listing");
   const body = [
     title(reference),
@@ -429,6 +493,10 @@ function listingManagementReply(listing, number) {
     ].join("\n"));
   }
 
+  if (listing.status === "cancelled") {
+    return closedListingActivityReply(listing, number);
+  }
+
   return [
     body,
     "",
@@ -463,7 +531,10 @@ async function completeListingAction(user, context = {}) {
     ].join("&"),
     {
       method: "PATCH",
-      body: JSON.stringify({ status: "cancelled" }),
+      body: JSON.stringify({
+        status: "cancelled",
+        updated_at: new Date().toISOString(),
+      }),
     }
   );
 
@@ -488,7 +559,10 @@ async function completeBulkAction(user, context = {}) {
       ].join("&"),
       {
         method: "PATCH",
-        body: JSON.stringify({ status: "cancelled" }),
+        body: JSON.stringify({
+          status: "cancelled",
+          updated_at: new Date().toISOString(),
+        }),
       }
     );
 
@@ -626,6 +700,44 @@ async function handleSettings(text, user, session) {
       return_flow: "settings",
       ...(currency ? { payment_currency: currency } : {}),
     });
+  }
+
+  const republishListingNumber = parseNumberedAction(
+    normalizedCommand,
+    ["republish", "relist", "repost"],
+    ["offer", "listing"]
+  ) || (
+    /\b(republish|relist|repost|publish again|list again|use this again|make a new listing)\b/.test(normalizedCommand)
+      ? Number(context.selected_listing_number || 0)
+      : null
+  );
+  if (republishListingNumber) {
+    const listing = await getMappedListing(user, context, republishListingNumber);
+    if (!listing) {
+      return [
+        title("Listing not found"),
+        "",
+        "Open My Listings and choose the closed listing again.",
+      ].join("\n");
+    }
+    if (listing.status !== "cancelled") {
+      return [
+        title("Listing is still open"),
+        "",
+        "Only a closed listing needs to be republished. You can manage this one instead.",
+      ].join("\n");
+    }
+
+    return prepareListingPreview(user, {
+      have_currency: listing.have_currency,
+      want_currency: listing.want_currency,
+      have_amount: listing.have_amount,
+      want_amount: listing.want_amount,
+      listing_type: listing.listing_type || "negotiable",
+    }, [
+      title("Republish listing"),
+      caption("I copied the old terms into a new listing with a fresh reference."),
+    ].join("\n"));
   }
 
   if (/^(edit|update|change) payout$/.test(normalizedCommand)) {
@@ -825,7 +937,10 @@ async function handleSettings(text, user, session) {
 
     const rows = await supabaseRequest(`listings?id=eq.${filterValue(listingId)}&owner_user_id=eq.${filterValue(user.id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ status: listingAction.status }),
+      body: JSON.stringify({
+        status: listingAction.status,
+        updated_at: new Date().toISOString(),
+      }),
     });
 
     if (!rows[0]) {
@@ -855,11 +970,12 @@ async function handleSettings(text, user, session) {
 function isSettingsCommand(text) {
   const command = compactText(text).replace(/_/g, " ");
   if (!command) return true;
-  if (/^(manage|edit|modify|close|delete|remove|pause|reopen|resume|activate|share|copy) listing \d+$/.test(command)) return true;
+  if (/^(manage|edit|modify|close|delete|remove|pause|reopen|resume|activate|share|copy|republish|relist|repost) listing \d+$/.test(command)) return true;
   if (/\b(profile|settings|account|menu|show profile|view profile|payouts)\b/.test(command)) return true;
   if (/\b(done|close|back|exit)\b/.test(command) && !/\b(offer|listing)\b/.test(command)) return true;
   if (/\b(add|new|edit|update|change|delete|remove)\b.*\b(payout|payment|bank|momo|details?)\b/.test(command)) return true;
   if (/\b(edit|modify|update|change|pause|reopen|resume|activate|close|delete|remove|cancel)\b.*\b(offer|listing)\b/.test(command)) return true;
+  if (/\b(republish|relist|repost|publish again|list again|use this again|make a new listing)\b/.test(command)) return true;
   if (/^(yes|no|confirm|delete|remove)$/.test(command)) return true;
   return false;
 }
