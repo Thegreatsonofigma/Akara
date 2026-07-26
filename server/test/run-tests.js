@@ -105,7 +105,7 @@ function lastMediaPayload() {
 
 const { buildReply } = require("../router");
 const { sendIdleMenus } = require("../app");
-const { runSmartMatchingSweep } = require("../flows/listing");
+const { reserveListingById, runSmartMatchingSweep } = require("../flows/listing");
 const { findOrCreateUser } = require("../db/users");
 const { getSession, rememberFailedMessage } = require("../db/sessions");
 const intents = require("../nlp/intents");
@@ -1470,8 +1470,9 @@ async function run() {
     "trade opening keeps payment facts compact and inline",
     reply.includes("*You send:*")
       && reply.includes("*You receive:*")
-      && reply.includes("*Payment window:* 15 minutes")
-      && reply.includes("*Service fee:* Free")
+      && reply.includes("*Rate:* Locked · *Time:* 15 min · *Fee:* Free")
+      && reply.includes("*Pay this account*")
+      && reply.includes("*Where yours will arrive*")
       && !reply.includes("_You send_"),
     reply
   );
@@ -1485,7 +1486,59 @@ async function run() {
     !reply.includes("*Actions*") && !reply.includes("`paid` after you send"),
     reply
   );
+  check(
+    "trade opening stays concise on a small phone",
+    reply.split("\n").filter((line) => line.trim()).length <= 18
+      && !reply.includes("Terms locked")
+      && !reply.includes("keeps both sides aligned"),
+    reply
+  );
   const openedDealCode = (await getSession(ALICE))?.context_json?.deal_code || __table("deals").at(-1)?.deal_code;
+  const secondTradeOwner = seedVerifiedUser("250700000077", "Second Trade Owner");
+  seedPayout(secondTradeOwner, "NGN");
+  seedPayout(secondTradeOwner, "RWF");
+  const secondTradeListing = seedListing(secondTradeOwner, {
+    code: "AKR-LIST-SECOND",
+    have_currency: "NGN",
+    have_amount: 50000,
+    want_currency: "RWF",
+    want_amount: 60000,
+    listing_type: "fixed",
+  });
+  const dealsBeforeSecondAttempt = __table("deals").length;
+  const secondTradeReply = await reserveListingById(aliceRow, secondTradeListing.id);
+  check(
+    "a user cannot open a second trade while the first is active",
+    secondTradeReply?.body?.includes("*Finish your open trade first*")
+      && secondTradeReply?.body?.includes(openedDealCode)
+      && __table("deals").length === dealsBeforeSecondAttempt
+      && secondTradeListing.status === "active",
+    JSON.stringify({ secondTradeReply, secondTradeListing })
+  );
+  check(
+    "the open-trade block provides one direct return action",
+    secondTradeReply?.buttons?.map((button) => button.id).join(",") === "trade_status",
+    JSON.stringify(secondTradeReply)
+  );
+  const peerBusyTaker = seedVerifiedUser("250700000078", "Peer Busy Taker");
+  seedPayout(peerBusyTaker, "NGN");
+  seedPayout(peerBusyTaker, "RWF");
+  const peerBusyListing = seedListing(bobRow, {
+    code: "AKR-LIST-PEER-BUSY",
+    have_currency: "NGN",
+    have_amount: 70000,
+    want_currency: "RWF",
+    want_amount: 80000,
+    listing_type: "fixed",
+  });
+  const peerBusyReply = await reserveListingById(peerBusyTaker, peerBusyListing.id);
+  check(
+    "a listing owner already in a trade cannot be placed in a second one",
+    peerBusyReply.includes("*This peer is completing another trade*")
+      && peerBusyListing.status === "active"
+      && __table("deals").length === dealsBeforeSecondAttempt,
+    JSON.stringify({ peerBusyReply, peerBusyListing })
+  );
 
   // ---------- deal room actions
   scenario("deal room");
@@ -1610,6 +1663,11 @@ async function run() {
     const index = __table("listings").indexOf(listing);
     if (index >= 0) __table("listings").splice(index, 1);
   }
+  if (recalledDeal) recalledDeal.status = "cancelled";
+  for (const phone of [ALICE, BOB]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
 
   // ---------- negotiable listing negotiation
   scenario("negotiable listing negotiation");
@@ -1637,6 +1695,11 @@ async function run() {
   check("owner acceptance opens trade", reply.includes("Akara Trade opened ✅"), reply);
   const negotiatedDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-091")?.id);
   check("negotiated amount becomes deal amount", Number(negotiatedDeal?.want_amount) === 105000, JSON.stringify(negotiatedDeal));
+  if (negotiatedDeal) negotiatedDeal.status = "closed";
+  for (const phone of [ALICE, CHARLIE]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
 
   // ---------- two-way negotiation: counters can move either side
   scenario("two-way negotiation");
@@ -1670,6 +1733,11 @@ async function run() {
   const twoWayDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-092")?.id);
   check("deal keeps negotiated send side", Number(twoWayDeal?.want_amount) === 105000, JSON.stringify(twoWayDeal));
   check("deal keeps negotiated receive side", Number(twoWayDeal?.have_amount) === 98000, JSON.stringify(twoWayDeal));
+  if (twoWayDeal) twoWayDeal.status = "closed";
+  for (const phone of [BOB, CHARLIE]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
 
   // ---------- natural owner counter with a leading rejection
   scenario("natural-language counter");
@@ -1733,6 +1801,12 @@ async function run() {
   check("partial source listing is reserved", partialSource?.status === "reserved", JSON.stringify(partialSource));
   check("partial residual listing remains live", Boolean(partialResidual), JSON.stringify(__table("listings").filter((listing) => listing.owner_user_id === charlieRow.id)));
   if (partialResidual) partialResidual.status = "closed";
+  const partialDeal = __table("deals").find((deal) => deal.listing_id === partialSource?.id);
+  if (partialDeal) partialDeal.status = "closed";
+  for (const phone of [ALICE, CHARLIE]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
 
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");
@@ -2043,7 +2117,7 @@ async function run() {
   );
   check(
     "auto-match explains its compatibility basis",
-    reply.includes("The currencies, available value and rates are compatible."),
+    reply.includes("A reciprocal offer matched your listing."),
     reply
   );
   reply = await send(ALICE, "cancel trade");
@@ -2087,6 +2161,7 @@ async function run() {
   });
   reply = await send(ALICE, "I have 10000 RWF and want at least 13000 NGN");
   check("favorable reciprocal request previews listing", reply.includes("*Review listing*"), reply);
+  const buttonsBeforeFavorableMatch = buttonSends.length;
   reply = await send(ALICE, "publish");
   const favorableDeal = __table("deals").at(-1);
   check(
@@ -2099,9 +2174,17 @@ async function run() {
   );
   check(
     "price improvement is explained without asking for negotiation",
-    reply.includes("receive more than your minimum")
+    reply.includes("Better rate: you get an extra 1,252.19 NGN")
       && !reply.includes("negotiation opened"),
     reply
+  );
+  const favorableMakerNotice = buttonSends
+    .slice(buttonsBeforeFavorableMatch)
+    .find((entry) => entry.to === BOB)?.payload?.body || "";
+  check(
+    "the reciprocal peer sees the value kept through the better rate",
+    favorableMakerNotice.includes("Better rate: you keep 1,372.81 NGN"),
+    favorableMakerNotice
   );
   const favorableResidual = __table("listings").find((row) => (
     row.owner_user_id === bobRow.id

@@ -6,6 +6,14 @@ const { getDefaultPaymentProfile } = require("./payments");
 const { sendWhatsAppText } = require("../lib/whatsapp");
 
 const DEAL_SELECT = "deals?select=id,deal_code,maker_user_id,taker_user_id,have_currency,want_currency,have_amount,want_amount,status,maker_sent_at,taker_sent_at,maker_received_at,taker_received_at,reservation_expires_at,created_at";
+const BLOCKING_DEAL_STATUSES = [
+  "reserved",
+  "instructions_viewed",
+  "maker_sent",
+  "taker_sent",
+  "partially_confirmed",
+  "disputed",
+];
 
 async function getDealById(dealId) {
   const rows = await supabaseRequest(`deals?id=eq.${filterValue(dealId)}&limit=1`);
@@ -33,6 +41,25 @@ async function getLatestOpenDealForUser(userId) {
       "status=not.in.(closed,cancelled,expired,disputed)",
       "order=created_at.desc",
       "limit=5",
+    ].join("&")
+  );
+
+  for (const deal of rows) {
+    if (await expireDealIfElapsed(deal)) continue;
+    return deal;
+  }
+
+  return null;
+}
+
+async function getBlockingOpenDealForUser(userId) {
+  const rows = await supabaseRequest(
+    [
+      DEAL_SELECT,
+      `or=(maker_user_id.eq.${filterValue(userId)},taker_user_id.eq.${filterValue(userId)})`,
+      `status=in.(${BLOCKING_DEAL_STATUSES.join(",")})`,
+      "order=created_at.desc",
+      "limit=10",
     ].join("&")
   );
 
@@ -228,6 +255,7 @@ module.exports = {
   getDealById,
   getDealByCodeForUser,
   getLatestOpenDealForUser,
+  getBlockingOpenDealForUser,
   getCompletedTradeCount,
   syncCompletedDealsCount,
   userRoleInDeal,

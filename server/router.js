@@ -1268,6 +1268,7 @@ function normalizeInteractiveCommand(command) {
     add_payout: "add payout",
     publish_bulk: "publish all",
     retry_receipt: "upload receipt",
+    trade_status: "trade status",
     verify: "verify",
   };
   if (map[command]) return map[command];
