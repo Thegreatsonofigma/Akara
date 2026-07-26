@@ -822,7 +822,7 @@ async function handleFindOffer(text, user, session) {
   {
     const details = parseSearchDetails(text);
     if (hasActionableSearchDetails(details)) {
-      return continueSearchOrShowMatches(user, details);
+      return continueSearchOrShowMatches(user, mergePresentDetails(context, details));
     }
   }
 

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { WhatsAppRedirect } from "@/components/listing/WhatsAppRedirect";
 import {
   akaraWhatsAppUrl,
   formatListingAmount,
@@ -14,7 +14,7 @@ type ListingPageProps = {
   params: Promise<{ code: string }>;
 };
 
-const siteUrl = "https://www.tryakara.com";
+const siteUrl = "https://tryakara.com";
 
 export async function generateMetadata({ params }: ListingPageProps): Promise<Metadata> {
   const { code: rawCode } = await params;
@@ -54,13 +54,35 @@ export async function generateMetadata({ params }: ListingPageProps): Promise<Me
 export default async function ListingPage({ params }: ListingPageProps) {
   const { code: rawCode } = await params;
   const code = normalizeListingCode(rawCode);
+  const whatsappUrl = akaraWhatsAppUrl(code || String(rawCode || "").toUpperCase());
   const listing = await getPublicListing(code);
-  if (!listing) notFound();
+  if (!listing) {
+    return (
+      <main style={{
+        minHeight: "100vh",
+        background: "#030303",
+        color: "#fff",
+        display: "grid",
+        placeItems: "center",
+        padding: "24px",
+        textAlign: "center",
+      }}>
+        <WhatsAppRedirect url={whatsappUrl} />
+        <div>
+          <strong style={{ display: "block", fontSize: "20px" }}>Opening Akara on WhatsApp</strong>
+          <a
+            href={whatsappUrl}
+            style={{ display: "inline-block", marginTop: "18px", color: "#9DFF1E", fontWeight: 800 }}
+          >
+            Continue to WhatsApp
+          </a>
+        </div>
+      </main>
+    );
+  }
 
   const version = encodeURIComponent(listingCardVersion(listing));
   const cardUrl = `/l/${encodeURIComponent(code)}/card?v=${version}`;
-  const whatsappUrl = akaraWhatsAppUrl(code);
-  const unavailable = listing.status !== "active";
 
   return (
     <main style={{
@@ -73,6 +95,7 @@ export default async function ListingPage({ params }: ListingPageProps) {
       justifyContent: "center",
       padding: "24px",
     }}>
+      <WhatsAppRedirect url={whatsappUrl} />
       <div style={{ width: "min(1120px, 100%)" }}>
         {/* The image is also the exact Open Graph preview WhatsApp requests. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -92,27 +115,25 @@ export default async function ListingPage({ params }: ListingPageProps) {
           <div>
             <strong style={{ display: "block", fontSize: "18px" }}>{code}</strong>
             <span style={{ color: "#a8a8a8", fontSize: "14px" }}>
-              {unavailable ? "This listing is no longer live." : "Review the terms, then continue inside WhatsApp."}
+              Opening this listing inside your Akara WhatsApp chat.
             </span>
           </div>
-          {!unavailable && (
-            <a
-              href={whatsappUrl}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                minHeight: "48px",
-                padding: "0 18px",
-                borderRadius: "6px",
-                background: "#9DFF1E",
-                color: "#000",
-                fontWeight: 800,
-                textDecoration: "none",
-              }}
-            >
-              Open on WhatsApp
-            </a>
-          )}
+          <a
+            href={whatsappUrl}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              minHeight: "48px",
+              padding: "0 18px",
+              borderRadius: "6px",
+              background: "#9DFF1E",
+              color: "#000",
+              fontWeight: 800,
+              textDecoration: "none",
+            }}
+          >
+            Continue to WhatsApp
+          </a>
         </div>
       </div>
     </main>

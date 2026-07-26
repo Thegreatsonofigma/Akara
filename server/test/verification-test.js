@@ -316,7 +316,7 @@ async function run() {
   check("quick option uses the KYC name", reply.toLowerCase().includes("account number"), reply);
 
   reply = await send(U1, "12345");
-  check("short account number rejected", reply.toLowerCase().includes("too short"), reply);
+  check("short account number rejected", reply.toLowerCase().includes("shorter than a nigerian bank account number"), reply);
 
   reply = await send(U1, "0123456789");
   check("account number advances to review", reply.includes("Review payout detail"), reply);

@@ -384,16 +384,23 @@ async function findActiveDuplicateListing(user, context) {
 }
 
 function duplicateListingReply(listing) {
-  return [
+  const body = [
     title("Listing already live"),
+    "",
     "You already have this exact offer open on Akara.",
     "",
     labeled("Reference", displayReference(listing.listing_code, "listing")),
     labeled("Status", listing.status === "active" ? "Live" : listing.status),
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "my_listings", title: "My listings" },
+    { id: "find_offers", title: "Find offers" },
+  ], [
+    body,
     "",
     `${action("my listings")} to manage it`,
-    `${action("find offers")} to browse the marketplace`,
-  ].join("\n");
+    `${action("find offers")} to browse live offers`,
+  ].join("\n"));
 }
 
 // Opens the edit conversation for a listing draft: keeps only the edit
@@ -1502,6 +1509,13 @@ async function handleCreateListing(text, user, session) {
     if (currency === context.have_currency) return "Choose a different currency from the one you have.";
 
     context.want_currency = currency;
+    if (context.have_amount && context.want_amount) {
+      return prepareListingPreview(user, context);
+    }
+    if (context.have_amount) {
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "want_amount", context);
+      return `How much ${context.want_currency} do you want for ${formatMoney(context.have_amount, context.have_currency)}?`;
+    }
     await upsertSession(user, user.whatsapp_phone, "create_listing", "have_amount", context);
     return `How much ${context.have_currency} do you have?`;
   }
@@ -1511,6 +1525,14 @@ async function handleCreateListing(text, user, session) {
     if (!amount) return "Enter a valid amount, like 50000.";
 
     context.have_amount = amount;
+    if (context.want_amount) {
+      context.listing_type = context.listing_type || "negotiable";
+      await upsertSession(user, user.whatsapp_phone, "create_listing", "confirm", context);
+      return listingReviewReply(context, [
+        `You previously asked for ${formatMoney(context.want_amount, context.want_currency)}.`,
+        "I kept that amount below. Choose Edit if you want to change it.",
+      ].join("\n"));
+    }
     await upsertSession(user, user.whatsapp_phone, "create_listing", "want_amount", context);
     return `How much ${context.want_currency} do you want for ${formatMoney(amount, context.have_currency)}?`;
   }

@@ -11,7 +11,7 @@ const { paymentOptionLines, parsePaymentCurrency } = require("../nlp/currency");
 const { isEditIntent, isCancelIntent, isDeclineIntent } = require("../nlp/intents");
 const { getUserById, updateUser, latestVerificationRequest } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
-const { mainMenu } = require("../messages/copy");
+const { mainMenu, mainMenuListPayload } = require("../messages/copy");
 const { mobileNumberRule, normalizeMobileMoneyNumber } = require("../lib/mobile-number");
 
 function paymentMethodForCurrency(currency) {
@@ -200,7 +200,35 @@ function paymentProfileStartPrompt(currency) {
       ].join("\n");
 }
 
-const BANK_LIST_PAGE_SIZE = 7;
+const BANK_LIST_PAGE_SIZE = 8;
+const POPULAR_NIGERIAN_BANKS = [
+  ["kuda"],
+  ["paycom", "opay"],
+  ["guaranty trust", "gtbank"],
+  ["access"],
+  ["zenith"],
+  ["united bank for africa", "uba"],
+  ["first bank"],
+  ["palmpay"],
+  ["nomba"],
+  ["pocket"],
+];
+
+function bankPopularityRank(name) {
+  const value = String(name || "").toLowerCase();
+  const rank = POPULAR_NIGERIAN_BANKS.findIndex((aliases) =>
+    aliases.some((alias) => value.includes(alias))
+  );
+  return rank === -1 ? POPULAR_NIGERIAN_BANKS.length : rank;
+}
+
+function sortBanksForDisplay(banks) {
+  return banks.slice().sort((a, b) => {
+    const rankDifference = bankPopularityRank(a.name) - bankPopularityRank(b.name);
+    if (rankDifference) return rankDifference;
+    return String(a.name).localeCompare(String(b.name));
+  });
+}
 
 function parseBankListAction(input) {
   const value = String(input || "").trim();
@@ -241,10 +269,10 @@ async function bankSelectionPromptReply(flow, user, context, requestedPage = 0) 
     return bankLookupUnavailableReply();
   }
 
-  const displayBanks = banks.map((bank) => ({
+  const displayBanks = sortBanksForDisplay(banks.map((bank) => ({
     ...bank,
     name: /\bpaycom\b/i.test(bank.name) ? "Opay" : bank.name,
-  }));
+  })));
   const pageCount = Math.max(1, Math.ceil(displayBanks.length / BANK_LIST_PAGE_SIZE));
   const page = Math.min(Math.max(0, Number(requestedPage) || 0), pageCount - 1);
   const pageBanks = displayBanks.slice(page * BANK_LIST_PAGE_SIZE, (page + 1) * BANK_LIST_PAGE_SIZE);
@@ -337,30 +365,44 @@ function looksLikeAccountNumber(input) {
 function bankAccountNumberPrompt(status = null) {
   if (status?.reason === "short") {
     return [
-      title("Account number needed"),
+      title("Check the account number"),
       "",
-      "That number is too short for a bank account.",
+      "That number is shorter than a Nigerian bank account number.",
+      "",
       "Send a 10 or 11 digit account number.",
-      "",
-      caption("You can say edit bank if the bank name is wrong."),
     ].join("\n");
   }
 
   if (status?.reason === "long") {
     return [
-      title("Account number needed"),
+      title("Check the account number"),
       "",
-      "That number is too long for a bank account.",
+      "That number is longer than a Nigerian bank account number.",
+      "",
       "Send only the 10 or 11 digit account number.",
-      "",
-      caption("You can say edit bank if the bank name is wrong."),
     ].join("\n");
   }
 
   return [
-    "Send the account number.",
-    caption("Use 10 or 11 digits only."),
+    title("Bank account number"),
+    "",
+    "Send the 10 or 11 digit account number.",
   ].join("\n");
+}
+
+function bankAccountNumberPromptReply(context = {}, status = null, intro = "") {
+  const body = [
+    intro,
+    context.payment_bank_name ? labeled("Bank", context.payment_bank_name) : "",
+    bankAccountNumberPrompt(status),
+  ].filter(Boolean).join("\n\n");
+  return whatsappButtonsReply(body, [
+    { id: "edit_account_bank", title: "Change bank" },
+  ], [
+    body,
+    "",
+    action("change bank"),
+  ].join("\n"));
 }
 
 function mobileMoneyNumberPrompt(currency, status = null) {
@@ -380,24 +422,26 @@ function mobileMoneyNumberPrompt(currency, status = null) {
 
   if (["short", "long", "format"].includes(status?.reason)) {
     const lengthText = status.reason === "short"
-      ? `It has only ${status.number.length} digits after formatting.`
+      ? `That number is shorter than a ${rule.country} mobile money number.`
       : status.reason === "long"
-        ? `It has ${status.number.length} digits after formatting.`
-        : "It does not match the local mobile number format.";
+        ? `That number is longer than a ${rule.country} mobile money number.`
+        : `That does not look like a ${rule.country} mobile money number.`;
     return [
       title("Check the mobile money number"),
       "",
       lengthText,
-      `${rule.country} mobile money numbers should have ${rule.localDigits} digits.`,
       "",
+      `Send a ${rule.localDigits} digit number.`,
       caption(`Example: ${rule.example}`),
-      caption(`You may paste +${rule.countryCode}; Akara removes the country code automatically.`),
     ].join("\n");
   }
 
   return [
-    "Send the mobile money phone number.",
-    caption(`${rule.localDigits} digits, like ${rule.example}. A +${rule.countryCode} country code is removed automatically.`),
+    title("Mobile money number"),
+    "",
+    `Send the phone number registered on this ${currency} mobile money account.`,
+    "",
+    caption(`Example: ${rule.example}`),
   ].join("\n");
 }
 
@@ -589,10 +633,25 @@ function namesLikelyMatch(kycName, payoutName) {
 }
 
 function verifiedBankNameMatch(verifiedName, bankName) {
-  const verifiedTokens = nameTokens(verifiedName).sort();
-  const bankTokens = nameTokens(bankName).sort();
-  if (!verifiedTokens.length || verifiedTokens.length !== bankTokens.length) return false;
-  return verifiedTokens.every((token, index) => token === bankTokens[index]);
+  const verified = normalizeNameForMatch(verifiedName);
+  const bank = normalizeNameForMatch(bankName);
+  if (!verified || !bank) return false;
+  if (verified === bank) return true;
+
+  const verifiedTokens = new Set(nameTokens(verified));
+  const bankTokens = new Set(nameTokens(bank));
+  if (verifiedTokens.size < 2 || bankTokens.size < 2) return false;
+
+  const overlap = [...bankTokens].filter((token) => verifiedTokens.has(token)).length;
+  const bankCoverage = overlap / bankTokens.size;
+  const verifiedCoverage = overlap / verifiedTokens.size;
+
+  // Banks often omit middle names or prepend a wallet/provider label. Two
+  // exact legal-name tokens are required, and they must cover either the
+  // complete bank name or most of both names.
+  return overlap >= 2
+    && bankCoverage >= (2 / 3)
+    && (bankCoverage === 1 || verifiedCoverage >= 0.6);
 }
 
 function canResolveNgnAccounts(context = {}) {
@@ -611,19 +670,17 @@ function clearResolvedBankAccount(context) {
 async function restartBankAccountNumber(flow, user, context, intro = "Enter a different account number.") {
   clearResolvedBankAccount(context);
   await upsertSession(user, user.whatsapp_phone, flow, "payment_account_number", context);
-  return [
+  return bankAccountNumberPromptReply(context, null, [
     title("Change account number"),
     "",
     intro,
-    "",
-    bankAccountNumberPrompt(),
-  ].join("\n");
+  ].join("\n"));
 }
 
 function resolvedBankOwnerReply(context) {
   const body = [
     title("Bank account found"),
-    caption("The bank returned these account details."),
+    caption("These are the details registered to that account."),
     "",
     labeled("Bank", context.payment_bank_name),
     labeled("Account number", context.payment_account_number),
@@ -641,8 +698,8 @@ function bankNameMismatchReply(context) {
   const body = [
     title("Account name does not match"),
     "",
-    labeled("Bank returned", context.payment_account_name),
-    labeled("Verified name", context.payment_verified_name),
+    labeled("Name on account", context.payment_account_name),
+    labeled("Verified identity", context.payment_verified_name),
     "",
     "Akara can only save a bank account held in your verified legal name.",
     "Change the account number or choose another bank to continue.",
@@ -735,11 +792,7 @@ async function proceedAfterBankChosen(flow, user, context) {
   }
 
   await upsertSession(user, user.whatsapp_phone, flow, "payment_account_number", context);
-  return [
-    labeled("Bank", context.payment_bank_name),
-    "",
-    bankAccountNumberPrompt(),
-  ].join("\n");
+  return bankAccountNumberPromptReply(context);
 }
 
 // Resolves an NGN account number, enforces KYC-name ownership, and asks the user
@@ -981,15 +1034,26 @@ async function finishPaymentProfileSave(user, flow, context) {
   }
 
   await clearSession(user, user.whatsapp_phone);
-  return [
-    "Payout detail saved ✅",
+  const body = [
+    title("Payout ready ✅"),
     "",
-    "You can now make offers or start exchanges with that currency.",
+    `Your ${context.payment_currency} payout detail is saved.`,
+    "",
+    `You can now receive ${context.payment_currency} when you create an offer or open an exchange.`,
   ].join("\n");
+  return {
+    type: "whatsapp_list",
+    list: mainMenuListPayload(body),
+    fallbackText: [
+      body,
+      "",
+      mainMenu(user),
+    ].join("\n"),
+  };
 }
 
 function paymentEditStep(text, context = {}) {
-  const value = compactText(text);
+  const value = compactText(text).replace(/_/g, " ");
   if (!context.payment_currency) return null;
   if (!/\b(edit|change|correct|fix|update)\b/.test(value)) return null;
   const method = paymentMethodForCurrency(context.payment_currency);
@@ -1017,6 +1081,12 @@ async function maybeHandlePaymentEdit(text, user, session, context) {
   if (!step) return null;
 
   await upsertSession(user, user.whatsapp_phone, session.current_flow, step, context);
+  if (step === "payment_bank_name" && canResolveNgnAccounts(context)) {
+    clearResolvedBankAccount(context);
+    context.payment_bank_name = "";
+    context.payment_bank_code = "";
+    return bankSelectionPromptReply(session.current_flow, user, context);
+  }
   return [
     title("No problem"),
     "",
@@ -1256,7 +1326,7 @@ async function handlePaymentSteps(flow, text, user, session, context, { onDeclin
     const number = normalizeShortText(text, 40);
     if (step === "payment_account_number") {
       const status = bankAccountNumberStatus(number);
-      if (!status.valid) return bankAccountNumberPrompt(status);
+      if (!status.valid) return bankAccountNumberPromptReply(context, status);
       context.payment_account_number = status.digits;
 
       if (canResolveNgnAccounts(context) && context.payment_bank_code) {
@@ -1309,6 +1379,7 @@ module.exports = {
   formatPayoutReview,
   mobileMoneyNumberPrompt,
   namesLikelyMatch,
+  verifiedBankNameMatch,
   maybeHandlePaymentEdit,
   handlePaymentSteps,
   handlePaymentProfile,

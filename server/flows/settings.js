@@ -71,22 +71,22 @@ function profileActionsReply(body) {
             {
               id: "profile_add_payout",
               title: "Add payout",
-              description: "Save a bank or mobile money account.",
+              description: "I want to add a bank or mobile money account.",
             },
             {
               id: "profile_edit_payout",
               title: "Edit payout",
-              description: "Update one saved payout detail.",
+              description: "I want to update one of my saved accounts.",
             },
             {
               id: "profile_delete_payout",
               title: "Delete payout",
-              description: "Remove one saved payout detail.",
+              description: "I want to remove one of my saved accounts.",
             },
             {
               id: "profile_delete_all_payouts",
               title: "Delete all payouts",
-              description: "Remove every saved payout detail.",
+              description: "I want to remove every saved payout account.",
             },
           ],
         },
@@ -96,22 +96,22 @@ function profileActionsReply(body) {
             {
               id: "profile_listings",
               title: "Manage listings",
-              description: "View and manage individual listings.",
+              description: "I want to view or update a listing I posted.",
             },
             {
               id: "profile_pause_all_listings",
               title: "Pause all listings",
-              description: "Temporarily hide every live listing.",
+              description: "I want to hide every live listing for now.",
             },
             {
               id: "profile_reopen_all_listings",
               title: "Reopen all listings",
-              description: "Return every paused listing to search.",
+              description: "I want my paused listings to appear again.",
             },
             {
               id: "profile_close_all_listings",
               title: "Close all listings",
-              description: "Permanently close all open listings.",
+              description: "I want to permanently close every open listing.",
             },
           ],
         },
@@ -121,12 +121,12 @@ function profileActionsReply(body) {
             {
               id: "profile_history",
               title: "Transaction history",
-              description: "Review your previous Akara exchanges.",
+              description: "I want to review my current and past exchanges.",
             },
             {
               id: "profile_trust",
               title: "Trust record",
-              description: "See your activity and completion record.",
+              description: "I want to see my reliability and completion record.",
             },
           ],
         },
@@ -562,7 +562,7 @@ function shareListingReply(listing) {
     "",
     shareUrl,
     "",
-    caption("Long-press the link to copy it, or tap it to preview the listing card."),
+    caption("Share this link. It previews the swap card and opens the listing in Akara on WhatsApp."),
   ].join("\n");
 }
 

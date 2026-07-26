@@ -958,9 +958,7 @@ function listingSharePage(listing) {
     <a href="${escapeXml(openUrl)}">Open this listing on Akara</a>
   </main>
   <script>
-    window.setTimeout(function () {
-      window.location.replace(${JSON.stringify(openUrl)});
-    }, 700);
+    window.location.replace(${JSON.stringify(openUrl)});
   </script>
 </body>
 </html>`;

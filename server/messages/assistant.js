@@ -195,6 +195,15 @@ function genericAkaraAssistantReply(user, options = {}) {
   const answer = personalizeGreeting(cleanedAnswer, name, mode);
 
   if (options.suppressNudge) return answer;
+  if (mode === "greeting" && !options.activeFlow) {
+    return [
+      answer,
+      "",
+      "If you need money in another currency, tell me what you have and what you want.",
+      "",
+      "I will check live offers first. If nothing fits, I can prepare your own listing and keep every exchange step organized here in WhatsApp.",
+    ].join("\n");
+  }
   return [answer, "", conversationNudge(user, options.activeFlow)].join("\n");
 }
 

@@ -98,7 +98,11 @@ const { findNigerianBanks } = require("../lib/coinprofile");
 const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
 const { normalizeMobileMoneyNumber } = require("../lib/mobile-number");
 const { formatMessageLayout } = require("../lib/format");
-const { handlePaymentProfile } = require("../flows/payment-profile");
+const {
+  handlePaymentProfile,
+  mobileMoneyNumberPrompt,
+  verifiedBankNameMatch,
+} = require("../flows/payment-profile");
 
 const { __table, __reset } = fakeSupabase;
 
@@ -365,6 +369,18 @@ async function run() {
     "wrong international country code is rejected",
     normalizeMobileMoneyNumber("RWF", "+254 712 345 678").reason === "wrong_country"
   );
+  check(
+    "mobile number prompt keeps backend normalization invisible",
+    !mobileMoneyNumberPrompt("KES").toLowerCase().includes("country code"),
+    mobileMoneyNumberPrompt("KES")
+  );
+  const longKenyanNumber = normalizeMobileMoneyNumber("KES", "071234567890");
+  check(
+    "mobile number error explains the country format without technical processing copy",
+    mobileMoneyNumberPrompt("KES", longKenyanNumber).includes("longer than a Kenya mobile money number")
+      && !mobileMoneyNumberPrompt("KES", longKenyanNumber).includes("after formatting"),
+    mobileMoneyNumberPrompt("KES", longKenyanNumber)
+  );
 
   // ---------- unverified journey
   scenario("unverified journey");
@@ -436,6 +452,12 @@ async function run() {
     JSON.stringify(profileRows)
   );
   check(
+    "profile action descriptions speak in the user's voice",
+    profileRows.find((row) => row.id === "profile_add_payout")?.description.startsWith("I want to")
+      && profileRows.find((row) => row.id === "profile_listings")?.description.startsWith("I want to"),
+    JSON.stringify(profileRows)
+  );
+  check(
     "profile body does not repeat tray actions as text",
     !reply.includes("cancel all listings")
       && !reply.includes("delete all payouts")
@@ -470,6 +492,21 @@ async function run() {
     JSON.stringify({ reply, list: lastListPayload() })
   );
   removeSeededDeals(completedProfileDeals);
+
+  reply = await send(ALICE, "hello", {
+    interpret: { action: "greeting", answer: "Hi there." },
+  });
+  check(
+    "verified greeting explains Akara's value before the menu",
+    reply.includes("check live offers first")
+      && reply.includes("organized here in WhatsApp"),
+    reply
+  );
+  check(
+    "verified greeting keeps one embedded native menu",
+    lastListPayload()?.sections?.[0]?.rows?.length === 6,
+    JSON.stringify(lastListPayload())
+  );
 
   // ---------- inactivity menu nudge
   scenario("inactivity menu nudge");
@@ -633,6 +670,11 @@ async function run() {
   check("duplicate live listing is blocked", reply.includes("*Listing already live*"), reply);
   check("duplicate listing points to existing reference", reply.includes("AKR-LIST-001"), reply);
   check("duplicate listing does not open review", !reply.includes("*Review listing*"), reply);
+  check(
+    "duplicate listing offers concise native next steps",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "my_listings,find_offers",
+    JSON.stringify(lastButtonPayload())
+  );
 
   const DORA = "250700000004";
   const doraRow = seedVerifiedUser(DORA, "Promise Uchenna Steven");
@@ -642,7 +684,7 @@ async function run() {
   reply = await send(DORA, "mtn");
   check("momo network asks for registered name", reply.includes("Quick option") && reply.includes("Promise Uchenna Steven"), reply);
   reply = await send(DORA, "option 1");
-  check("verified name shortcut advances to momo number", reply.toLowerCase().includes("mobile money phone number"), reply);
+  check("verified name shortcut advances to momo number", reply.includes("*Mobile money number*"), reply);
   reply = await send(DORA, "+250 788 123 456");
   check("momo number advances to payout review", reply.includes("Review payout detail"), reply);
   check("momo review shows normalized local number", reply.includes("0788123456") && !reply.includes("+250"), reply);
@@ -650,6 +692,26 @@ async function run() {
   check("saving payout resumes listing review", reply.includes("Payout detail saved") && reply.includes("*Review listing*"), reply);
   const doraRwfPayout = __table("payment_profiles").find((row) => row.user_id === doraRow.id && row.currency === "RWF");
   check("saved momo number uses local digits only", doraRwfPayout?.momo_number_encrypted === "0788123456", JSON.stringify(doraRwfPayout));
+
+  const PAYOUT_MENU = "250700000019";
+  const payoutMenuUser = seedVerifiedUser(PAYOUT_MENU, "Payout Menu User");
+  reply = await handlePaymentProfile("save payout", payoutMenuUser, {
+    current_flow: "payment_profile",
+    current_step: "payment_confirm",
+    context_json: {
+      payment_currency: "KES",
+      payment_network: "M-Pesa",
+      payment_number: "0712345678",
+      payment_account_name: "Payout Menu User",
+    },
+  });
+  check(
+    "standalone payout save ends with a useful next-step menu",
+    reply?.type === "whatsapp_list"
+      && reply.list?.body?.includes("*Payout ready ✅*")
+      && reply.list?.sections?.[0]?.rows?.some((row) => row.id === "make_offer"),
+    JSON.stringify(reply)
+  );
 
   const recoveredPaymentReply = await handlePaymentProfile("continue", doraRow, {
     current_flow: "payment_profile",
@@ -850,6 +912,10 @@ async function run() {
   check("need-only no match asks what user has", reply.includes("Tell me what currency you have"), reply);
   check("need-only no match keeps requested currency", reply.includes("9,999,999 KES"), reply);
   check("need-only no match does not ask needed currency again", !reply.includes("Tell me what currency you need") && !reply.includes("What currency do you need"), reply);
+  reply = await send(ALICE, "I have 100k RWF");
+  check("follow-up keeps the previously requested amount", reply.includes("9,999,999 KES"), reply);
+  check("follow-up does not ask for the requested amount again", !reply.includes("How much KES do you want"), reply);
+  await send(ALICE, "no thanks");
 
   reply = await send(ALICE, "I can give 9999999 XAF");
   check("have-only no match asks what user needs", reply.includes("Tell me what currency you want in return"), reply);
@@ -1082,8 +1148,14 @@ async function run() {
   });
 
   reply = await send(ALICE, "my listings");
-  check("my listings opens a listing picker", lastListPayload()?.button === "Manage listing", JSON.stringify(lastListPayload()));
+  check("my listings opens a listing picker", lastListPayload()?.button === "Choose listing", JSON.stringify(lastListPayload()));
   check("listing picker maps the first listing", lastListPayload()?.sections?.[0]?.rows?.[0]?.id === "manage_listing_1", JSON.stringify(lastListPayload()));
+  check(
+    "listing status guide uses separate scannable rows",
+    lastListPayload()?.body?.includes("🟢 Live\n\n🟡 Paused")
+      && lastListPayload()?.body?.includes("🔒 In trade\n\n⚫ Closed"),
+    lastListPayload()?.body
+  );
 
   reply = await send(ALICE, "manage_listing_1");
   let listingButtonIds = (lastButtonPayload()?.buttons || []).map((button) => button.id);
@@ -1097,7 +1169,7 @@ async function run() {
       settings_item_number: 1,
     },
   });
-  check("implied share request returns the previewable listing link", reply.includes("/l/AKR-LIST-778") && reply.includes("Long-press"), reply);
+  check("implied share request returns the previewable WhatsApp listing link", reply.includes("/l/AKR-LIST-778") && reply.includes("opens the listing in Akara on WhatsApp"), reply);
 
   reply = await send(ALICE, "I need to change what I am asking for on this one", {
     interpret: {
@@ -1381,6 +1453,23 @@ async function run() {
     .find((row) => row.user_id === chidiRow.id && row.currency === "NGN");
   const originalChidiAccountNumber = originalChidiPayout.account_number_encrypted;
 
+  check(
+    "bank ownership accepts a verified two-name subset",
+    verifiedBankNameMatch("Steven Promise Uchenna", "Promise Steven")
+  );
+  check(
+    "bank ownership accepts provider text around two verified names",
+    verifiedBankNameMatch("Stephen Promise Uchenna", "GIYD-Uchenna Stephen")
+  );
+  check(
+    "bank ownership still rejects an unrelated account holder",
+    !verifiedBankNameMatch("Stephen Promise Uchenna", "Musa Ibrahim")
+  );
+  check(
+    "bank ownership rejects a single matching name",
+    !verifiedBankNameMatch("Stephen Promise Uchenna", "Uchenna")
+  );
+
   const resolveCalls = [];
   const realFetch = global.fetch;
   Object.assign(config, {
@@ -1437,6 +1526,11 @@ async function run() {
     const bankRows = lastListPayload()?.sections?.[0]?.rows || [];
     check("NGN payout setup opens the native bank tray", lastListPayload()?.button === "Choose bank", JSON.stringify(lastListPayload()));
     check(
+      "popular Nigerian banks rank before the remaining directory",
+      bankRows.slice(0, 3).map((row) => row.title).join(",") === "Kuda Microfinance Bank,Opay,Guaranty Trust Bank",
+      JSON.stringify(bankRows)
+    );
+    check(
       "bank tray provides supported banks and a search action",
       bankRows.some((row) => row.id === "payout_bank:058")
         && bankRows.some((row) => row.title === "Opay")
@@ -1457,6 +1551,11 @@ async function run() {
     check("bank search action asks for a typed bank name", reply.includes("*Search Nigerian banks*"), reply);
     reply = await send(CHIDI, "opay");
     check("typed bank search selects the bank", reply.includes("*Bank:* Opay") && reply.includes("account number"), reply);
+    check(
+      "account-number step provides a native change-bank action",
+      lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "edit_account_bank",
+      JSON.stringify(lastButtonPayload())
+    );
     await send(CHIDI, "cancel");
 
     reply = await send(CHIDI, "bank details");

@@ -18,7 +18,9 @@ function greetingMenuBody(user) {
   return [
     `Hi${name ? ` ${name}` : ""} 👋`,
     "",
-    "Choose what you want to do next on Akara.",
+    "Need money in another currency? Tell me what you have and what you need.",
+    "",
+    "I can help you find a live offer or create your own, then keep the exchange clear inside WhatsApp.",
   ].join("\n");
 }
 
@@ -148,7 +150,7 @@ function mainMenuListPayload(body = "Choose what you want to do next on Akara.")
           { id: "find_offers", title: "Find offers", description: "I want to browse available exchanges." },
           { id: "my_listings", title: "My listings", description: "I want to manage the offers I posted." },
           { id: "history", title: "History", description: "I want to see my current and past trades." },
-          { id: "profile", title: "Profile", description: "I want to manage my Akara account." },
+          { id: "profile", title: "Profile", description: "I want to manage my account and payout details." },
           { id: "get_support", title: "Get support", description: "I want help from Akara support." },
         ],
       },
@@ -248,7 +250,7 @@ function feeIncludedNote() {
 }
 
 function listingShareCopy() {
-  return "Share this link with anyone interested. It previews your swap card and opens the listing in their Akara chat.";
+  return "Share this link with anyone interested. It previews your swap card and opens the listing in Akara on WhatsApp.";
 }
 
 function explainMissingListing(fields, context = {}) {

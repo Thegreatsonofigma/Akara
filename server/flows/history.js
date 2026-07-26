@@ -47,7 +47,7 @@ function listingPickerReply(listings, body) {
     type: "whatsapp_list",
     list: {
       body,
-      button: "Manage listing",
+      button: "Choose listing",
       sections,
     },
     fallbackText: body,
@@ -93,11 +93,15 @@ async function getMyListingsReply(user) {
 
   const body = [
     title("Your listings"),
-    caption("Open listings can be managed. Closed listings are kept as history."),
+    caption("Choose a listing to view its details and available actions."),
     "",
-    `${listingStatusMarker("active")} Live · ${listingStatusMarker("paused")} Paused · ${listingStatusMarker("reserved")} In trade · ${listingStatusMarker("cancelled")} Closed`,
+    `${listingStatusMarker("active")} Live`,
     "",
-    caption("Tap Manage listing to choose one."),
+    `${listingStatusMarker("paused")} Paused`,
+    "",
+    `${listingStatusMarker("reserved")} In trade`,
+    "",
+    `${listingStatusMarker("cancelled")} Closed`,
   ].join("\n");
 
   return listingPickerReply(listings, body);
