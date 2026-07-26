@@ -15,6 +15,7 @@ const ACTIONS = [
   "bulk_cancel_listings",
   "bulk_delete_payouts",
   "add_payout",
+  "get_support",
   "menu",
   "verify",
   "greeting",
@@ -41,6 +42,7 @@ const FRESH_ACTIONS = new Set([
   "bulk_cancel_listings",
   "bulk_delete_payouts",
   "add_payout",
+  "get_support",
   "menu",
   "verify",
 ]);
@@ -57,6 +59,12 @@ const RESPONSE_SCHEMA = {
     want_currency: { type: ["string", "null"] },
     want_amount: { type: ["number", "null"] },
     payment_currency: { type: ["string", "null"] },
+    settings_target: { type: ["string", "null"], enum: ["listing", "payout", null] },
+    settings_operation: {
+      type: ["string", "null"],
+      enum: ["edit", "close", "share", "pause", "reopen", "delete", null],
+    },
+    settings_item_number: { type: ["number", "null"] },
     answer: { type: ["string", "null"] },
   },
   required: [
@@ -66,6 +74,9 @@ const RESPONSE_SCHEMA = {
     "want_currency",
     "want_amount",
     "payment_currency",
+    "settings_target",
+    "settings_operation",
+    "settings_item_number",
     "answer",
   ],
 };
@@ -89,10 +100,11 @@ const SYSTEM_PROMPT = [
   "- my_deals: they want their own trade or transaction history (\"my deals\", \"my transactions\", \"history\", \"records\", \"statement\").",
   "- view_profile: they want to see their own profile or account details (\"my profile\", \"my account\", \"account info\", \"who am I\").",
   "- view_payouts: they want to see their saved bank or payment information (\"bank details\", \"bank information\", \"my bank\", \"payment details\", \"payout details\", \"momo details\").",
-  "- settings_action: they want to edit, change, pause, reopen, close, delete, or remove a specific listing or payout detail.",
+  "- settings_action: they want to edit, modify, change, pause, reopen, close, delete, share, copy, or remove a specific listing or payout detail. Set settings_target, settings_operation, and settings_item_number when known.",
   "- bulk_cancel_listings: they want to cancel, close, or delete ALL of their listings or offers at once.",
   "- bulk_delete_payouts: they want to delete ALL of their saved payout or payment details at once.",
   "- add_payout: they want to add, save, or register NEW payout details (bank account or mobile money). Set payment_currency when they name the currency it is for. Editing existing details is settings_action, not add_payout.",
+  "- get_support: they want to contact Akara support, report an account-level problem, or email the support team.",
   "- menu: they want the menu, help, or to know what Akara can do.",
   "- verify: they ask to get verified or continue verification.",
   "- greeting: a greeting or conversation opener with no other request.",
@@ -104,6 +116,7 @@ const SYSTEM_PROMPT = [
   "",
   "Flow interruption rule: when a flow is active but the newest message is clearly a different request (for example they are mid listing-creation and ask to see their bank details), classify the NEW request. Never force a message into flow_reply just because a flow is active.",
   "Confirmation rule: when an active flow is waiting for confirmation and the message confirms, approves, or asks to publish or proceed (yes, go ahead, publish it, oya post am), classify it as flow_reply — do not re-classify it as create_listing just because the draft's details appear in the transcript.",
+  "Implied listing action rule: use the active flow and transcript to understand references such as this one, that offer, it, or the listing I chose. The user does not need an exact command. Wanting to adjust an amount, currency, or terms means settings_operation edit. Wanting it gone, unavailable, or no longer shown means close. Wanting its link, to send it around, or to show someone means share. Wanting it hidden temporarily means pause. Wanting it live again means reopen. Closing or deleting is only an inferred request; the application will still ask for confirmation.",
   "Treat synonyms interchangeably: offer/listing/ad/post/deal, bank details/bank information/payment details/payout details/account details, history/transactions/records/statement/deals/trades, profile/account/settings.",
   "",
   "Extract currencies as ISO codes (NGN, RWF, XAF, KES, GHS) and amounts as plain numbers.",
@@ -111,8 +124,14 @@ const SYSTEM_PROMPT = [
   "Users may write in Nigerian Pidgin or casual slang.",
   "When the newest message omits a currency or amount that the transcript clearly establishes (\"make it 20k instead\"), fill the missing slots from the transcript.",
   "",
-  "Always write answer. For question and unknown: a short, friendly WhatsApp answer (under 100 words) about Akara only. Use the transcript so the answer fits the conversation.",
+  "Always write answer.",
+  "For greeting, thanks, and wellbeing: respond like a warm, present human in one short sentence. Use the user's name only when it is available in the transcript. Do not dump a menu.",
+  "For question: answer the question directly and naturally in under 80 words. You may answer simple, timeless general-knowledge questions, casual conversation, and questions about Akara. If information is current, uncertain, medical, legal, investment-related, or otherwise high-stakes, say so briefly instead of guessing.",
+  "For unknown: acknowledge what the user meant if possible. If it is outside Akara's capabilities, give a brief helpful response and state the limitation without sounding defensive.",
+  "For greeting, thanks, wellbeing, question, and unknown, do not add a menu, commands, or an Akara sales pitch. The application adds one context-aware next step after your answer.",
   "For every other action: one short, friendly sentence (under 15 words) that acknowledges what the user asked for, for example \"Here's your transaction history.\" for my_deals. The app builds the functional reply itself and shows your sentence as its heading or caption, so acknowledge the request only — never promise specific results, quote data, list options, or give instructions, and never contradict what the app might report (it may find nothing).",
+  "Write in the user's register when appropriate, including natural Nigerian or Cameroonian Pidgin, but remain clear and restrained.",
+  "Never use an em dash.",
   "Never invent exchange rates, fees, or features. If asked for a live rate, say rates on Akara are peer-set and suggest checking current offers.",
 ].join("\n");
 
@@ -162,6 +181,13 @@ async function interpretMessage(text, context = {}) {
         have_amount: cleanAmount(result.have_amount),
         want_amount: cleanAmount(result.want_amount),
         payment_currency: normalizeCurrency(result.payment_currency || ""),
+        settings_target: ["listing", "payout"].includes(result.settings_target)
+          ? result.settings_target
+          : null,
+        settings_operation: ["edit", "close", "share", "pause", "reopen", "delete"].includes(result.settings_operation)
+          ? result.settings_operation
+          : null,
+        settings_item_number: cleanAmount(result.settings_item_number),
       },
       answer: typeof result.answer === "string" ? result.answer.trim() : "",
     };

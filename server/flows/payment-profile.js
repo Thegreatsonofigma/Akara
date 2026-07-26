@@ -7,6 +7,7 @@ const { isEditIntent, isCancelIntent, isDeclineIntent } = require("../nlp/intent
 const { getUserById, updateUser, latestVerificationRequest } = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { mainMenu } = require("../messages/copy");
+const { mobileNumberRule, normalizeMobileMoneyNumber } = require("../lib/mobile-number");
 
 function paymentMethodForCurrency(currency) {
   return currency === "NGN" ? "bank" : "momo";
@@ -257,6 +258,44 @@ function bankAccountNumberPrompt(status = null) {
   ].join("\n");
 }
 
+function mobileMoneyNumberPrompt(currency, status = null) {
+  const rule = status?.rule || mobileNumberRule(currency);
+  if (!rule) return "Send the mobile money phone number.";
+
+  if (status?.reason === "wrong_country") {
+    return [
+      title(`${rule.country} number needed`),
+      "",
+      `That appears to use the ${status.detectedCountry} country code.`,
+      `Send the ${rule.country} mobile money number for this ${currency} payout.`,
+      "",
+      caption(`Use ${rule.localDigits} digits, like ${rule.example}.`),
+    ].join("\n");
+  }
+
+  if (["short", "long", "format"].includes(status?.reason)) {
+    const lengthText = status.reason === "short"
+      ? `It has only ${status.number.length} digits after formatting.`
+      : status.reason === "long"
+        ? `It has ${status.number.length} digits after formatting.`
+        : "It does not match the local mobile number format.";
+    return [
+      title("Check the mobile money number"),
+      "",
+      lengthText,
+      `${rule.country} mobile money numbers should have ${rule.localDigits} digits.`,
+      "",
+      caption(`Example: ${rule.example}`),
+      caption(`You may paste +${rule.countryCode}; Akara removes the country code automatically.`),
+    ].join("\n");
+  }
+
+  return [
+    "Send the mobile money phone number.",
+    caption(`${rule.localDigits} digits, like ${rule.example}. A +${rule.countryCode} country code is removed automatically.`),
+  ].join("\n");
+}
+
 function paymentStepPrompt(step, context = {}) {
   const currency = context.payment_currency;
   if (step === "payment_bank_name") {
@@ -274,7 +313,7 @@ function paymentStepPrompt(step, context = {}) {
       : "Send the name registered on that mobile money account.";
   }
   if (step === "payment_account_number") return bankAccountNumberPrompt();
-  if (step === "payment_number") return "Send the mobile money phone number.";
+  if (step === "payment_number") return mobileMoneyNumberPrompt(currency);
   return paymentChoicePrompt();
 }
 
@@ -887,7 +926,7 @@ async function handlePaymentSteps(flow, text, user, session, context, { onDeclin
     await upsertSession(user, user.whatsapp_phone, flow, nextStep, context);
     return paymentMethodForCurrency(context.payment_currency) === "bank"
       ? bankAccountNumberPrompt()
-      : "What is the mobile money phone number?";
+      : mobileMoneyNumberPrompt(context.payment_currency);
   }
 
   if (step === "payment_account_number" || step === "payment_number") {
@@ -900,11 +939,12 @@ async function handlePaymentSteps(flow, text, user, session, context, { onDeclin
       if (canResolveNgnAccounts(context) && context.payment_bank_code) {
         return resolveAndConfirmAccount(flow, user, context);
       }
-    } else if (!number || !/\d{5,}/.test(number.replace(/\D/g, ""))) {
-      return "Send a valid mobile money number.";
+    } else {
+      const status = normalizeMobileMoneyNumber(context.payment_currency, number);
+      if (!status.valid) return mobileMoneyNumberPrompt(context.payment_currency, status);
+      context.payment_number = status.number;
     }
 
-    if (step === "payment_number") context.payment_number = number;
     return promptPaymentProfileConfirmation(user, flow, context);
   }
 
@@ -938,6 +978,7 @@ module.exports = {
   paymentEditMenuPrompt,
   paymentContextFromProfile,
   formatPayoutReview,
+  mobileMoneyNumberPrompt,
   namesLikelyMatch,
   maybeHandlePaymentEdit,
   handlePaymentSteps,

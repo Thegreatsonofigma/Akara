@@ -1,7 +1,32 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { title, caption, action, labeled, formatMoney } = require("../lib/format");
-const { getUserListings, displayReference, listingShareUrl, listingStatusLabel } = require("../db/listings");
+const { getUserListings, displayReference, listingStatusLabel } = require("../db/listings");
 const { userRoleInDeal, dealPartySummary, readableDealStatus } = require("../db/deals");
+const { upsertSession } = require("../db/sessions");
+
+function listingPickerReply(listings, body) {
+  return {
+    type: "whatsapp_list",
+    list: {
+      body,
+      button: "Manage listing",
+      sections: [
+        {
+          title: "Your listings",
+          rows: listings.map((listing, index) => ({
+            id: `manage_listing_${index + 1}`,
+            title: displayReference(listing.listing_code, "listing").slice(0, 24),
+            description: [
+              `${formatMoney(listing.have_amount, listing.have_currency)} to ${formatMoney(listing.want_amount, listing.want_currency)}`,
+              listingStatusLabel(listing.status),
+            ].join(" | ").slice(0, 72),
+          })),
+        },
+      ],
+    },
+    fallbackText: body,
+  };
+}
 
 async function getMyListingsReply(user) {
   const listings = await getUserListings(user.id, 5);
@@ -16,23 +41,32 @@ async function getMyListingsReply(user) {
     ].join("\n");
   }
 
-  return [
+  const listingMap = {};
+  listings.forEach((listing, index) => {
+    listingMap[String(index + 1)] = listing.id;
+  });
+  await upsertSession(user, user.whatsapp_phone, "settings", "listing_picker", {
+    payout_map: {},
+    listing_map: listingMap,
+  });
+
+  const body = [
     title("Your listings"),
-    caption("Live and recent listings from your account."),
+    caption("Choose one to edit, close, reopen, or share."),
     "",
     listings.map((listing, index) => {
-      const shareUrl = listing.status === "active" ? listingShareUrl(listing) : "";
       return [
         title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
         labeled("Send", formatMoney(listing.have_amount, listing.have_currency)),
         labeled("Receive", formatMoney(listing.want_amount, listing.want_currency)),
         labeled("Status", listingStatusLabel(listing.status)),
-        shareUrl ? labeled("Share", shareUrl) : "",
-      ].filter(Boolean).join("\n");
+      ].join("\n");
     }).join("\n\n"),
     "",
-    `${action("profile")} for controls`,
+    caption("Tap Manage listing, or type an action like: edit listing 1"),
   ].join("\n");
+
+  return listingPickerReply(listings, body);
 }
 
 async function getMyDealsReply(user) {

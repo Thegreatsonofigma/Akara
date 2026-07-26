@@ -1,7 +1,12 @@
 const { title, caption, action, labeled } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { currencyMentions, currencyHelpLine } = require("../nlp/currency");
-const { isRateQuestion } = require("../nlp/intents");
+const {
+  isRateQuestion,
+  isGreeting,
+  isThanksMessage,
+  isWellbeingQuestion,
+} = require("../nlp/intents");
 const { isVerified, firstName } = require("../db/users");
 const { getMarketRate } = require("../db/market");
 const {
@@ -116,20 +121,83 @@ function disputeAssistantReply() {
   ].join("\n");
 }
 
-function genericAkaraAssistantReply(user) {
-  const name = firstName(user);
+function cleanConversationalAnswer(answer) {
+  return String(answer || "")
+    .replace(/[—–]/g, ",")
+    .replace(/\s+\n/g, "\n")
+    .trim()
+    .slice(0, 900);
+}
+
+function personalizeGreeting(answer, name, mode) {
+  if (!name || mode !== "greeting" || answer.toLowerCase().includes(name.toLowerCase())) {
+    return answer;
+  }
+
+  if (/^(hi|hello|hey)\s+there\b/i.test(answer)) {
+    return answer.replace(/^(hi|hello|hey)\s+there\b/i, `$1 ${name}`);
+  }
+  if (/^(hi|hello|hey)\b/i.test(answer)) {
+    return answer.replace(/^(hi|hello|hey)\b/i, `$1 ${name}`);
+  }
+  if (/^good (morning|afternoon|evening)\b/i.test(answer)) {
+    return answer.replace(/^good (morning|afternoon|evening)\b/i, (greeting) => `${greeting}, ${name}`);
+  }
+  return `Hi ${name}. ${answer}`;
+}
+
+function conversationNudge(user, activeFlow = "") {
+  if (!isVerified(user)) {
+    if (user?.verification_status === "pending_review") {
+      return caption("Your verification is in review. I will let you know as soon as it is ready.");
+    }
+    if (user?.verification_status === "suspended") {
+      return caption("Your account needs a review before you can exchange. Contact support if you need help.");
+    }
+    if (user?.verification_status === "rejected") {
+      return [
+        caption("Your verification needs another look before you can exchange."),
+        action("verify"),
+      ].join("\n");
+    }
+    return [
+      caption("To exchange with Akara, complete verification first."),
+      action("verify"),
+    ].join("\n");
+  }
+
+  const active = {
+    create_listing: "Your listing draft is still open. Reply with the next detail when you are ready.",
+    find_offer: "Your offer search is still open. Reply with the next detail when you are ready.",
+    search_results: "Your offer results are still open. Choose an offer or ask to see more.",
+    negotiation: "Your negotiation is still open. Reply with your offer or decision when you are ready.",
+    payment_profile: "Your payout setup is still open. Reply with the requested detail to continue.",
+    deal_room: "Your Akara Trade is still open. Ask for its status whenever you need it.",
+    verification: "Your verification is still open. Reply with the requested detail to continue.",
+  }[activeFlow];
+  if (active) return caption(active);
+
   return [
-    `I hear you${name ? `, ${name}` : ""}.`,
-    "",
-    "I can answer questions about Akara, exchange rates, offers, payouts, receipts, reminders, disputes, verification, and transaction history.",
-    "",
-    "Tell me what you want to do next, or choose one:",
-    "",
-    action("find offers"),
-    action("make offer"),
-    action("history"),
-    action("profile"),
+    caption("Ready to exchange? Tell me what you have and what you want."),
+    action("I have 50k NGN and want RWF"),
   ].join("\n");
+}
+
+function genericAkaraAssistantReply(user, options = {}) {
+  const name = firstName(user);
+  const mode = options.interpretedAction || "unknown";
+  const fallback = {
+    greeting: `Hi${name ? ` ${name}` : ""}. Good to hear from you.`,
+    wellbeing: "I dey good, and I am ready when you are.",
+    thanks: `You are welcome${name ? `, ${name}` : ""}.`,
+    question: "I can help with that where it relates to Akara and currency exchange.",
+    unknown: "I hear you. That is outside what I can do directly inside Akara.",
+  }[mode] || `I hear you${name ? `, ${name}` : ""}.`;
+  const cleanedAnswer = cleanConversationalAnswer(options.modelAnswer) || fallback;
+  const answer = personalizeGreeting(cleanedAnswer, name, mode);
+
+  if (options.suppressNudge) return answer;
+  return [answer, "", conversationNudge(user, options.activeFlow)].join("\n");
 }
 
 async function rateAssistantReply(text) {
@@ -235,7 +303,7 @@ async function reputationAssistantReply(text, user) {
   return trustCredentialMessage(credential);
 }
 
-async function scopedAssistantReply(text, user) {
+async function scopedAssistantReply(text, user, options = {}) {
   const value = compactText(text);
 
   if (/\bAKR-TRUST-[A-F0-9]{8}\b/i.test(text)
@@ -253,7 +321,15 @@ async function scopedAssistantReply(text, user) {
   if (/\b(dispute|problem|issue|wrong|fake|not received|no alert)\b/.test(value)) return disputeAssistantReply();
   if (/\b(what can you do|help|options|commands|menu)\b/.test(value)) return mainMenu();
 
-  return genericAkaraAssistantReply(user);
+  let interpretedAction = options.interpretedAction || "unknown";
+  if (isWellbeingQuestion(text)) interpretedAction = "wellbeing";
+  else if (isThanksMessage(text)) interpretedAction = "thanks";
+  else if (isGreeting(text)) interpretedAction = "greeting";
+
+  return genericAkaraAssistantReply(user, {
+    ...options,
+    interpretedAction,
+  });
 }
 
 module.exports = {

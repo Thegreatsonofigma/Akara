@@ -144,12 +144,12 @@ function mainMenuListPayload(body = "Choose what you want to do next on Akara.")
       {
         title: "Akara actions",
         rows: [
-          { id: "make_offer", title: "make offer", description: "Create a rate listing people can take." },
-          { id: "find_offers", title: "find offers", description: "Browse available currency offers." },
-          { id: "my_listings", title: "my listings", description: "Manage your live listings." },
-          { id: "history", title: "history", description: "See your past and active trades." },
-          { id: "profile", title: "profile", description: "Payouts, verification, and account details." },
-          { id: "get_support", title: "get support", description: "Email Akara support." },
+          { id: "make_offer", title: "Make an offer", description: "I want to create a listing people can take." },
+          { id: "find_offers", title: "Find offers", description: "I want to browse available exchanges." },
+          { id: "my_listings", title: "My listings", description: "I want to manage the offers I posted." },
+          { id: "history", title: "History", description: "I want to see my current and past trades." },
+          { id: "profile", title: "Profile", description: "I want to manage my Akara account." },
+          { id: "get_support", title: "Get support", description: "I want help from Akara support." },
         ],
       },
     ],

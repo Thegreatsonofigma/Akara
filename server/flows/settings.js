@@ -15,7 +15,7 @@ const {
 } = require("../nlp/intents");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { getPaymentProfiles, formatPaymentProfileCompact } = require("../db/payments");
-const { getUserListings, displayReference, listingStatusLabel } = require("../db/listings");
+const { getUserListings, displayReference, listingShareUrl, listingStatusLabel } = require("../db/listings");
 const { getCompletedTradeCount } = require("../db/deals");
 const { getLatestUserReputation } = require("../db/integrity");
 const { mainMenu, referralPitch } = require("../messages/copy");
@@ -28,13 +28,22 @@ const { startListingEdit } = require("./listing");
 const { requestSecurityAuthorization } = require("../lib/security");
 
 function parseNumberedAction(text, actionWords, nounWords) {
-  const value = compactText(text);
+  const value = compactText(text).replace(/_/g, " ");
   const actionPattern = Array.isArray(actionWords) ? actionWords.join("|") : actionWords;
   const nounPattern = Array.isArray(nounWords) ? nounWords.join("|") : nounWords;
   const match = value.match(new RegExp(`\\b(${actionPattern})\\s+(?:my\\s+)?(${nounPattern})\\s*(\\d+)?\\b|\\b(${actionPattern})\\s*(\\d+)\\b`));
   if (!match) return null;
   const number = Number(match[3] || match[5] || 1);
   return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function whatsappButtonsReply(body, buttons, fallbackText = body) {
+  return {
+    type: "whatsapp_buttons",
+    body,
+    buttons,
+    fallbackText,
+  };
 }
 
 function verificationStatusLabel(user) {
@@ -208,15 +217,21 @@ async function requestBulkListingCancel(user) {
     bulk_count: rows.length,
   });
 
-  return [
+  const body = [
     title("Cancel all listings?"),
     "",
     `This will close ${rows.length} live or paused listing${rows.length === 1 ? "" : "s"}.`,
     "They will stop appearing in search immediately.",
-    "",
-    `${action("confirm")} to cancel them`,
-    `${action("keep")} to leave them as they are`,
   ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "confirm", title: "Close all" },
+    { id: "keep", title: "Keep live" },
+  ], [
+    body,
+    "",
+    `${action("confirm")} to close them`,
+    `${action("keep")} to leave them live`,
+  ].join("\n"));
 }
 
 async function requestBulkPayoutDelete(user) {
@@ -284,13 +299,86 @@ async function requestSingleListingClose(user, context, listing) {
     pending_listing_code: listing.listing_code,
   });
 
-  return [
+  const body = [
     title(`Close ${reference}?`),
     "",
     "This removes the listing from search and stops new offers for it.",
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "confirm", title: "Close listing" },
+    { id: "keep", title: "Keep live" },
+  ], [
+    body,
     "",
     `${action("confirm")} to close it`,
     `${action("keep")} to leave it live`,
+  ].join("\n"));
+}
+
+async function getMappedListing(user, context, number) {
+  const listingId = context.listing_map?.[String(number)];
+  if (!listingId) return null;
+  const rows = await supabaseRequest(
+    `listings?id=eq.${filterValue(listingId)}&owner_user_id=eq.${filterValue(user.id)}&limit=1`
+  );
+  return rows[0] || null;
+}
+
+function listingManagementReply(listing, number) {
+  const reference = displayReference(listing.listing_code, "listing");
+  const body = [
+    title(reference),
+    "",
+    labeled("Send", formatMoney(listing.have_amount, listing.have_currency)),
+    labeled("Receive", formatMoney(listing.want_amount, listing.want_currency)),
+    labeled("Status", listingStatusLabel(listing.status)),
+  ].join("\n");
+
+  if (listing.status === "active") {
+    return whatsappButtonsReply(body, [
+      { id: `edit_listing_${number}`, title: "Edit" },
+      { id: `close_listing_${number}`, title: "Close" },
+      { id: `share_listing_${number}`, title: "Share link" },
+    ], [
+      body,
+      "",
+      action(`edit listing ${number}`),
+      action(`close listing ${number}`),
+      action(`share listing ${number}`),
+    ].join("\n"));
+  }
+
+  if (listing.status === "paused") {
+    return whatsappButtonsReply(body, [
+      { id: `edit_listing_${number}`, title: "Edit" },
+      { id: `reopen_listing_${number}`, title: "Reopen" },
+      { id: `close_listing_${number}`, title: "Close" },
+    ], [
+      body,
+      "",
+      action(`edit listing ${number}`),
+      action(`reopen listing ${number}`),
+      action(`close listing ${number}`),
+    ].join("\n"));
+  }
+
+  return [
+    body,
+    "",
+    caption("This listing already has trade activity or is no longer live, so its details are locked."),
+  ].join("\n");
+}
+
+function shareListingReply(listing) {
+  const shareUrl = listingShareUrl(listing);
+  return [
+    title("Share listing"),
+    "",
+    labeled("Reference", displayReference(listing.listing_code, "listing")),
+    "",
+    shareUrl,
+    "",
+    caption("Long-press the link to copy it, or tap it to preview the listing card."),
   ].join("\n");
 }
 
@@ -402,11 +490,20 @@ async function handleSettings(text, user, session) {
       ].join("\n");
     }
 
-    return [
+    const body = [
       title("Please confirm"),
       "",
-      "Reply confirm to close this listing, or keep to leave it live.",
+      "Close this listing and remove it from search?",
     ].join("\n");
+    return whatsappButtonsReply(body, [
+      { id: "confirm", title: "Close listing" },
+      { id: "keep", title: "Keep live" },
+    ], [
+      body,
+      "",
+      `${action("confirm")} to close it`,
+      `${action("keep")} to leave it live`,
+    ].join("\n"));
   }
 
   if (session.current_step === "confirm_delete_payout") {
@@ -425,11 +522,27 @@ async function handleSettings(text, user, session) {
     return profileSettingsReply(user, "No changes made.");
   }
 
-  if (!command || /\b(profile|settings|account|menu|show|view)\b/.test(command)) {
+  const normalizedCommand = command.replace(/_/g, " ");
+
+  if (session.current_step === "listing_picker") {
+    const selected = normalizedCommand.match(/^(?:manage listing )?(\d+)$/);
+    if (selected) {
+      const number = Number(selected[1]);
+      const listing = await getMappedListing(user, context, number);
+      if (!listing) return profileSettingsReply(user, "Choose a valid listing.");
+      await upsertSession(user, user.whatsapp_phone, "settings", "listing_actions", {
+        ...context,
+        selected_listing_number: number,
+      });
+      return listingManagementReply(listing, number);
+    }
+  }
+
+  if (!normalizedCommand || /\b(profile|settings|account|menu|show|view)\b/.test(normalizedCommand)) {
     return profileSettingsReply(user);
   }
 
-  if (/\b(done|close|back|exit)\b/.test(command) && !/\b(offer|listing)\b/.test(command)) {
+  if (/\b(done|close|back|exit)\b/.test(normalizedCommand) && !/\b(offer|listing)\b/.test(normalizedCommand)) {
     await clearSession(user, user.whatsapp_phone);
     return mainMenu();
   }
@@ -437,15 +550,15 @@ async function handleSettings(text, user, session) {
   if (isBulkListingCancelIntent(text)) return requestBulkListingCancel(user);
   if (isBulkPayoutDeleteIntent(text)) return requestBulkPayoutDelete(user);
 
-  if (/\b(add|new)\b/.test(command) && /\b(payout|payment|bank|momo|details?)\b/.test(command)) {
-    const currency = parsePaymentCurrency(command);
+  if (/\b(add|new)\b/.test(normalizedCommand) && /\b(payout|payment|bank|momo|details?)\b/.test(normalizedCommand)) {
+    const currency = parsePaymentCurrency(normalizedCommand);
     return startPaymentProfileFlow(user, {
       return_flow: "settings",
       ...(currency ? { payment_currency: currency } : {}),
     });
   }
 
-  const editPayoutNumber = parseNumberedAction(command, ["edit", "update", "change"], ["payout", "payment", "bank", "momo", "details?"]);
+  const editPayoutNumber = parseNumberedAction(normalizedCommand, ["edit", "update", "change"], ["payout", "payment", "bank", "momo", "details?"]);
   if (editPayoutNumber) {
     const payoutId = context.payout_map?.[String(editPayoutNumber)];
     if (!payoutId) return profileSettingsReply(user, "Choose a valid payout number.");
@@ -473,7 +586,7 @@ async function handleSettings(text, user, session) {
     return paymentEditMenuPrompt(editContext);
   }
 
-  const deletePayoutNumber = parseNumberedAction(command, ["delete", "remove"], ["payout", "payment", "bank", "momo", "details?"]);
+  const deletePayoutNumber = parseNumberedAction(normalizedCommand, ["delete", "remove"], ["payout", "payment", "bank", "momo", "details?"]);
   if (deletePayoutNumber) {
     const payoutId = context.payout_map?.[String(deletePayoutNumber)];
     if (!payoutId) return profileSettingsReply(user, "Choose a valid payout number.");
@@ -501,7 +614,7 @@ async function handleSettings(text, user, session) {
     ].join("\n");
   }
 
-  const editListingNumber = parseNumberedAction(command, ["edit", "update", "change"], ["offer", "listing"]);
+  const editListingNumber = parseNumberedAction(normalizedCommand, ["edit", "modify", "update", "change"], ["offer", "listing"]);
   if (editListingNumber) {
     const listingId = context.listing_map?.[String(editListingNumber)];
     if (!listingId) return profileSettingsReply(user, "Choose a valid listing number.");
@@ -514,6 +627,7 @@ async function handleSettings(text, user, session) {
     if (!["active", "paused"].includes(existing.status)) {
       return profileSettingsReply(user, "That listing already has trade activity, so it cannot be edited.");
     }
+    const previousListingStatus = existing.status;
 
     await supabaseRequest(`listings?id=eq.${filterValue(listingId)}&owner_user_id=eq.${filterValue(user.id)}`, {
       method: "PATCH",
@@ -525,17 +639,36 @@ async function handleSettings(text, user, session) {
     return startListingEdit(user, {
       listing_code: existing.listing_code,
       editing_listing_id: existing.id,
-      previous_listing_status: existing.status,
+      previous_listing_status: previousListingStatus,
+      have_currency: existing.have_currency,
+      want_currency: existing.want_currency,
+      have_amount: existing.have_amount,
+      want_amount: existing.want_amount,
+      listing_type: existing.listing_type || "negotiable",
     }, [
       title("Edit listing"),
       caption("I paused it while you edit, so it will not appear in search."),
     ].join("\n"));
   }
 
+  const shareListingNumber = parseNumberedAction(normalizedCommand, ["share", "copy"], ["offer", "listing", "link"]);
+  if (shareListingNumber) {
+    const listing = await getMappedListing(user, context, shareListingNumber);
+    if (!listing) return profileSettingsReply(user, "Choose a valid listing number.");
+    if (listing.status !== "active") {
+      return [
+        title("Share link unavailable"),
+        "",
+        "Only live listings can be shared. Reopen this listing first.",
+      ].join("\n");
+    }
+    return shareListingReply(listing);
+  }
+
   const listingActions = [
-    { status: "paused", label: "paused", number: parseNumberedAction(command, ["pause"], ["offer", "listing"]) },
-    { status: "active", label: "reopened", number: parseNumberedAction(command, ["reopen", "resume", "activate"], ["offer", "listing"]) },
-    { status: "cancelled", label: "closed", number: parseNumberedAction(command, ["close", "delete", "remove", "cancel"], ["offer", "listing"]) },
+    { status: "paused", label: "paused", number: parseNumberedAction(normalizedCommand, ["pause"], ["offer", "listing"]) },
+    { status: "active", label: "reopened", number: parseNumberedAction(normalizedCommand, ["reopen", "resume", "activate"], ["offer", "listing"]) },
+    { status: "cancelled", label: "closed", number: parseNumberedAction(normalizedCommand, ["close", "delete", "remove", "cancel"], ["offer", "listing"]) },
   ];
   const listingAction = listingActions.find((entry) => entry.number);
   if (listingAction) {
@@ -615,12 +748,13 @@ async function handleSettings(text, user, session) {
 }
 
 function isSettingsCommand(text) {
-  const command = compactText(text);
+  const command = compactText(text).replace(/_/g, " ");
   if (!command) return true;
+  if (/^(manage|edit|modify|close|delete|remove|pause|reopen|resume|activate|share|copy) listing \d+$/.test(command)) return true;
   if (/\b(profile|settings|account|menu|show profile|view profile|payouts)\b/.test(command)) return true;
   if (/\b(done|close|back|exit)\b/.test(command) && !/\b(offer|listing)\b/.test(command)) return true;
   if (/\b(add|new|edit|update|change|delete|remove)\b.*\b(payout|payment|bank|momo|details?)\b/.test(command)) return true;
-  if (/\b(edit|update|change|pause|reopen|resume|activate|close|delete|remove|cancel)\b.*\b(offer|listing)\b/.test(command)) return true;
+  if (/\b(edit|modify|update|change|pause|reopen|resume|activate|close|delete|remove|cancel)\b.*\b(offer|listing)\b/.test(command)) return true;
   if (/^(yes|no|confirm|delete|remove)$/.test(command)) return true;
   return false;
 }

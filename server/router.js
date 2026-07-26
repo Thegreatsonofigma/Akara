@@ -44,10 +44,6 @@ const {
   verificationIntro,
   mainMenuListPayload,
   verificationStartButtonPayload,
-  greetingMenuBody,
-  sessionEndedMenuBody,
-  thanksReply,
-  wellbeingReply,
   supportReply,
   explainMissingListing,
   menuOptionLines,
@@ -201,7 +197,7 @@ async function resolveQuotedReply(text, user, incoming = {}) {
 // Actions whose written answer may be sent to the user as-is. Add
 // conversational actions here (e.g. "greeting", "thanks", "wellbeing") to let
 // the model speak for them too; functional actions must never be listed.
-const ANSWER_ACTIONS = new Set(["question", "unknown"]);
+const ANSWER_ACTIONS = new Set(["question", "unknown", "greeting", "thanks", "wellbeing"]);
 
 // Actions that do NOT interrupt the named flow: the flow's own handler knows
 // how to process them (numbers in a results list, confirmations in settings,
@@ -222,6 +218,38 @@ function actionInterruptsFlow(interpretedAction, flow) {
   return !(compatible && compatible.has(interpretedAction));
 }
 
+function conversationalReply(interpreted, text, user, session, options = {}) {
+  return scopedAssistantReply(text, user, {
+    modelAnswer: interpreted?.answer || "",
+    interpretedAction: interpreted?.action || "unknown",
+    activeFlow: session?.current_flow || "",
+    ...options,
+  });
+}
+
+function isConversationalInterpretation(interpreted) {
+  const actionName = interpreted?.action || "unknown";
+  if (["greeting", "thanks", "wellbeing", "question"].includes(actionName)) return true;
+  return actionName === "unknown" && Boolean(String(interpreted?.answer || "").trim());
+}
+
+function interpretedSettingsCommand(interpreted, text, session) {
+  if (interpreted?.action !== "settings_action") return text;
+  const details = interpreted.details || {};
+  const target = details.settings_target;
+  const operation = details.settings_operation;
+  if (!operation || target !== "listing") return text;
+
+  const selectedNumber = Number(
+    details.settings_item_number
+    || session?.context_json?.selected_listing_number
+    || 1
+  );
+  const number = Number.isInteger(selectedNumber) && selectedNumber > 0 ? selectedNumber : 1;
+  const normalizedOperation = operation === "delete" ? "close" : operation;
+  return `${normalizedOperation} listing ${number}`;
+}
+
 // Single routing brain. Takes the model interpretation of the message and
 // performs the matching action; every branch also keeps its deterministic
 // check (exact commands, codes, session flows), so routing still works when
@@ -230,7 +258,6 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const command = normalizeInteractiveCommand(text.trim().toLowerCase());
   const interpretedAction = interpreted?.action || "unknown";
   const details = interpreted?.details || {};
-  const answer = typeof interpreted?.answer === "string" ? interpreted.answer.trim() : "";
 
   if (isVerified(user) && !session?.current_flow && /^[1-6]$/.test(command)) {
     await clearSession(user, user.whatsapp_phone);
@@ -250,13 +277,6 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return supportReply();
   }
 
-  // The model's written answer is only the reply for conversational
-  // classifications. Functional actions (flows, listings, trades, settings,
-  // confirmations) always route through their handlers below, so an answer
-  // the model wrote anyway can never swallow flow state. Questions are
-  // answered without cancelling whatever flow is active.
-  if (answer && ANSWER_ACTIONS.has(interpretedAction)) return answer;
-
   if (!isVerified(user)) {
     if (interpretedAction === "view_profile" || isProfileCommand(text)) {
       return viewProfileReply(user);
@@ -275,19 +295,38 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     }
 
     if (["pending_input", "pending_review", "rejected", "suspended"].includes(user.verification_status)) {
-      if (interpretedAction === "question" || isAssistantQuestion(text)) return scopedAssistantReply(text, user);
+      if (isConversationalInterpretation(interpreted) || isAssistantQuestion(text)) {
+        if (["pending_input", "rejected"].includes(user.verification_status)) {
+          const answer = await conversationalReply(interpreted, text, user, session, {
+            suppressNudge: true,
+          });
+          return sendVerificationStartList(user, [
+            answer,
+            "",
+            caption("Complete verification to start exchanging with Akara."),
+          ].join("\n"));
+        }
+        return conversationalReply(interpreted, text, user, session);
+      }
       if (user.verification_status === "rejected") {
         return sendVerificationStartList(user, verificationIntro(user));
       }
       return verificationIntro(user);
     }
 
-    if (interpretedAction === "greeting" || isGreeting(text)) {
-      return sendVerificationStartList(user, verificationIntro(user));
-    }
-
-    if (interpretedAction === "question" || isAssistantQuestion(text)) {
-      return scopedAssistantReply(text, user);
+    if (isConversationalInterpretation(interpreted)
+        || isGreeting(text)
+        || isThanksMessage(text)
+        || isWellbeingQuestion(text)
+        || isAssistantQuestion(text)) {
+      const answer = await conversationalReply(interpreted, text, user, session, {
+        suppressNudge: true,
+      });
+      return sendVerificationStartList(user, [
+        answer,
+        "",
+        caption("Complete verification to start exchanging with Akara."),
+      ].join("\n"));
     }
 
     return sendVerificationStartList(user, [
@@ -342,20 +381,23 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return getMyListingsReply(user);
   }
 
-  if (!session?.current_flow && (interpretedAction === "thanks" || isSessionClosureMessage(text))) {
-    await clearSession(user, user.whatsapp_phone);
-    return sendMenuList(user);
+  if (!session?.current_flow && isSessionClosureMessage(text)) {
+    return conversationalReply(
+      { ...interpreted, action: "thanks" },
+      text,
+      user,
+      session
+    );
   }
-
-  // Thanks is unambiguous, so it gets a warm reply even mid-flow without
-  // losing the flow. Wellbeing stays later: "how far" doubles as a status
-  // check inside a deal room.
-  if (interpretedAction === "thanks" || isThanksMessage(text)) return thanksReply(user);
 
   const quotedReply = await resolveQuotedReply(text, user, incoming);
   if (quotedReply) return quotedReply;
 
-  if (session?.current_flow === "negotiation") {
+  if (session?.current_flow === "negotiation"
+      && !["greeting", "thanks", "wellbeing", "question"].includes(interpretedAction)
+      && !isGreeting(text)
+      && !isThanksMessage(text)
+      && !isWellbeingQuestion(text)) {
     return handleNegotiation(text, user, session);
   }
 
@@ -502,14 +544,21 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     session = null;
   }
 
-  // Greetings also release any flow: "hi" mid-flow reads as starting over,
-  // unless the greeting carries an actual exchange request.
-  const bareGreeting = (interpretedAction === "greeting" || isGreeting(text))
+  const bareGreeting = (
+    interpretedAction === "greeting"
+    || (interpretedAction === "unknown" && isGreeting(text))
+  )
     && !freshDirectional
     && !parseCurrencyAmountPairs(text).length;
-  if (session?.current_flow && bareGreeting) {
-    await clearSession(user, user.whatsapp_phone);
-    session = null;
+
+  // Conversation can happen around an active task. Answer it without
+  // consuming the message as a currency, amount, account number, or other
+  // flow input, and remind the user where they paused in one short line.
+  if (["greeting", "thanks", "wellbeing", "question"].includes(interpretedAction)
+      || bareGreeting
+      || isThanksMessage(text)
+      || isWellbeingQuestion(text)) {
+    return conversationalReply(interpreted, text, user, session);
   }
 
   if (session?.current_flow === "create_listing") {
@@ -529,11 +578,12 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   }
 
   if (session?.current_flow === "settings") {
-    if (interpretedAction === "unknown" && shouldLeaveSettingsForFreshCommand(text)) {
+    const settingsText = interpretedSettingsCommand(interpreted, text, session);
+    if (interpretedAction === "unknown" && shouldLeaveSettingsForFreshCommand(settingsText)) {
       await clearSession(user, user.whatsapp_phone);
       session = null;
-    } else if (isSettingsCommand(text) || ["settings_action", "add_payout", "flow_reply"].includes(interpretedAction)) {
-      return handleSettings(text, user, session);
+    } else if (isSettingsCommand(settingsText) || ["settings_action", "add_payout", "flow_reply"].includes(interpretedAction)) {
+      return handleSettings(settingsText, user, session);
     } else {
       await clearSession(user, user.whatsapp_phone);
       session = null;
@@ -567,15 +617,6 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     }
   }
 
-  if (interpretedAction === "wellbeing" || isWellbeingQuestion(text)){
-    return sendMenuList(user, wellbeingReply(user));
-  }
-
-  if (bareGreeting) {
-    await clearSession(user, user.whatsapp_phone);
-    return sendMenuList(user, greetingMenuBody(user));
-  }
-
   if (command === "verify" || command === "verify me" || interpretedAction === "verify") {
     return sendMenuList(user, [
       "You are already verified ✅",
@@ -602,7 +643,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const listingDetails = freshListingDetails;
   const hasCompleteListing = hasFreshCompleteListing;
   const settingsAction = interpretedAction === "settings_action"
-    || /\b(edit|update|change|delete|remove|pause|reopen|resume|activate|close|cancel)\b.*\b(payout|payment|bank|momo|details?|offer|listing)\b/.test(command);
+    || /\b(edit|modify|update|change|delete|remove|pause|reopen|resume|activate|close|cancel|share|copy)\b.*\b(payout|payment|bank|momo|details?|offer|listing)\b/.test(command);
 
   if (hasCompleteListing && (
     interpretedAction === "create_listing"
@@ -623,7 +664,11 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   if (settingsAction) {
     await profileSettingsReply(user);
     const settingsSession = await getSession(user.whatsapp_phone);
-    return handleSettings(text, user, settingsSession);
+    return handleSettings(
+      interpretedSettingsCommand(interpreted, text, settingsSession),
+      user,
+      settingsSession
+    );
   }
 
   if (command === "5" || intent === "settings") {
@@ -635,7 +680,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   }
 
   if (isRateQuestion(text)) {
-    return scopedAssistantReply(text, user);
+    return conversationalReply(interpreted, text, user, session);
   }
 
   // Loose intent words like "trades" and "get" appear in ordinary questions,
@@ -643,7 +688,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   // hijack it into a flow prompt.
   if (["question", "unknown", "flow_reply"].includes(interpretedAction) && isAssistantQuestion(text)
       && !isDemandSeekingQuestion(text)) {
-    return scopedAssistantReply(text, user);
+    return conversationalReply(interpreted, text, user, session);
   }
 
   if (command === "post" || command === "make offer" || command === "create listing" || command === "create offer" || command === "list offer" || command === "1" || interpretedAction === "create_listing" || intent === "create_listing") {
@@ -709,7 +754,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     ].join("\n");
   }
 
-  return scopedAssistantReply(text, user);
+  return conversationalReply(interpreted, text, user, session);
 }
 
 // Fresh actions that may interrupt payout collection. Deliberately narrower
@@ -741,6 +786,9 @@ async function routeMessage(text, user, session, incoming = {}) {
   if (command === "cancel" || command === "stop") {
     if (session?.current_flow === "deal_room") {
       return handleDealRoom("cancel trade", user, session, incoming);
+    }
+    if (session?.current_flow === "create_listing") {
+      return handleCreateListing("cancel", user, session);
     }
 
     await clearSession(user, user.whatsapp_phone);
@@ -824,18 +872,22 @@ function normalizeInteractiveCommand(command) {
 }
 
 async function routeInterpreted(interpreted, text, user, session, incoming = {}) {
-  // Verification is fully scripted: the model only classifies messages here,
-  // and nothing it writes is ever sent. Questions and outside requests get
-  // predetermined walls that repeat the current step's prompt, so "find
-  // offers" is never saved as someone's nationality and no AI-written answer
-  // can replace or decorate a verification reply.
+  // Verification fields remain scripted, but conversation can happen around
+  // them. A question or greeting is answered without being saved as KYC data,
+  // then the exact pending verification prompt is restored.
   if (session?.current_flow === "verification") {
     const stepPrompt = verificationStepPrompt(session.current_step, session.context_json || {});
-    if (!incoming.media?.id && interpreted.action === "question") {
+    if (!incoming.media?.id && (
+      ["question", "greeting", "thanks", "wellbeing"].includes(interpreted.action)
+      || isGreeting(text)
+      || isThanksMessage(text)
+      || isWellbeingQuestion(text)
+    )) {
+      const answer = await conversationalReply(interpreted, text, user, session, {
+        suppressNudge: true,
+      });
       return [
-        "Verification first 🔐",
-        "",
-        "I will answer questions properly once your verification is done. For now:",
+        answer,
         "",
         stepPrompt,
         "",
@@ -864,7 +916,12 @@ async function routeInterpreted(interpreted, text, user, session, incoming = {})
   // handler — a model-written answer here would claim progress that never
   // happened and the detail would never be saved.
   if (session?.current_flow === "payment_profile") {
-    if (interpreted.answer && interpreted.action === "question") return interpreted.answer;
+    if (["question", "greeting", "thanks", "wellbeing"].includes(interpreted.action)
+        || isGreeting(text)
+        || isThanksMessage(text)
+        || isWellbeingQuestion(text)) {
+      return conversationalReply(interpreted, text, user, session);
+    }
     if (!incoming.media?.id && paymentProfileInterrupt(interpreted.action)) {
       await clearSession(user, user.whatsapp_phone);
       return dispatchInterpretedAction(interpreted, text, user, null, incoming);

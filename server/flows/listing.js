@@ -421,7 +421,7 @@ async function startListingEdit(user, context, intro = title("Edit listing")) {
 }
 
 function listingEditMenu(context, intro = title("What do you want to edit?")) {
-  return [
+  const body = [
     intro,
     caption("Choose only the part you want to change."),
     "",
@@ -429,10 +429,16 @@ function listingEditMenu(context, intro = title("What do you want to edit?")) {
     `2. ${action("receive amount")} ${formatMoney(context.want_amount, context.want_currency)}`,
     `3. ${action("terms")} ${listingTypeLabel(context.listing_type || "negotiable")}`,
     `4. ${action("currencies")}`,
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "publish", title: "Publish" },
+    { id: "cancel", title: "Cancel" },
+  ], [
+    body,
     "",
     `${action("publish")} to continue with publication`,
     `${action("cancel")} to stop`,
-  ].join("\n");
+  ].join("\n"));
 }
 
 function listingEditChoice(text) {

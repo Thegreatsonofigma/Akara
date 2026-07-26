@@ -77,6 +77,14 @@ function lastButtonBody() {
   return buttonSends.length ? String(buttonSends[buttonSends.length - 1].payload?.body || "") : "";
 }
 
+function lastListPayload() {
+  return listSends.length ? listSends[listSends.length - 1].payload : null;
+}
+
+function lastButtonPayload() {
+  return buttonSends.length ? buttonSends[buttonSends.length - 1].payload : null;
+}
+
 const { buildReply } = require("../router");
 const { sendIdleMenus } = require("../app");
 const { findOrCreateUser } = require("../db/users");
@@ -86,6 +94,7 @@ const { clearHistory } = require("../nlp/history");
 const { config } = require("../config");
 const { findNigerianBanks } = require("../lib/coinprofile");
 const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
+const { normalizeMobileMoneyNumber } = require("../lib/mobile-number");
 
 const { __table, __reset } = fakeSupabase;
 
@@ -121,6 +130,9 @@ function fullInterpretation(partial) {
     want_currency: null,
     want_amount: null,
     payment_currency: null,
+    settings_target: null,
+    settings_operation: null,
+    settings_item_number: null,
     answer: null,
     ...partial,
   };
@@ -148,11 +160,15 @@ async function send(phone, text, { interpret, media, quotedText } = {}) {
   if (reply === null && buttonSends.length > beforeButtons) return lastButtonBody();
   if (reply && typeof reply === "object") {
     if (typeof reply.reply === "string") return reply.reply;
-    if (typeof reply.body === "string") return reply.body;
     if (reply.type === "whatsapp_list") {
       listSends.push({ to: phone, payload: reply.list });
       return reply.list?.body || reply.fallbackText || "";
     }
+    if (reply.type === "whatsapp_buttons") {
+      buttonSends.push({ to: phone, payload: reply });
+      return reply.body || reply.fallbackText || "";
+    }
+    if (typeof reply.body === "string") return reply.body;
     if (reply.type === "whatsapp_flow") return reply.fallbackText || reply.flow?.body || "";
     if (reply.type === "media") return reply.caption || reply.fallbackText || "";
   }
@@ -290,10 +306,46 @@ async function run() {
   check("find offers not listings", !intents.isMyListingsCommand("find offers"));
   check("delete all payouts not payouts view", !intents.isPayoutsCommand("delete all my payouts"));
 
+  // ---------- mobile money number formatting
+  scenario("mobile money number formatting");
+  check(
+    "Rwanda international number becomes local format",
+    normalizeMobileMoneyNumber("RWF", "+250 788 123 456").number === "0788123456"
+  );
+  check(
+    "Rwanda 00 country code becomes local format",
+    normalizeMobileMoneyNumber("RWF", "00250 788 123 456").number === "0788123456"
+  );
+  check(
+    "Kenya international number becomes local format",
+    normalizeMobileMoneyNumber("KES", "+254 712 345 678").number === "0712345678"
+  );
+  check(
+    "Ghana country code without plus becomes local format",
+    normalizeMobileMoneyNumber("GHS", "233 24 123 4567").number === "0241234567"
+  );
+  check(
+    "Cameroon international number becomes nine local digits",
+    normalizeMobileMoneyNumber("XAF", "+237 670 123 456").number === "670123456"
+  );
+  check(
+    "Nigeria international number becomes eleven local digits",
+    normalizeMobileMoneyNumber("NGN", "+234 803 123 4567").number === "08031234567"
+  );
+  check(
+    "short Rwanda number is rejected",
+    normalizeMobileMoneyNumber("RWF", "07881234").reason === "short"
+  );
+  check(
+    "wrong international country code is rejected",
+    normalizeMobileMoneyNumber("RWF", "+254 712 345 678").reason === "wrong_country"
+  );
+
   // ---------- unverified journey
   scenario("unverified journey");
   let reply = await send(ALICE, "hi");
-  check("greeting → verification intro", reply.includes("First, let's verify you"), reply);
+  check("unverified greeting is conversational", reply.includes("Hi Test") && reply.includes("Complete verification"), reply);
+  check("unverified greeting keeps verification CTA", lastButtonBody().includes("Complete verification"), lastButtonBody());
 
   reply = await send(ALICE, "my profile");
   check("unverified profile is scoped", reply.includes("*Your profile*"), reply);
@@ -339,8 +391,8 @@ async function run() {
   check("profile has no payout list", !reply.includes("*Payouts*"), reply);
 
   reply = await send(ALICE, "okay thanks");
-  check("session closure returns the menu", reply.includes("Choose what you want to do next on Akara"), reply);
-  check("session closure has no duplicate closure text", !reply.includes("Done") && !reply.includes("You're welcome"), reply);
+  check("session closure is conversational", reply.includes("You are welcome, Test"), reply);
+  check("session closure gives one useful nudge", reply.includes("Ready to exchange?") && !reply.includes("Choose what you want to do next"), reply);
   removeSeededDeals(completedProfileDeals);
 
   // ---------- inactivity menu nudge
@@ -389,6 +441,13 @@ async function run() {
 
 	  reply = await send(ALICE, "menu");
 	  check("menu includes get support", reply.includes("6. `get support`"), reply);
+	  const menuRows = lastListPayload()?.sections?.[0]?.rows || [];
+	  check(
+	    "menu descriptions use the user's voice",
+	    menuRows.find((row) => row.id === "make_offer")?.description === "I want to create a listing people can take."
+	      && menuRows.find((row) => row.id === "my_listings")?.description === "I want to manage the offers I posted.",
+	    JSON.stringify(menuRows)
+	  );
 
 	  reply = await send(ALICE, "6");
 	  check("typed menu 6 opens support email", reply.includes("mailto:support@tryakara.com"), reply);
@@ -453,10 +512,13 @@ async function run() {
   check("momo network asks for registered name", reply.includes("Quick option") && reply.includes("Promise Uchenna Steven"), reply);
   reply = await send(DORA, "option 1");
   check("verified name shortcut advances to momo number", reply.toLowerCase().includes("mobile money phone number"), reply);
-  reply = await send(DORA, "0788123456");
+  reply = await send(DORA, "+250 788 123 456");
   check("momo number advances to payout review", reply.includes("Review payout detail"), reply);
+  check("momo review shows normalized local number", reply.includes("0788123456") && !reply.includes("+250"), reply);
   reply = await send(DORA, "save payout");
   check("saving payout resumes listing review", reply.includes("Payout detail saved") && reply.includes("*Review listing*"), reply);
+  const doraRwfPayout = __table("payment_profiles").find((row) => row.user_id === doraRow.id && row.currency === "RWF");
+  check("saved momo number uses local digits only", doraRwfPayout?.momo_number_encrypted === "0788123456", JSON.stringify(doraRwfPayout));
 
   const TIER = "250700000005";
   const tierRow = seedVerifiedUser(TIER, "Tier One User");
@@ -532,6 +594,8 @@ async function run() {
   reply = await send(ALICE, "edit", { interpret: { action: "settings_action" } });
   check("review edit asks what to edit", reply.includes("*What do you want to edit?*"), reply);
   check("review edit offers amount choices", reply.includes("`send amount`") && reply.includes("`receive amount`"), reply);
+  const reviewEditButtonIds = (lastButtonPayload()?.buttons || []).map((button) => button.id);
+  check("review edit uses publish and cancel buttons", reviewEditButtonIds.join(",") === "publish,cancel", JSON.stringify(lastButtonPayload()));
 
   reply = await send(ALICE, "1");
   check("review edit number selects send amount", reply.includes("*Edit send amount*"), reply);
@@ -826,7 +890,7 @@ async function run() {
   check("update does not start add flow", !reply.includes("Choose where incoming payments should land"), reply);
   await send(ALICE, "cancel");
 
-  seedListing(aliceRow, {
+  const managedListing = seedListing(aliceRow, {
     code: "AKR-LIST-778",
     have_currency: "NGN",
     have_amount: 5000,
@@ -834,9 +898,50 @@ async function run() {
     want_amount: 5600,
     created_at: "2099-01-01T00:00:00.000Z",
   });
-  reply = await send(ALICE, "cancel listing 1");
-  check("single listing cancel asks to confirm", reply.includes("Close AKR-LIST-778?"), reply);
+
+  reply = await send(ALICE, "my listings");
+  check("my listings opens a listing picker", lastListPayload()?.button === "Manage listing", JSON.stringify(lastListPayload()));
+  check("listing picker maps the first listing", lastListPayload()?.sections?.[0]?.rows?.[0]?.id === "manage_listing_1", JSON.stringify(lastListPayload()));
+
+  reply = await send(ALICE, "manage_listing_1");
+  let listingButtonIds = (lastButtonPayload()?.buttons || []).map((button) => button.id);
+  check("selected live listing has action buttons", listingButtonIds.join(",") === "edit_listing_1,close_listing_1,share_listing_1", JSON.stringify(lastButtonPayload()));
+
+  reply = await send(ALICE, "help me pass this one around", {
+    interpret: {
+      action: "settings_action",
+      settings_target: "listing",
+      settings_operation: "share",
+      settings_item_number: 1,
+    },
+  });
+  check("implied share request returns the previewable listing link", reply.includes("/l/AKR-LIST-778") && reply.includes("Long-press"), reply);
+
+  reply = await send(ALICE, "I need to change what I am asking for on this one", {
+    interpret: {
+      action: "settings_action",
+      settings_target: "listing",
+      settings_operation: "edit",
+      settings_item_number: 1,
+    },
+  });
+  check("implied edit request opens focused choices", reply.includes("*What do you want to edit?*") && reply.includes("send amount"), reply);
+  check("implied edit request immediately hides the live listing", managedListing.status === "paused", JSON.stringify(managedListing));
+  await send(ALICE, "cancel");
+  check("cancelling edit restores the listing", managedListing.status === "active", JSON.stringify(managedListing));
+
+  reply = await send(ALICE, "abeg I no want make people see this offer again", {
+    interpret: {
+      action: "settings_action",
+      settings_target: "listing",
+      settings_operation: "close",
+      settings_item_number: 1,
+    },
+  });
+  check("implied close request asks to confirm", reply.includes("Close AKR-LIST-778?"), reply);
   check("single listing cancel prompt is scoped", !reply.includes("Manage payout details") && !reply.includes("*Payouts*"), reply);
+  listingButtonIds = (lastButtonPayload()?.buttons || []).map((button) => button.id);
+  check("single listing confirmation uses reply buttons", listingButtonIds.join(",") === "confirm,keep", JSON.stringify(lastButtonPayload()));
 
   reply = await send(ALICE, "confirm");
   check("single listing cancel completes", reply.includes("*Listing closed*") && reply.includes("off search"), reply);
@@ -895,14 +1000,46 @@ async function run() {
   scenario("small talk");
   reply = await send(ALICE, "make offer");
   reply = await send(ALICE, "thanks");
-  check("thanks mid-flow is warm", reply.includes("You're welcome"), reply);
+  check("thanks mid-flow is warm", reply.includes("You are welcome"), reply);
   check("thanks keeps the flow", (await sessionFlow(ALICE)) === "create_listing");
   reply = await send(ALICE, "hi");
-  check("greeting mid-flow restarts with the menu list", reply.includes("Choose what you want to do next on Akara"), JSON.stringify({ reply, body: lastListBody() }));
-  check("greeting releases flow", (await sessionFlow(ALICE)) === null);
+  check("greeting mid-flow sounds natural", reply.includes("Hi Test") && reply.includes("listing draft is still open"), reply);
+  check("greeting preserves the active flow", (await sessionFlow(ALICE)) === "create_listing");
 
   reply = await send(ALICE, "how far");
-  check("wellbeing reply", reply.includes("I dey alright"), JSON.stringify({ reply, body: lastListBody() }));
+  check("wellbeing reply uses natural Pidgin", reply.includes("I dey good"), reply);
+  check("wellbeing keeps the active flow", (await sessionFlow(ALICE)) === "create_listing");
+
+  reply = await send(ALICE, "what's good?", {
+    interpret: { action: "greeting", answer: "Hi there! I am here and ready." },
+  });
+  check("model small talk is personalized locally", reply.includes("Hi Test!"), reply);
+  check("model small talk gets a contextual nudge", reply.includes("listing draft is still open"), reply);
+
+  reply = await send(ALICE, "why is the sky blue?", {
+    interpret: {
+      action: "question",
+      answer: "Sunlight scatters in the atmosphere, and blue light scatters more strongly than most visible colours.",
+    },
+  });
+  check("simple general question is answered directly", reply.includes("blue light scatters"), reply);
+  check("general answer preserves the listing flow", (await sessionFlow(ALICE)) === "create_listing");
+
+  reply = await send(ALICE, "what is the NGN to RWF rate?", {
+    interpret: { action: "question", answer: "The live rate is 1 NGN to 999 RWF." },
+  });
+  check("model cannot invent a live exchange rate", !reply.includes("999 RWF"), reply);
+  check("rate question uses Akara market data", reply.includes("Akara") && (reply.includes("peer-set") || reply.includes("Market Rate")), reply);
+  await send(ALICE, "cancel");
+
+  reply = await send(ALICE, "write me a full university thesis", {
+    interpret: {
+      action: "unknown",
+      answer: "I cannot write a full thesis here, but I can help you shape a focused outline.",
+    },
+  });
+  check("out-of-scope request gets a useful answer", reply.includes("focused outline"), reply);
+  check("out-of-scope answer returns gently to Akara", reply.includes("Ready to exchange?"), reply);
 
   // ---------- reserve without context
   scenario("reserve guidance");
@@ -951,14 +1088,21 @@ async function run() {
   const editListing = seedListing(aliceRow, { code: "AKR-LIST-888", have_currency: "NGN", have_amount: 20000, want_currency: "RWF", want_amount: 22000 });
   reply = await send(ALICE, "i want to edit my listing", { interpret: { action: "settings_action" } });
   check("fresh edit skips review screen", !reply.includes("*Review listing*"), reply);
-  check("fresh edit opens the edit handler", reply.includes("*Edit listing*") && reply.includes("What currency do you have?"), reply);
+  check("fresh edit opens focused edit choices", reply.includes("*What do you want to edit?*") && reply.includes("send amount"), reply);
   check("fresh edit pauses the listing", __table("listings").find((row) => row.id === editListing.id)?.status === "paused", reply);
   check("fresh edit enters create flow", (await sessionFlow(ALICE)) === "create_listing");
 
-  reply = await send(ALICE, "ngn");
-  reply = await send(ALICE, "rwf");
+  reply = await send(ALICE, "1");
   reply = await send(ALICE, "25000");
+  check("send amount edit keeps the other listing details", reply.includes("*Review listing*") && reply.includes("25,000 NGN") && reply.includes("22,000 RWF"), reply);
+
+  reply = await send(ALICE, "edit");
+  reply = await send(ALICE, "2");
   reply = await send(ALICE, "70000");
+  check("receive amount edit keeps the updated send amount", reply.includes("*Review listing*") && reply.includes("25,000 NGN") && reply.includes("70,000 RWF"), reply);
+
+  reply = await send(ALICE, "edit");
+  reply = await send(ALICE, "3");
   reply = await send(ALICE, "fixed");
   check("edited draft re-previews", reply.includes("*Review listing*") && reply.includes("25,000 NGN"), reply);
 
