@@ -46,6 +46,7 @@ const {
 const NEGOTIATION_REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 const autoMatchRequeueTasks = new Map();
 let smartMatchingSweepTask = null;
+let pendingMatchReminderSweepTask = null;
 let smartMatchingSweepOffset = 0;
 
 function promptTextPart(value) {
@@ -1361,6 +1362,261 @@ async function runSmartMatchingSweep(options = {}) {
       smartMatchingSweepTask = null;
     });
   return smartMatchingSweepTask;
+}
+
+async function automaticReminderWasSent(entityType, entityId, userId, eventName, since = "") {
+  const rows = await supabaseRequest(
+    [
+      "audit_events?select=id",
+      `entity_type=eq.${entityType}`,
+      `entity_id=eq.${filterValue(entityId)}`,
+      `actor_user_id=eq.${filterValue(userId)}`,
+      `event_name=eq.${eventName}`,
+      since ? `created_at=gte.${filterValue(since)}` : "",
+      "limit=1",
+    ].filter(Boolean).join("&")
+  );
+  return rows.length > 0;
+}
+
+async function recordAutomaticReminder(entityType, entityId, userId, eventName, payload = {}) {
+  await supabaseRequest("audit_events", {
+    method: "POST",
+    body: JSON.stringify({
+      actor_user_id: userId,
+      actor_type: "system",
+      entity_type: entityType,
+      entity_id: entityId,
+      event_name: eventName,
+      event_payload: payload,
+    }),
+  });
+}
+
+function automaticDealReminderReply(deal, role, nowMs) {
+  const maker = role === "maker";
+  const youSend = maker
+    ? { amount: deal.have_amount, currency: deal.have_currency }
+    : { amount: deal.want_amount, currency: deal.want_currency };
+  const youReceive = maker
+    ? { amount: deal.want_amount, currency: deal.want_currency }
+    : { amount: deal.have_amount, currency: deal.have_currency };
+  const remainingMs = Math.max(0, new Date(deal.reservation_expires_at || 0).getTime() - nowMs);
+  const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+  const body = [
+    title("Your matched exchange is waiting"),
+    caption("Akara found and locked a compatible reciprocal offer while your listing was live."),
+    "",
+    labeled("Transaction ref", displayReference(deal.deal_code, "deal")),
+    labeled("You send", formatMoney(youSend.amount, youSend.currency)),
+    labeled("You receive", formatMoney(youReceive.amount, youReceive.currency)),
+    labeled("Time left", `${remainingMinutes} min`),
+    "",
+    "Open the trade to continue, or cancel before sending money if you no longer want it.",
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "trade_status", title: "View trade" },
+    { id: "paid", title: "Paid" },
+    { id: "cancel", title: "Cancel" },
+  ]);
+}
+
+function automaticNegotiationReminderReply(listing, offer, targetIsOwner) {
+  const body = [
+    title("A matched rate is waiting"),
+    caption(targetIsOwner
+      ? "A compatible peer is waiting for your decision."
+      : "The listing owner sent a counter proposal and is waiting for your decision."),
+    "",
+    labeled("Listing", displayReference(listing.listing_code, "listing")),
+    labeled(
+      targetIsOwner ? "They send you" : "You send",
+      formatMoney(offerWantAmount(listing, offer), listing.want_currency)
+    ),
+    labeled(
+      targetIsOwner ? "You send them" : "You receive",
+      formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)
+    ),
+    "",
+    "Accept, suggest another value, or pass so Akara can check the next compatible listing.",
+  ].join("\n");
+  return whatsappButtonsReply(body, [
+    { id: "accept", title: "Accept" },
+    { id: "counter", title: "Counter" },
+    { id: "decline", title: "Pass" },
+  ]);
+}
+
+async function performPendingMatchReminderSweep(options = {}) {
+  const nowMs = Number(options.nowMs) || Date.now();
+  const reminderAfterMs = Number(options.reminderAfterMs) || config.matchingResponseReminderMs;
+  const cutoffMs = nowMs - reminderAfterMs;
+  const eventLookback = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+  const result = { scanned: 0, sent: 0, skipped: 0, failed: 0 };
+
+  const [dealMatchEvents, negotiationMatchEvents] = await Promise.all([
+    supabaseRequest([
+      "audit_events?select=entity_id,created_at",
+      "entity_type=eq.deal",
+      "event_name=eq.smart_match_cleared",
+      `created_at=gte.${filterValue(eventLookback)}`,
+      "order=created_at.desc",
+      "limit=500",
+    ].join("&")),
+    supabaseRequest([
+      "audit_events?select=entity_id,created_at",
+      "entity_type=eq.negotiable_offer",
+      "event_name=eq.smart_match_negotiation_suggested",
+      `created_at=gte.${filterValue(eventLookback)}`,
+      "order=created_at.desc",
+      "limit=500",
+    ].join("&")),
+  ]);
+
+  const dealIds = [...new Set(dealMatchEvents.map((row) => row.entity_id).filter(Boolean))];
+  if (dealIds.length) {
+    const deals = await supabaseRequest([
+      "deals?select=id,deal_code,maker_user_id,taker_user_id,have_currency,want_currency,have_amount,want_amount,status,maker_sent_at,taker_sent_at,maker_received_at,taker_received_at,reservation_expires_at,created_at",
+      `id=in.(${dealIds.map(filterValue).join(",")})`,
+      "status=in.(reserved,instructions_viewed,maker_sent,taker_sent,partially_confirmed)",
+      `limit=${Math.min(500, dealIds.length)}`,
+    ].join("&"));
+
+    for (const deal of deals) {
+      const createdAt = new Date(deal.created_at || 0).getTime();
+      const expiresAt = new Date(deal.reservation_expires_at || 0).getTime();
+      if (!createdAt || createdAt > cutoffMs || (expiresAt && expiresAt <= nowMs)) {
+        result.skipped += 1;
+        continue;
+      }
+
+      const parties = [
+        {
+          role: "maker",
+          userId: deal.maker_user_id,
+          acted: Boolean(deal.maker_sent_at || deal.maker_received_at),
+        },
+        {
+          role: "taker",
+          userId: deal.taker_user_id,
+          acted: Boolean(deal.taker_sent_at || deal.taker_received_at),
+        },
+      ];
+
+      for (const party of parties) {
+        result.scanned += 1;
+        if (party.acted || !party.userId) {
+          result.skipped += 1;
+          continue;
+        }
+        try {
+          const alreadySent = await automaticReminderWasSent(
+            "deal",
+            deal.id,
+            party.userId,
+            "automatic_match_reminder_sent"
+          );
+          if (alreadySent) {
+            result.skipped += 1;
+            continue;
+          }
+          const user = await getUserById(party.userId);
+          if (!user?.whatsapp_phone) {
+            result.skipped += 1;
+            continue;
+          }
+          await sendWhatsAppButtons(
+            user.whatsapp_phone,
+            automaticDealReminderReply(deal, party.role, nowMs)
+          );
+          await recordAutomaticReminder(
+            "deal",
+            deal.id,
+            party.userId,
+            "automatic_match_reminder_sent",
+            { role: party.role, reminder_after_ms: reminderAfterMs }
+          );
+          result.sent += 1;
+        } catch (error) {
+          result.failed += 1;
+          console.error(`[matching] automatic reminder failed for ${deal.deal_code}/${party.role}: ${error.message}`);
+        }
+      }
+    }
+  }
+
+  const offerIds = [...new Set(negotiationMatchEvents.map((row) => row.entity_id).filter(Boolean))];
+  if (offerIds.length) {
+    const offers = await supabaseRequest([
+      "negotiable_offers?select=id,listing_id,offering_user_id,offered_amount,offered_currency,receive_amount,receive_currency,status,message,created_at,updated_at",
+      `id=in.(${offerIds.map(filterValue).join(",")})`,
+      "status=in.(pending,countered)",
+      `limit=${Math.min(500, offerIds.length)}`,
+    ].join("&"));
+
+    for (const offer of offers) {
+      result.scanned += 1;
+      const waitingSince = new Date(offer.updated_at || offer.created_at || 0).getTime();
+      if (!waitingSince || waitingSince > cutoffMs) {
+        result.skipped += 1;
+        continue;
+      }
+      try {
+        const listing = await getActiveListingById(offer.listing_id);
+        if (!listing) {
+          result.skipped += 1;
+          continue;
+        }
+        const targetIsOwner = offer.status === "pending";
+        const targetUserId = targetIsOwner ? listing.owner_user_id : offer.offering_user_id;
+        const alreadySent = await automaticReminderWasSent(
+          "negotiable_offer",
+          offer.id,
+          targetUserId,
+          "automatic_negotiation_reminder_sent",
+          new Date(waitingSince).toISOString()
+        );
+        if (alreadySent) {
+          result.skipped += 1;
+          continue;
+        }
+        const target = await getUserById(targetUserId);
+        if (!target?.whatsapp_phone) {
+          result.skipped += 1;
+          continue;
+        }
+        await sendWhatsAppButtons(
+          target.whatsapp_phone,
+          automaticNegotiationReminderReply(listing, offer, targetIsOwner)
+        );
+        await recordAutomaticReminder(
+          "negotiable_offer",
+          offer.id,
+          targetUserId,
+          "automatic_negotiation_reminder_sent",
+          {
+            waiting_for: targetIsOwner ? "listing_owner" : "offering_user",
+            reminder_after_ms: reminderAfterMs,
+          }
+        );
+        result.sent += 1;
+      } catch (error) {
+        result.failed += 1;
+        console.error(`[matching] automatic negotiation reminder failed for ${offer.id}: ${error.message}`);
+      }
+    }
+  }
+
+  return result;
+}
+
+async function runPendingMatchReminderSweep(options = {}) {
+  if (pendingMatchReminderSweepTask) return pendingMatchReminderSweepTask;
+  pendingMatchReminderSweepTask = performPendingMatchReminderSweep(options)
+    .finally(() => {
+      pendingMatchReminderSweepTask = null;
+    });
+  return pendingMatchReminderSweepTask;
 }
 
 async function rematchLiveListing(listingId, excludeListingIds = []) {
@@ -2777,4 +3033,5 @@ module.exports = {
   handleNegotiation,
   requeueCancelledAutoMatch,
   runSmartMatchingSweep,
+  runPendingMatchReminderSweep,
 };

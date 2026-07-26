@@ -95,6 +95,10 @@ const config = {
     500,
     positiveIntegerEnv("AKARA_MATCHING_SWEEP_BATCH_SIZE", 100)
   ),
+  matchingResponseReminderMs: Math.max(
+    60000,
+    positiveIntegerEnv("AKARA_MATCHING_RESPONSE_REMINDER_MS", 5 * 60 * 1000)
+  ),
   matchingPairCooldownMs: Math.max(
     60000,
     positiveIntegerEnv("AKARA_MATCHING_PAIR_COOLDOWN_MS", 30 * 60 * 1000)
