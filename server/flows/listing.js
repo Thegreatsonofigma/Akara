@@ -1067,13 +1067,14 @@ async function recordMatchPairExclusion(leftListingId, rightListingId, actorUser
 async function openNegotiationListingIds() {
   const rows = await supabaseRequest(
     [
-      "negotiable_offers?select=id,listing_id,message,status,created_at",
+      "negotiable_offers?select=id,listing_id,offering_user_id,message,status,created_at",
       "status=in.(pending,countered)",
       "order=created_at.desc",
       "limit=1000",
     ].join("&")
   );
   const ids = new Set();
+  const userIds = new Set();
   for (const row of rows) {
     const createdAt = new Date(row.created_at || 0).getTime();
     const expired = createdAt > 0 && createdAt + config.negotiationWindowMs <= Date.now();
@@ -1092,9 +1093,23 @@ async function openNegotiationListingIds() {
       continue;
     }
     if (row.listing_id) ids.add(row.listing_id);
+    if (row.offering_user_id) userIds.add(row.offering_user_id);
     const sourceId = reciprocalSourceListingId(row);
     if (sourceId) ids.add(sourceId);
   }
+  if (ids.size) {
+    const listings = await supabaseRequest(
+      [
+        "listings?select=id,owner_user_id",
+        `id=in.(${[...ids].map(filterValue).join(",")})`,
+        `limit=${ids.size}`,
+      ].join("&")
+    );
+    for (const listing of listings) {
+      if (listing.owner_user_id) userIds.add(listing.owner_user_id);
+    }
+  }
+  ids.userIds = userIds;
   return ids;
 }
 
@@ -1110,7 +1125,7 @@ async function findReciprocalPlan(user, listing, kind, options = {}) {
   const usersById = await matchingUsersById(rows);
   const exclusions = await excludedReciprocalListingIds(listing.id);
   const busyListings = await openNegotiationListingIds();
-  if (busyListings.has(listing.id)) return null;
+  if (busyListings.has(listing.id) || busyListings.userIds?.has(user.id)) return null;
   for (const id of options.excludeListingIds || []) exclusions.add(id);
 
   const plans = rows
@@ -1118,6 +1133,7 @@ async function findReciprocalPlan(user, listing, kind, options = {}) {
       candidate.owner_user_id !== user.id
       && !exclusions.has(candidate.id)
       && !busyListings.has(candidate.id)
+      && !busyListings.userIds?.has(candidate.owner_user_id)
       && matchingOwnerIsEligible(usersById[candidate.owner_user_id])
     ))
     .map((candidate) => (
@@ -1154,9 +1170,12 @@ function reciprocalSourceListingId(offer) {
 }
 
 function reciprocalNegotiationOwnerReply(listing, offer, plan = {}) {
+  const wideGap = Number(plan.gap_percent || 0) > 20;
   const body = [
     title("Potential exchange"),
-    caption("The currencies and values line up. Akara suggested a fair middle rate for both sides."),
+    caption(wideGap
+      ? "The currencies match, but your requested rates differ. Review this starting point and negotiate before opening a trade."
+      : "The currencies match and the requested rates are close. Akara suggested a starting point for both sides."),
     "",
     labeled("They send you", formatMoney(offerWantAmount(listing, offer), listing.want_currency)),
     labeled("You send them", formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)),
@@ -1174,9 +1193,12 @@ function reciprocalNegotiationOwnerReply(listing, offer, plan = {}) {
 }
 
 function reciprocalNegotiationPublisherReply(listing, offer, plan = {}) {
+  const wideGap = Number(plan.gap_percent || 0) > 20;
   const body = [
     title("Listing live · negotiation opened"),
-    caption("I found a close reciprocal listing and suggested a fair middle rate."),
+    caption(wideGap
+      ? "I found a reciprocal listing. Your requested rates differ, so I opened a negotiation instead of a trade."
+      : "I found a close reciprocal listing and suggested a starting point."),
     "",
     labeled("You propose", formatMoney(offerWantAmount(listing, offer), listing.want_currency)),
     labeled("You receive", formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)),
