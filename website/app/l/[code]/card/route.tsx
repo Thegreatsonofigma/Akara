@@ -40,7 +40,9 @@ export async function GET(
   ]);
   const haveAmount = formatListingAmount(listing.have_amount);
   const wantAmount = formatListingAmount(listing.want_amount);
-  const backgroundUrl = new URL("/cards/listing-card-base.webp", request.url).toString();
+  // next/og cannot decode WebP assets inside ImageResponse on Vercel.
+  // Keep a lossless PNG renderer source so the final dynamic response remains PNG.
+  const backgroundUrl = new URL("/cards/listing-card-base.png", request.url).toString();
 
   return new ImageResponse(
     (

@@ -814,6 +814,7 @@ async function run() {
   check(
     "listing share page includes the dynamic card preview and WhatsApp deep link",
     previewPage.includes('property="og:image" content="https://akara-share.example/l/AKR-LIST-321/card')
+      && previewPage.includes('property="og:image:type" content="image/png"')
       && previewPage.includes("https://wa.me/")
       && previewPage.includes("open%20AKR-LIST-321"),
     previewPage.slice(0, 600)

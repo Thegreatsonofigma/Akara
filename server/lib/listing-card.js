@@ -965,10 +965,11 @@ function listingSharePage(listing) {
 }
 
 async function handleListingCardRoute(req, res, url) {
-  const match = url.pathname.match(/^\/l\/([^/.]+)(?:\.(svg|png))?$/i);
+  const match = url.pathname.match(/^\/l\/([^/.]+)(?:(?:\.(svg|png))|(?:\/(card)))?$/i);
   if (!match) return false;
 
-  const [, rawCode, ext] = match;
+  const [, rawCode, fileExtension, cardRoute] = match;
+  const ext = cardRoute ? "png" : fileExtension;
   const listing = await getListingByCode(decodeURIComponent(rawCode));
   if (!listing) {
     res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });

@@ -2,6 +2,8 @@ const { config, getShareUrl } = require("../config");
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { moneyNumber, positiveMoney } = require("../lib/format");
 
+const LISTING_PREVIEW_REVISION = "preview-v2";
+
 function referencePrefix(entity) {
   return entity === "listing" ? "AKR-LIST" : "AKR-TXN";
 }
@@ -77,6 +79,7 @@ function extractDealCode(input) {
 function listingVersionQuery(listing) {
   if (!listing || typeof listing !== "object") return "";
   const parts = [
+    LISTING_PREVIEW_REVISION,
     listing.have_currency,
     listing.want_currency,
     moneyNumber(listing.have_amount),

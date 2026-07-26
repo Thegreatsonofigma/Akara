@@ -1,5 +1,7 @@
 import "server-only";
 
+const LISTING_PREVIEW_REVISION = "preview-v2";
+
 export type PublicListing = {
   listing_code: string;
   have_currency: string;
@@ -37,6 +39,7 @@ export function formatListingAmount(value: number | string) {
 
 export function listingCardVersion(listing: PublicListing) {
   return [
+    LISTING_PREVIEW_REVISION,
     listing.have_currency,
     listing.want_currency,
     listing.have_amount,
