@@ -776,6 +776,8 @@ async function publishListing(user, context) {
 
     const autoMatchReply = await tryAutoMatchListing(user, listing);
     if (autoMatchReply) return autoMatchReply;
+    const negotiationReply = await tryStartReciprocalNegotiation(user, listing);
+    if (negotiationReply) return negotiationReply;
 
     await clearSession(user, user.whatsapp_phone);
     const shareUrl = listingShareUrl(listing);
@@ -792,6 +794,8 @@ async function publishListing(user, context) {
     const deliveryReply = await deliverListingLive(user, listing, listingCode, liveMessage);
     const autoMatchReply = await tryAutoMatchListing(user, listing);
     if (autoMatchReply) return deliveryReply ? [deliveryReply, autoMatchReply] : autoMatchReply;
+    const negotiationReply = await tryStartReciprocalNegotiation(user, listing);
+    if (negotiationReply) return deliveryReply ? [deliveryReply, negotiationReply] : negotiationReply;
 
     await clearSession(user, user.whatsapp_phone);
     return deliveryReply;
@@ -799,6 +803,8 @@ async function publishListing(user, context) {
 
   const autoMatchReply = await tryAutoMatchListing(user, listing);
   if (autoMatchReply) return autoMatchReply;
+  const negotiationReply = await tryStartReciprocalNegotiation(user, listing);
+  if (negotiationReply) return negotiationReply;
 
   await clearSession(user, user.whatsapp_phone);
   const shareUrl = listingShareUrl(listing);
@@ -847,7 +853,8 @@ async function publishBulkListings(user, listings) {
   let matchedListingId = null;
   let matchReply = null;
   for (const listing of createdListings) {
-    matchReply = await tryAutoMatchListing(user, listing);
+    matchReply = await tryAutoMatchListing(user, listing)
+      || await tryStartReciprocalNegotiation(user, listing);
     if (matchReply) {
       matchedListingId = listing.id;
       break;
@@ -942,6 +949,107 @@ function reciprocalRatesCross(candidate, listing) {
   if (!Number.isFinite(candidateOffersPerListingUnit) || !Number.isFinite(listingRequiresPerUnit)) return false;
   if (candidateOffersPerListingUnit <= 0 || listingRequiresPerUnit <= 0) return false;
   return candidateOffersPerListingUnit + Number.EPSILON >= listingRequiresPerUnit;
+}
+
+async function findNegotiableReciprocalListing(user, listing) {
+  if (listing.listing_type !== "negotiable") return null;
+  const rows = await supabaseRequest(
+    [
+      "listings?select=id,listing_code,owner_user_id,have_currency,want_currency,have_amount,want_amount,rate,listing_type,created_at",
+      "status=eq.active",
+      "listing_type=eq.negotiable",
+      `have_currency=eq.${filterValue(listing.want_currency)}`,
+      `want_currency=eq.${filterValue(listing.have_currency)}`,
+      `owner_user_id=neq.${filterValue(user.id)}`,
+      "order=created_at.asc",
+      "limit=20",
+    ].join("&")
+  );
+
+  return rows.find((candidate) => (
+    candidate.owner_user_id !== user.id
+    && !reciprocalRatesCross(candidate, listing)
+  )) || null;
+}
+
+function reciprocalSourceListingId(offer) {
+  return String(offer?.message || "").match(/^reciprocal_source:([0-9a-f-]{36})$/i)?.[1] || null;
+}
+
+function reciprocalNegotiationOwnerReply(listing, offer) {
+  const body = [
+    title("Potential exchange"),
+    caption("The currencies line up, but the posted rates need agreement."),
+    "",
+    labeled("They send you", formatMoney(offerWantAmount(listing, offer), listing.want_currency)),
+    labeled("You send them", formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)),
+    "",
+    "Accept these values, suggest new ones, or pass.",
+  ].join("\n");
+  return {
+    ...whatsappButtonsReply(body, [
+      { id: "accept", title: "Accept" },
+      { id: "counter", title: "Counter" },
+      { id: "decline", title: "Decline" },
+    ]),
+    preserveLayout: true,
+  };
+}
+
+function reciprocalNegotiationPublisherReply(listing, offer) {
+  const body = [
+    title("Listing live · negotiation opened"),
+    caption("I found the reverse currency pair, but the posted rates need agreement."),
+    "",
+    labeled("You propose", formatMoney(offerWantAmount(listing, offer), listing.want_currency)),
+    labeled("You receive", formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)),
+    "",
+    "I sent this proposal to the listing owner. You can send different values here at any time.",
+  ].join("\n");
+  return {
+    ...whatsappButtonsReply(body, [
+      { id: "change_proposal", title: "Change proposal" },
+      { id: "remind", title: "Remind" },
+      { id: "cancel", title: "Withdraw" },
+    ]),
+    preserveLayout: true,
+  };
+}
+
+async function tryStartReciprocalNegotiation(user, sourceListing) {
+  const candidate = await findNegotiableReciprocalListing(user, sourceListing);
+  if (!candidate) return null;
+  if (await linkedAccountBlock(user, candidate)) return null;
+
+  const offer = await createNegotiationOffer(user, candidate, {
+    want_amount: Math.min(moneyNumber(sourceListing.have_amount), moneyNumber(candidate.want_amount)),
+    have_amount: Math.min(moneyNumber(sourceListing.want_amount), moneyNumber(candidate.have_amount)),
+    message: `reciprocal_source:${sourceListing.id}`,
+  });
+
+  await upsertSession(user, user.whatsapp_phone, "negotiation", "taker_waiting", {
+    offer_id: offer.id,
+    listing_id: candidate.id,
+    reciprocal_source_listing_id: sourceListing.id,
+  });
+
+  const owner = await getUserById(candidate.owner_user_id);
+  if (owner?.whatsapp_phone) {
+    await upsertSession(owner, owner.whatsapp_phone, "negotiation", "owner_review", {
+      offer_id: offer.id,
+      listing_id: candidate.id,
+      taker_user_id: user.id,
+      reciprocal_source_listing_id: sourceListing.id,
+    });
+    sendWhatsAppButtons(
+      owner.whatsapp_phone,
+      reciprocalNegotiationOwnerReply(candidate, offer)
+    ).catch((error) => {
+      console.error(`[negotiation] reciprocal notice failed: ${error.message}`);
+    });
+  }
+
+  return reciprocalNegotiationPublisherReply(candidate, offer);
 }
 
 async function tryAutoMatchListing(user, listing) {
@@ -1276,6 +1384,26 @@ async function openListingTrade(user, listing, options = {}) {
   const listingHaveAmount = moneyNumber(listing.have_amount);
   const listingWantAmount = moneyNumber(listing.want_amount);
   const isPartialFill = dealHaveAmount < listingHaveAmount || dealWantAmount < listingWantAmount;
+  let reciprocalSourceListing = null;
+
+  if (options.reciprocalSourceListingId) {
+    const sourceRows = await supabaseRequest(
+      [
+        "listings?select=id,listing_code,owner_user_id,have_currency,want_currency,have_amount,want_amount,listing_type,status",
+        `id=eq.${filterValue(options.reciprocalSourceListingId)}`,
+        `owner_user_id=eq.${filterValue(user.id)}`,
+        "status=eq.active",
+        "limit=1",
+      ].join("&")
+    );
+    reciprocalSourceListing = sourceRows[0] || null;
+    if (!reciprocalSourceListing) {
+      return "Your reciprocal listing is no longer live. Review your listings before accepting these terms.";
+    }
+    if (!listingHasEnoughForDeal(reciprocalSourceListing, dealWantAmount, dealHaveAmount)) {
+      return "These proposed values now exceed your live listing. Send a smaller counter proposal.";
+    }
+  }
 
   if (isPartialFill && listing.listing_type !== "negotiable") {
     return "This fixed-rate listing can only open with the posted terms. Ask the owner to edit it, or choose another offer.";
@@ -1354,6 +1482,12 @@ async function openListingTrade(user, listing, options = {}) {
     method: "PATCH",
     body: JSON.stringify({ status: "reserved" }),
   });
+  if (reciprocalSourceListing) {
+    await supabaseRequest(`listings?id=eq.${filterValue(reciprocalSourceListing.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "reserved" }),
+    });
+  }
 
   const deal = deals[0];
   await attachQuoteToDeal(lockedQuote, deal.id);
@@ -1377,8 +1511,18 @@ async function openListingTrade(user, listing, options = {}) {
   const residualListing = shouldCreateResidualListing
     ? await createResidualListing(listing, dealHaveAmount, dealWantAmount)
     : null;
+  const reciprocalResidualListing = reciprocalSourceListing
+    && (
+      dealWantAmount < moneyNumber(reciprocalSourceListing.have_amount)
+      || dealHaveAmount < moneyNumber(reciprocalSourceListing.want_amount)
+    )
+    ? await createResidualListing(reciprocalSourceListing, dealWantAmount, dealHaveAmount)
+    : null;
   const residualLine = residualListing
     ? `${formatMoney(residualListing.have_amount, residualListing.have_currency)} for ${formatMoney(residualListing.want_amount, residualListing.want_currency)}`
+    : "";
+  const reciprocalResidualLine = reciprocalResidualListing
+    ? `${formatMoney(reciprocalResidualListing.have_amount, reciprocalResidualListing.have_currency)} for ${formatMoney(reciprocalResidualListing.want_amount, reciprocalResidualListing.want_currency)}`
     : "";
 
   await upsertSession(user, user.whatsapp_phone, "deal_room", "reserved", {
@@ -1410,6 +1554,7 @@ async function openListingTrade(user, listing, options = {}) {
     paymentProfile: makerReceiveProfile,
     expectedProfile: takerReceiveProfile,
     firstInstruction: "Name check: the account name should match the verified person you are trading with.",
+    residualLine: reciprocalSourceListing ? reciprocalResidualLine : "",
     quoteCode: lockedQuote?.quote_code || "",
   });
 
@@ -1499,6 +1644,18 @@ async function handleNegotiation(text, user, session) {
   const context = session.context_json || {};
   const command = compactText(text);
   const messageProposal = parseCurrencyAmountPairs(text).length || parseBareNegotiationAmount(text);
+
+  if (["change proposal", "change_proposal"].includes(command)) {
+    const offer = context.offer_id ? await getNegotiableOfferById(context.offer_id) : null;
+    const listing = offer ? await getActiveListingById(offer.listing_id) : null;
+    if (!offer || !listing) return "That proposal is no longer available.";
+    return [
+      title("Change proposal"),
+      caption("Send one amount or both values in a natural sentence."),
+      "",
+      `Example: I can send ${formatMoney(offerWantAmount(listing, offer), listing.want_currency)} for ${formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)}.`,
+    ].join("\n");
+  }
 
   if (isReminderIntent(command) && context.offer_id) {
     const offer = await getNegotiableOfferById(context.offer_id);
@@ -1622,6 +1779,7 @@ async function handleNegotiation(text, user, session) {
         force: true,
         want_amount: offer.offered_amount,
         have_amount: offer.receive_amount,
+        reciprocalSourceListingId: reciprocalSourceListingId(offer),
         negotiableOfferId: offer.id,
         quoteType: "negotiated",
         returnRole: "maker",
@@ -1666,7 +1824,7 @@ async function handleNegotiation(text, user, session) {
       body: JSON.stringify({
         status: "countered",
         ...patch,
-        message: text,
+        message: reciprocalSourceListingId(offer) ? offer.message : text,
       }),
     }))[0] || { ...offer, ...patch };
 
@@ -1726,6 +1884,7 @@ async function handleNegotiation(text, user, session) {
         force: true,
         want_amount: offer.offered_amount,
         have_amount: offer.receive_amount,
+        reciprocalSourceListingId: reciprocalSourceListingId(offer),
         negotiableOfferId: offer.id,
         quoteType: "negotiated",
         takerIntro: "You accepted the counter proposal.",
@@ -1754,7 +1913,7 @@ async function handleNegotiation(text, user, session) {
       body: JSON.stringify({
         status: "pending",
         ...patch,
-        message: text,
+        message: reciprocalSourceListingId(offer) ? offer.message : text,
       }),
     }))[0] || { ...offer, ...patch };
     const owner = await getUserById(listing.owner_user_id);

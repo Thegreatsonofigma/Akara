@@ -43,19 +43,42 @@ function normalizeAmount(raw) {
 }
 
 function findAmountCandidates(text) {
-  const matches = String(text || "").match(/(?:[₦₵]\s*)?\d[\d,\s]*(?:\.\d+)?\s*[kKmM]?/g) || [];
+  // Keep each visible number independent. In particular, never let line
+  // breaks combine a receipt date, phone number and reference into one value.
+  const matches = String(text || "").match(
+    /(?:[₦₵][ \t]*)?(?:\d{1,3}(?:[,\u00a0 ]\d{3})+|\d+)(?:\.\d+)?[ \t]*[kKmM]?/g
+  ) || [];
   return matches
     .map(normalizeAmount)
     .filter((amount) => amount && amount >= 1)
     .sort((a, b) => b - a);
 }
 
+function findCurrencyAmountCandidates(text) {
+  const amountToken = "(?:\\d{1,3}(?:[,\\u00a0 ]\\d{3})+|\\d+)(?:\\.\\d+)?";
+  const currencyToken = "(?:NGN|RWF|XAF|KES|KSH|GHS|NAIRA|₦|₵)";
+  const patterns = [
+    new RegExp(`${currencyToken}[ \\t]*(${amountToken})`, "gi"),
+    new RegExp(`(${amountToken})[ \\t]*${currencyToken}`, "gi"),
+  ];
+  const amounts = [];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(String(text || "")))) {
+      const amount = normalizeAmount(match[1]);
+      if (amount) amounts.push(amount);
+    }
+  }
+  return [...new Set(amounts)];
+}
+
 function parseReceiptEvidenceText(text) {
   const amounts = findAmountCandidates(text);
-  const amount = amounts[0] || null;
+  const currencyAmounts = findCurrencyAmountCandidates(text);
+  const amount = currencyAmounts[0] || amounts[0] || null;
   return {
     amount,
-    amounts,
+    amounts: [...new Set([...currencyAmounts, ...amounts])],
     currency: detectCurrency(text),
     paymentStatus: detectPaymentStatus(text),
   };

@@ -862,6 +862,31 @@ async function run() {
   );
   check("receipt parser rejects failed payment status", receiptCheck.ocr_status === "mismatch", JSON.stringify(receiptCheck));
 
+  const mpesaReceiptText = [
+    "Transaction Successful",
+    "Jul 25, 2026",
+    "2:17 PM",
+    "Amount Paid",
+    "KES 13,000.00",
+    "Sent to 0704030385",
+    "Phone Number 0704030385",
+    "Amount KES 13,000.00",
+    "Transaction ID QX3W7ZL0J7",
+    "Completed",
+    "You have successfully sent KES 13,000.00 to 0704030385.",
+  ].join("\n");
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 12000, currency: "KES" },
+    { text: mpesaReceiptText }
+  );
+  check(
+    "M-Pesa mismatch reports the currency-labelled amount rather than phone or date digits",
+    receiptCheck.ocr_status === "mismatch"
+      && receiptCheck.ocr_mismatch_reason.includes("13,000 KES")
+      && !receiptCheck.ocr_mismatch_reason.includes("704,030,385"),
+    JSON.stringify(receiptCheck)
+  );
+
   receiptCheck = await analyzeReceiptEvidence(
     { amount: 80000, currency: "NGN" },
     { media: { id: "m1", filename: "receipt.png" } }
@@ -1949,6 +1974,77 @@ async function run() {
   );
   await send(ALICE, "cancel trade");
   await send(ALICE, "cancel");
+
+  scenario("non-crossing negotiable reciprocal");
+  for (const phone of [ALICE, BOB]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
+  for (const listing of __table("listings")) {
+    const isTestPair = ["NGN", "RWF"].includes(listing.have_currency)
+      && ["NGN", "RWF"].includes(listing.want_currency);
+    if (isTestPair && listing.status === "active") listing.status = "closed";
+  }
+  const negotiationCandidate = seedListing(bobRow, {
+    code: "AKR-LIST-201",
+    have_currency: "NGN",
+    have_amount: 100000,
+    want_currency: "RWF",
+    want_amount: 200000,
+    listing_type: "negotiable",
+  });
+  const buttonsBeforeReciprocalNegotiation = buttonSends.length;
+  reply = await send(ALICE, "I have 100000 RWF and want 100000 NGN");
+  check("non-crossing reciprocal request previews listing", reply.includes("*Review listing*"), reply);
+  reply = await send(ALICE, "publish");
+  check(
+    "non-crossing negotiable pair opens negotiation instead of a trade",
+    reply.includes("*Listing live · negotiation opened*") && !reply.includes("Akara Trade opened"),
+    reply
+  );
+  const reciprocalOffer = __table("negotiable_offers").at(-1);
+  const reciprocalSourceId = String(reciprocalOffer?.message || "").match(/^reciprocal_source:([0-9a-f-]{36})$/i)?.[1];
+  const reciprocalSource = __table("listings").find((row) => row.id === reciprocalSourceId);
+  check(
+    "reciprocal negotiation keeps both listings live until acceptance",
+    negotiationCandidate.status === "active" && reciprocalSource?.status === "active",
+    JSON.stringify({ negotiationCandidate, reciprocalSource })
+  );
+  check(
+    "reciprocal negotiation proposes values both listings can cover",
+    Number(reciprocalOffer?.offered_amount) === 100000
+      && Number(reciprocalOffer?.receive_amount) === 100000,
+    JSON.stringify(reciprocalOffer)
+  );
+  const ownerNegotiationButtons = buttonSends
+    .slice(buttonsBeforeReciprocalNegotiation)
+    .find((entry) => entry.to === BOB)?.payload?.buttons || [];
+  check(
+    "reciprocal listing owner receives accept counter and decline buttons",
+    ownerNegotiationButtons.map((button) => button.id).join(",") === "accept,counter,decline",
+    JSON.stringify(ownerNegotiationButtons)
+  );
+  check(
+    "publisher can change remind or withdraw the proposal with buttons",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "change_proposal,remind,cancel",
+    JSON.stringify(lastButtonPayload())
+  );
+  check("both users enter the same negotiation", (await sessionFlow(ALICE)) === "negotiation" && (await sessionFlow(BOB)) === "negotiation");
+  reply = await send(ALICE, "change_proposal");
+  check("change proposal button explains how to send new values", reply.includes("*Change proposal*") && reply.includes("Example:"), reply);
+  reply = await send(BOB, "accept");
+  check("accepting a reciprocal proposal opens the trade room", reply.includes("Akara Trade opened ✅"), reply);
+  check(
+    "accepted reciprocal negotiation removes both source listings from search",
+    reciprocalSource?.status === "reserved" && negotiationCandidate.status === "reserved",
+    JSON.stringify({ reciprocalSource, negotiationCandidate })
+  );
+  const reciprocalDeal = __table("deals").at(-1);
+  reciprocalDeal.status = "cancelled";
+  for (const phone of [ALICE, BOB]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
 
   // ---------- thanks and wellbeing
   scenario("small talk");
