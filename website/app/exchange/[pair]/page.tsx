@@ -134,10 +134,10 @@ export default async function ExchangeCorridorPage({ params }: PageProps) {
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <Link
-                  href={SITE.whatsappHref}
+                  href={SITE.waitlistHref}
                   className="rounded-full bg-[#9DFF1E] px-6 py-3 text-sm font-black uppercase tracking-[0.18em] text-black transition hover:bg-white"
                 >
-                  Try on WhatsApp
+                  Join waitlist
                 </Link>
                 <Link
                   href="/support"

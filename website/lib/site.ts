@@ -46,6 +46,7 @@ export const SITE = {
   supportEmail: "support@tryakara.com",
   fallbackEmail: "tryakara@gmail.com",
   complaintsEmail: "complaints@tryakara.com",
+  waitlistHref: "/#waitlist",
   whatsappLabel: "[Official WhatsApp Number]",
   whatsappHref: "https://wa.me/",
 } as const;

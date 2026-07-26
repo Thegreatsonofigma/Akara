@@ -191,16 +191,16 @@ export default async function GuidePage({ params }: GuidePageProps) {
             <aside className="space-y-5">
               <div className="rounded-[28px] border border-brand/30 bg-brand p-6 text-black">
                 <p className="text-sm font-black uppercase tracking-[0.22em]">
-                  Start in WhatsApp
+                  Private launch
                 </p>
                 <p className="mt-4 text-2xl font-black leading-tight">
-                  Find offers, list your rate, and track the trade from chat.
+                  Join the list for first access to Akara on WhatsApp.
                 </p>
                 <a
-                  href={SITE.whatsappHref}
+                  href={SITE.waitlistHref}
                   className="mt-6 inline-flex rounded-full bg-black px-5 py-3 text-sm font-black text-white"
                 >
-                  Try Akara
+                  Join waitlist
                 </a>
               </div>
 

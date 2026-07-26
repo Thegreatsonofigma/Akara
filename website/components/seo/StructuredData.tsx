@@ -76,8 +76,8 @@ const jsonLd = [
     })),
     availableChannel: {
       "@type": "ServiceChannel",
-      serviceUrl: SITE.whatsappHref,
-      name: "WhatsApp",
+      serviceUrl: `${SITE.url}/#waitlist`,
+      name: "Akara private launch waitlist",
     },
     description: `${SITE.name} helps verified users discover, list, coordinate, and track peer-to-peer currency exchange arrangements on WhatsApp. ${NO_CUSTODY_LINE}`,
     hasOfferCatalog: {
