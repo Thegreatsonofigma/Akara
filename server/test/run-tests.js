@@ -57,12 +57,17 @@ const whatsapp = require("../lib/whatsapp");
 const { containsPreviewableUrl } = whatsapp;
 const listSends = [];
 const buttonSends = [];
+const mediaSends = [];
 whatsapp.sendWhatsAppList = async (to, payload) => {
   listSends.push({ to, payload });
   return { logged: true };
 };
 whatsapp.sendWhatsAppButtons = async (to, payload) => {
   buttonSends.push({ to, payload });
+  return { logged: true };
+};
+whatsapp.sendWhatsAppMedia = async (to, mediaType, mediaId, caption = "", filename = "") => {
+  mediaSends.push({ to, mediaType, mediaId, caption, filename });
   return { logged: true };
 };
 whatsapp.getWhatsAppMedia = async () => ({
@@ -85,6 +90,10 @@ function lastListPayload() {
 
 function lastButtonPayload() {
   return buttonSends.length ? buttonSends[buttonSends.length - 1].payload : null;
+}
+
+function lastMediaPayload() {
+  return mediaSends.length ? mediaSends[mediaSends.length - 1] : null;
 }
 
 const { buildReply } = require("../router");
@@ -1233,7 +1242,14 @@ async function run() {
 
   reply = await send(ALICE, "manage_listing_1");
   let listingButtonIds = (lastButtonPayload()?.buttons || []).map((button) => button.id);
-  check("selected live listing has action buttons", listingButtonIds.join(",") === "edit_listing_1,close_listing_1,share_listing_1", JSON.stringify(lastButtonPayload()));
+  check("selected live listing has only management action buttons", listingButtonIds.join(",") === "edit_listing_1,close_listing_1", JSON.stringify(lastButtonPayload()));
+  check(
+    "selected live listing sends its current swap card with the listing link",
+    lastMediaPayload()?.mediaType === "image"
+      && lastMediaPayload()?.caption?.includes("AKR-LIST-778")
+      && lastMediaPayload()?.caption?.includes("https://akara-share.example/l/AKR-LIST-778"),
+    JSON.stringify(lastMediaPayload())
+  );
 
   reply = await send(ALICE, "help me pass this one around", {
     interpret: {

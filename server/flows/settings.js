@@ -19,6 +19,7 @@ const { getUserListings, displayReference, listingShareUrl, listingStatusLabel }
 const { getCompletedTradeCount } = require("../db/deals");
 const { getLatestUserReputation } = require("../db/integrity");
 const { mainMenu, mainMenuListPayload } = require("../messages/copy");
+const { sendListingCard } = require("../lib/listing-card");
 const {
   startPaymentProfileFlow,
   paymentEditMenuPrompt,
@@ -518,13 +519,11 @@ async function listingManagementReply(listing, number) {
     return whatsappButtonsReply(body, [
       { id: `edit_listing_${number}`, title: "Edit" },
       { id: `close_listing_${number}`, title: "Close" },
-      { id: `share_listing_${number}`, title: "Share link" },
     ], [
       body,
       "",
       action(`edit listing ${number}`),
       action(`close listing ${number}`),
-      action(`share listing ${number}`),
     ].join("\n"));
   }
 
@@ -551,6 +550,27 @@ async function listingManagementReply(listing, number) {
     "",
     caption("This listing already has trade activity or is no longer live, so its details are locked."),
   ].join("\n");
+}
+
+async function selectedListingReply(user, listing, number) {
+  const reference = displayReference(listing.listing_code, "listing");
+  const shareUrl = listing.status === "active" ? listingShareUrl(listing) : "";
+  const cardCaption = [
+    title(reference),
+    shareUrl ? title("Listing link") : "",
+    shareUrl,
+    shareUrl
+      ? caption("Share this link to open the listing in Akara.")
+      : caption(`Status: ${listingStatusLabel(listing.status)}`),
+  ].filter(Boolean).join("\n\n");
+
+  try {
+    await sendListingCard(user.whatsapp_phone, listing, cardCaption);
+  } catch (error) {
+    console.error(`[settings] listing card send failed for ${reference}: ${error.message}`);
+  }
+
+  return listingManagementReply(listing, number);
 }
 
 function shareListingReply(listing) {
@@ -767,7 +787,7 @@ async function handleSettings(text, user, session) {
         ...context,
         selected_listing_number: number,
       });
-      return listingManagementReply(listing, number);
+      return selectedListingReply(user, listing, number);
     }
   }
 
