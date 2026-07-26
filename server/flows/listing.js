@@ -2154,7 +2154,9 @@ async function openListingTrade(user, listing, options = {}) {
   const dealWantAmount = moneyNumber(options.want_amount || listing.want_amount);
   const listingHaveAmount = moneyNumber(listing.have_amount);
   const listingWantAmount = moneyNumber(listing.want_amount);
-  const isPartialFill = dealHaveAmount < listingHaveAmount || dealWantAmount < listingWantAmount;
+  const isPartialFill = dealHaveAmount < listingHaveAmount;
+  const termsChanged = dealHaveAmount !== listingHaveAmount || dealWantAmount !== listingWantAmount;
+  const hasAcceptedNegotiation = Boolean(options.negotiableOfferId);
   let reciprocalSourceListing = null;
 
   if (options.reciprocalSourceListingId) {
@@ -2171,16 +2173,27 @@ async function openListingTrade(user, listing, options = {}) {
     if (!reciprocalSourceListing) {
       return "Your reciprocal listing is no longer live. Review your listings before accepting these terms.";
     }
-    if (!listingHasEnoughForDeal(reciprocalSourceListing, dealWantAmount, dealHaveAmount)) {
-      return "These proposed values now exceed your live listing. Send a smaller counter proposal.";
+    if (
+      !hasAcceptedNegotiation
+      && !listingHasEnoughForDeal(reciprocalSourceListing, dealWantAmount, dealHaveAmount)
+    ) {
+      return [
+        title("Your listing cannot cover this proposal"),
+        "",
+        `You have ${formatMoney(reciprocalSourceListing.have_amount, reciprocalSourceListing.have_currency)} available in that listing.`,
+        `Counter with ${formatMoney(reciprocalSourceListing.have_amount, reciprocalSourceListing.have_currency)} or less.`,
+      ].join("\n");
     }
   }
 
-  if (isPartialFill && listing.listing_type !== "negotiable") {
+  if (termsChanged && listing.listing_type !== "negotiable") {
     return "This fixed-rate listing can only open with the posted terms. Ask the owner to edit it, or choose another offer.";
   }
 
-  if (!listingHasEnoughForDeal(listing, dealHaveAmount, dealWantAmount)) {
+  if (
+    !hasAcceptedNegotiation
+    && !listingHasEnoughForDeal(listing, dealHaveAmount, dealWantAmount)
+  ) {
     return "This offer cannot cover that value. Choose another offer or send a smaller proposal.";
   }
 
