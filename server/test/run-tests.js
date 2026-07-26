@@ -1772,6 +1772,46 @@ async function run() {
     if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
   }
 
+  // ---------- a counter may improve what the listing owner receives
+  scenario("executable higher counter");
+  const higherCounterMakerPhone = "250700000071";
+  const higherCounterTakerPhone = "250700000072";
+  const higherCounterMaker = seedVerifiedUser(higherCounterMakerPhone, "Higher Counter Maker");
+  const higherCounterTaker = seedVerifiedUser(higherCounterTakerPhone, "Higher Counter Taker");
+  for (const currency of ["NGN", "GHS"]) {
+    seedPayout(higherCounterMaker, currency);
+    seedPayout(higherCounterTaker, currency);
+  }
+  const higherCounterListing = seedListing(higherCounterMaker, {
+    code: "AKR-LIST-650",
+    have_currency: "NGN",
+    have_amount: 45000,
+    want_currency: "GHS",
+    want_amount: 50000,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(higherCounterTakerPhone, "open AKR-LIST-650");
+  check("higher-counter fixture opens negotiation", reply.includes("*Negotiable listing*"), reply);
+  reply = await send(higherCounterTakerPhone, "I can send 50,000 GHS for 45,000 NGN");
+  check("initial executable proposal reaches the owner", reply.includes("50,000 GHS") && reply.includes("45,000 NGN"), reply);
+  reply = await send(higherCounterMakerPhone, "I need 65,000 GHS");
+  check(
+    "owner can request more without increasing the amount they send",
+    reply.includes("*Counter sent*") && reply.includes("65,000 GHS") && reply.includes("45,000 NGN"),
+    reply
+  );
+  reply = await send(higherCounterTakerPhone, "accept");
+  const higherCounterDeal = __table("deals").find((row) => row.listing_id === higherCounterListing.id);
+  check(
+    "the exact counter shown to the user can be accepted",
+    reply.includes("Akara Trade opened ✅")
+      && Number(higherCounterDeal?.want_amount) === 65000
+      && Number(higherCounterDeal?.have_amount) === 45000,
+    JSON.stringify({ reply, higherCounterDeal })
+  );
+  if (higherCounterDeal) higherCounterDeal.status = "closed";
+
   // ---------- natural owner counter with a leading rejection
   scenario("natural-language counter");
   const naturalCounterListing = seedListing(charlieRow, {
