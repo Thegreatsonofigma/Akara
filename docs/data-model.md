@@ -239,3 +239,54 @@ Allowed statuses:
 - event_payload
 - created_at
 
+## integrity_records
+
+- event_key
+- record_type
+- entity_type
+- entity_id
+- subject_ref
+- payload_version
+- payload_snapshot
+- salt
+- commitment_hash
+- previous_commitment_hash
+- status
+- batch_id
+- leaf_index
+- merkle_proof
+- anchored_at
+
+## stellar_anchor_batches
+
+- network
+- merkle_root
+- leaf_count
+- status
+- source_account
+- transaction_hash
+- transaction_xdr
+- ledger_sequence
+- explorer_url
+- attempt_count
+- next_retry_at
+- last_error
+- submitted_at
+- confirmed_at
+
+## user_reputation_snapshots
+
+- user_id
+- trigger_type
+- trigger_entity_id
+- completed_trades
+- cancelled_trades
+- expired_trades
+- completion_rate
+- disputes_total
+- open_disputes
+- resolved_disputes
+- reputation_band
+- previous_commitment_hash
+- commitment_hash
+- integrity_record_id

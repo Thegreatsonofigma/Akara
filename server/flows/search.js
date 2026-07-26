@@ -19,12 +19,35 @@ const {
   isMoreResultsIntent,
 } = require("../nlp/intents");
 const { isVerified } = require("../db/users");
+const { getLatestUserReputations } = require("../db/integrity");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { displayReference, listingShareUrl, listingTypeLabel } = require("../db/listings");
 const { explainMissingListing, mainMenu, currencyListReply } = require("../messages/copy");
 const { prepareListingPreview, reserveListing } = require("./listing");
 
 const LISTING_SEARCH_SELECT = "listings?select=id,listing_code,owner_user_id,have_currency,want_currency,have_amount,want_amount,rate,listing_type,created_at,users!listings_owner_user_id_fkey(completed_deals_count,verification_status)";
+
+async function attachOwnerReputations(listings) {
+  const reputations = await getLatestUserReputations(
+    listings.map((listing) => listing.owner_user_id)
+  );
+  return listings.map((listing) => ({
+    ...listing,
+    owner_reputation: reputations[listing.owner_user_id] || null,
+  }));
+}
+
+function ownerRecordLabel(listing) {
+  const owner = listing.users || {};
+  const reputation = listing.owner_reputation;
+  if (!reputation) return `${owner.completed_deals_count || 0} completed`;
+
+  const band = `${reputation.reputation_band[0].toUpperCase()}${reputation.reputation_band.slice(1)}`;
+  const integrity = reputation.integrity_status === "verified"
+    ? "integrity checked"
+    : "record updating";
+  return `${band} · ${reputation.completed_trades} completed · ${integrity}`;
+}
 
 function searchPromptForStep(step, details = {}) {
   if (step === "have_currency") {
@@ -115,10 +138,10 @@ async function showNeedOnlyOfferMatches(user, context) {
     "limit=20",
   ].filter(Boolean).join("&");
 
-  const listings = sortNeedOnlyListings(
+  const listings = await attachOwnerReputations(sortNeedOnlyListings(
     (await supabaseRequest(query)).filter((listing) => listing.owner_user_id !== user.id),
     requestedAmount,
-  ).slice(0, 5);
+  ).slice(0, 5));
 
   if (!listings.length) {
     await upsertSession(user, user.whatsapp_phone, "find_offer", "have_currency", {
@@ -161,7 +184,6 @@ async function showNeedOnlyOfferMatches(user, context) {
     caption("Negotiable offers appear first when they can cover what you need."),
     "",
     listings.map((listing, index) => {
-      const owner = listing.users || {};
       const shareUrl = listingShareUrl(listing.listing_code);
       return [
         title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
@@ -169,7 +191,7 @@ async function showNeedOnlyOfferMatches(user, context) {
         labeled("They want", formatMoney(listing.want_amount, listing.want_currency)),
         labeled("Rate", `1 ${listing.want_currency} gets ${(Number(listing.have_amount) / Number(listing.want_amount)).toFixed(4)} ${listing.have_currency}`),
         labeled("Terms", listingTypeLabel(listing.listing_type)),
-        labeled("Owner record", `${owner.completed_deals_count || 0} completed`),
+        labeled("Owner record", ownerRecordLabel(listing)),
         shareUrl ? labeled("Link", shareUrl) : "",
       ].filter(Boolean).join("\n");
     }).join("\n\n"),
@@ -213,10 +235,10 @@ async function showHaveOnlyOfferMatches(user, context) {
     "limit=20",
   ].filter(Boolean).join("&");
 
-  const listings = sortHaveOnlyListings(
+  const listings = await attachOwnerReputations(sortHaveOnlyListings(
     (await supabaseRequest(query)).filter((listing) => listing.owner_user_id !== user.id),
     offeredAmount,
-  ).slice(0, 5);
+  ).slice(0, 5));
 
   if (!listings.length) {
     await upsertSession(user, user.whatsapp_phone, "find_offer", "want_currency", {
@@ -259,7 +281,6 @@ async function showHaveOnlyOfferMatches(user, context) {
     caption("Negotiable offers appear first when your amount can cover what they need."),
     "",
     listings.map((listing, index) => {
-      const owner = listing.users || {};
       const shareUrl = listingShareUrl(listing.listing_code);
       return [
         title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
@@ -267,7 +288,7 @@ async function showHaveOnlyOfferMatches(user, context) {
         labeled("They want", formatMoney(listing.want_amount, listing.want_currency)),
         labeled("Rate", `1 ${listing.want_currency} gets ${(Number(listing.have_amount) / Number(listing.want_amount)).toFixed(4)} ${listing.have_currency}`),
         labeled("Terms", listingTypeLabel(listing.listing_type)),
-        labeled("Owner record", `${owner.completed_deals_count || 0} completed`),
+        labeled("Owner record", ownerRecordLabel(listing)),
         shareUrl ? labeled("Link", shareUrl) : "",
       ].filter(Boolean).join("\n");
     }).join("\n\n"),
@@ -384,6 +405,7 @@ async function showOfferMatches(user, context) {
     ].join("\n");
   }
 
+  listings = await attachOwnerReputations(listings);
   const resultMap = {};
   listings.forEach((listing, index) => {
     resultMap[String(index + 1)] = listing.id;
@@ -399,7 +421,6 @@ async function showOfferMatches(user, context) {
     subheading,
     "",
     listings.map((listing, index) => {
-      const owner = listing.users || {};
       const shareUrl = listingShareUrl(listing.listing_code);
       return [
         title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
@@ -407,7 +428,7 @@ async function showOfferMatches(user, context) {
         labeled("You send", formatMoney(listing.want_amount, listing.want_currency)),
         labeled("Rate", `1 ${listing.want_currency} gets ${(Number(listing.have_amount) / Number(listing.want_amount)).toFixed(4)} ${listing.have_currency}`),
         labeled("Terms", listingTypeLabel(listing.listing_type)),
-        labeled("Owner record", `${owner.completed_deals_count || 0} completed`),
+        labeled("Owner record", ownerRecordLabel(listing)),
         shareUrl ? labeled("Link", shareUrl) : "",
       ].filter(Boolean).join("\n");
     }).join("\n\n"),
@@ -433,7 +454,7 @@ async function showBrowseOffers(user, currency = null, page = 0) {
 
   const fetched = (await supabaseRequest(query)).filter((listing) => listing.owner_user_id !== user.id);
   const hasMore = fetched.length > pageSize;
-  const listings = fetched.slice(0, pageSize);
+  const listings = await attachOwnerReputations(fetched.slice(0, pageSize));
   if (!listings.length) {
     return [
       title(page ? "No more offers" : currency ? `No ${currency} offers yet` : "No live offers yet"),
@@ -467,14 +488,13 @@ async function showBrowseOffers(user, currency = null, page = 0) {
     caption(page ? `Page ${page + 1}. Choose a number if one works for you.` : "Choose a number if one works for you."),
     "",
     listings.map((listing, index) => {
-      const owner = listing.users || {};
       return [
         title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
         labeled("They offer", formatMoney(listing.have_amount, listing.have_currency)),
         labeled("They want", formatMoney(listing.want_amount, listing.want_currency)),
         labeled("Rate", `1 ${listing.want_currency} gets ${(Number(listing.have_amount) / Number(listing.want_amount)).toFixed(4)} ${listing.have_currency}`),
         labeled("Terms", listingTypeLabel(listing.listing_type)),
-        labeled("Owner record", `${owner.completed_deals_count || 0} completed`),
+        labeled("Owner record", ownerRecordLabel(listing)),
       ].join("\n");
     }).join("\n\n"),
     "",

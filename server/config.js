@@ -36,6 +36,17 @@ function optionalEnv(name, fallback = "") {
   return value;
 }
 
+function booleanEnv(name, fallback = false) {
+  const value = process.env[name];
+  if (value == null || value === "") return fallback;
+  return String(value).toLowerCase() === "true";
+}
+
+function positiveIntegerEnv(name, fallback) {
+  const value = Number(process.env[name] || fallback);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
 loadEnv(path.join(rootDir, ".env"));
 
 const config = {
@@ -62,6 +73,19 @@ const config = {
   coinProfileApiUrl: optionalEnv("COIN_PROFILE_API_URL"),
   coinProfileApiKey: optionalEnv("COIN_PROFILE_API_KEY"),
   coinProfileUsername: optionalEnv("COIN_PROFILE_USERNAME"),
+  stellarIntegrityEnabled: booleanEnv("AKARA_STELLAR_INTEGRITY_ENABLED", false),
+  stellarNetwork: optionalEnv("AKARA_STELLAR_NETWORK", "testnet").toLowerCase(),
+  stellarMainnetAcknowledged: booleanEnv("AKARA_STELLAR_MAINNET_ACK", false),
+  stellarHorizonUrl: optionalEnv("AKARA_STELLAR_HORIZON_URL"),
+  stellarSecretKey: optionalEnv("AKARA_STELLAR_SECRET_KEY"),
+  stellarPublicKey: optionalEnv("AKARA_STELLAR_PUBLIC_KEY"),
+  stellarMaxFeeStroops: positiveIntegerEnv("AKARA_STELLAR_MAX_FEE_STROOPS", 10000),
+  stellarBatchSize: Math.min(256, positiveIntegerEnv("AKARA_STELLAR_BATCH_SIZE", 64)),
+  stellarAnchorIntervalMs: Math.max(
+    30000,
+    positiveIntegerEnv("AKARA_STELLAR_ANCHOR_INTERVAL_MS", 60000)
+  ),
+  integrityHmacSecret: optionalEnv("AKARA_INTEGRITY_HMAC_SECRET"),
 };
 
 let runtimePublicUrl = "";

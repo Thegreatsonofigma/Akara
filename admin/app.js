@@ -11,6 +11,7 @@ const titles = {
   listings: ["Offers", ""],
   deals: ["Deals", ""],
   disputes: ["Reports", ""],
+  integrity: ["Integrity", ""],
 };
 
 const statusTone = {
@@ -62,6 +63,11 @@ const statusLabels = {
   flagged_user: "Flagged user",
   verification: "Verification",
   dispute: "Dispute",
+  anchored: "Anchored",
+  batched: "Batched",
+  pending: "Pending",
+  failed: "Failed",
+  confirmed: "Confirmed",
 };
 
 const disputeOutcomes = {
@@ -582,6 +588,57 @@ function renderDisputes(rows) {
   ], rows);
 }
 
+function shortHash(value) {
+  const text = String(value || "");
+  if (!text) return "-";
+  return `${text.slice(0, 8)}...${text.slice(-8)}`;
+}
+
+function integrityAction(row) {
+  if (row.status !== "anchored" || !row.batch?.transaction_hash) return "-";
+  return `
+    <div class="integrity-actions">
+      <button class="mini-button" data-integrity-verify="${escapeHtml(row.id)}">Verify</button>
+      <a class="mini-link" href="${escapeHtml(row.batch.explorer_url || "#")}" target="_blank" rel="noopener">Ledger</a>
+    </div>
+  `;
+}
+
+function renderIntegrity(data) {
+  const summary = $("#integrity-summary");
+  if (!data.schemaReady) {
+    summary.innerHTML = `<div class="notice is-error">${escapeHtml(data.warning || "Integrity migration is required.")}</div>`;
+    attachTable("integrity-table", [], []);
+    return;
+  }
+
+  summary.innerHTML = `
+    <div class="status-strip">
+      <div><span>Network</span><strong>${escapeHtml(data.network)}</strong></div>
+      <div><span>Anchoring</span><strong>${data.enabled ? "On" : "Off"}</strong></div>
+      <div><span>Anchored</span><strong>${escapeHtml(data.totals.anchored)}</strong></div>
+      <div><span>Pending</span><strong>${escapeHtml(data.totals.pending)}</strong></div>
+      <div><span>Failed batches</span><strong>${escapeHtml(data.totals.failedBatches)}</strong></div>
+    </div>
+  `;
+
+  attachTable("integrity-table", [
+    { label: "Record", render: (row) => escapeHtml(row.record_type.replaceAll("_", " ")) },
+    { label: "Subject", render: (row) => `<code title="${escapeHtml(row.subject_ref)}">${escapeHtml(shortHash(row.subject_ref))}</code>` },
+    {
+      label: "Reputation",
+      render: (row) => row.reputation
+        ? escapeHtml(`${row.reputation.reputation_band} · ${row.reputation.completed_trades} completed · ${row.reputation.completion_rate}%`)
+        : "-",
+    },
+    { label: "Commitment", render: (row) => `<code title="${escapeHtml(row.commitment_hash)}">${escapeHtml(shortHash(row.commitment_hash))}</code>` },
+    { label: "Status", render: (row) => chip(row.status) },
+    { label: "Network", render: (row) => escapeHtml(row.batch?.network || "-") },
+    { label: "Anchored", render: (row) => escapeHtml(date(row.anchored_at)) },
+    { label: "Action", render: integrityAction },
+  ], data.records || []);
+}
+
 function disputeControls(row) {
   return `
     <div class="dispute-actions" data-dispute-id="${escapeHtml(row.id)}">
@@ -619,6 +676,7 @@ async function loadView(view = state.view) {
   if (view === "listings") renderListings(data);
   if (view === "deals") renderDeals(data);
   if (view === "disputes") renderDisputes(data);
+  if (view === "integrity") renderIntegrity(data);
 }
 
 function setView(view) {
@@ -718,6 +776,14 @@ async function decideVerification(button) {
   await loadView(state.view);
 }
 
+async function verifyIntegrity(button) {
+  const id = button.dataset.integrityVerify;
+  const result = await api(`/admin/api/integrity/${id}/verify`, {
+    method: "POST",
+  });
+  showNotice(`Verified on Stellar${result.ledgerSequence ? ` at ledger ${result.ledgerSequence}` : ""}.`);
+}
+
 async function suspendUser(button) {
   const id = button.dataset.userSuspend;
   if (!window.confirm("Suspend this user profile now?")) return;
@@ -771,6 +837,10 @@ function bindEvents() {
 
     if (event.target.matches("button[data-user-suspend]")) {
       suspendUser(event.target).catch((error) => showNotice(error.message, true));
+    }
+
+    if (event.target.matches("button[data-integrity-verify]")) {
+      verifyIntegrity(event.target).catch((error) => showNotice(error.message, true));
     }
   });
 }

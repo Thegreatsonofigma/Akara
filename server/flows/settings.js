@@ -17,6 +17,7 @@ const { upsertSession, clearSession } = require("../db/sessions");
 const { getPaymentProfiles, formatPaymentProfileCompact } = require("../db/payments");
 const { getUserListings, displayReference, listingStatusLabel } = require("../db/listings");
 const { getCompletedTradeCount } = require("../db/deals");
+const { getLatestUserReputation } = require("../db/integrity");
 const { mainMenu, referralPitch } = require("../messages/copy");
 const {
   startPaymentProfileFlow,
@@ -53,10 +54,11 @@ function verificationStatusLabel(user) {
 async function viewProfileReply(user) {
   await clearSession(user, user.whatsapp_phone);
 
-  const [profiles, listings, completedTrades] = await Promise.all([
+  const [profiles, listings, completedTrades, reputation] = await Promise.all([
     getPaymentProfiles(user.id),
     getUserListings(user.id, 20),
     getCompletedTradeCount(user.id),
+    getLatestUserReputation(user.id),
   ]);
   const liveListings = listings.filter((listing) => ["active", "paused"].includes(listing.status)).length;
   const name = (user.display_name || user.legal_name || "").trim();
@@ -67,6 +69,18 @@ async function viewProfileReply(user) {
     name ? labeled("Name", name) : "",
     labeled("WhatsApp", `+${user.whatsapp_phone}`),
     labeled("Status", verificationStatusLabel(user)),
+    reputation
+      ? labeled(
+          "Trust level",
+          `${reputation.reputation_band[0].toUpperCase()}${reputation.reputation_band.slice(1)}`
+        )
+      : "",
+    reputation
+      ? labeled(
+          "Trade record",
+          reputation.integrity_status === "verified" ? "Verified" : "Updating"
+        )
+      : "",
     labeled("Completed trades", String(completedTrades)),
     labeled("Live listings", String(liveListings)),
     labeled("Saved payout details", String(profiles.length)),

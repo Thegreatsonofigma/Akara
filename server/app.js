@@ -22,11 +22,13 @@ const { handleAdminApi, adminFilePath } = require("./admin");
 const { supabaseRequest, filterValue } = require("./lib/supabase");
 const { mainMenuListPayload, mainMenu, greetingMenuBody } = require("./messages/copy");
 const { handleWebsiteRoute } = require("./website");
+const { anchorPendingRecords, integrityRecordingEnabled } = require("./db/integrity");
 
 const activeInboundMessageIds = new Set();
 const DEFAULT_IDLE_MENU_AFTER_MS = 5 * 60 * 1000;
 const DEFAULT_IDLE_MENU_SCAN_MS = 60 * 1000;
 let idleMenuTimer = null;
+let stellarIntegrityTimer = null;
 
 function isMainMenuReply(reply = "") {
   return /^\*(Find offers and trade with more confidence|Choose your next move|Hi .+, choose your next move)\*/i
@@ -216,6 +218,20 @@ function startIdleMenuScheduler() {
     });
   }, scanMs);
   idleMenuTimer.unref?.();
+}
+
+function startStellarIntegrityScheduler() {
+  if (stellarIntegrityTimer || !integrityRecordingEnabled()) return;
+  stellarIntegrityTimer = setInterval(() => {
+    anchorPendingRecords().catch((error) => {
+      console.error(`[stellar-integrity] scheduled anchor failed: ${error.message}`);
+    });
+  }, config.stellarAnchorIntervalMs);
+  stellarIntegrityTimer.unref?.();
+
+  anchorPendingRecords().catch((error) => {
+    console.error(`[stellar-integrity] startup anchor failed: ${error.message}`);
+  });
 }
 
 async function isInboundMessageProcessed(messageId) {
@@ -480,6 +496,7 @@ function startServer() {
     console.log(`Akara send mode: ${config.sendMode}`);
   });
   startIdleMenuScheduler();
+  startStellarIntegrityScheduler();
 }
 
 module.exports = {

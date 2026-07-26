@@ -5,7 +5,12 @@ const { supabaseRequest, filterValue, createStorageSignedUrl } = require("./lib/
 const { sendWhatsAppText } = require("./lib/whatsapp");
 const { sendVerificationSuccessCard, sendUpgradeSuccessCard, sendExchangeCompletionCard } = require("./lib/listing-card");
 const { getUserById, updateUser } = require("./db/users");
-const { exchangeCompleteMessage, syncCompletedDealsCount } = require("./db/deals");
+const { exchangeCompleteMessage, getDealById, syncCompletedDealsCount } = require("./db/deals");
+const {
+  recordCompletedDealIntegrity,
+  recordDisputeOutcomeIntegrity,
+  verifyIntegrityRecord,
+} = require("./db/integrity");
 const { mainMenu } = require("./messages/copy");
 const { title } = require("./lib/format");
 const { displayReference } = require("./db/listings");
@@ -464,6 +469,59 @@ function pickAllowed(body, allowed) {
   return Object.fromEntries(Object.entries(body || {}).filter(([key, value]) => allowed.includes(key) && value !== undefined));
 }
 
+function isMissingIntegritySchema(error) {
+  return /(integrity_records|stellar_anchor_batches|user_reputation_snapshots)/i.test(String(error?.message || ""))
+    && /(does not exist|relation|42P01)/i.test(String(error?.message || ""));
+}
+
+async function getIntegrityDashboard() {
+  try {
+    const [records, batches, reputations] = await Promise.all([
+      supabaseRequest(
+        "integrity_records?select=id,event_key,record_type,entity_type,entity_id,subject_ref,commitment_hash,status,batch_id,leaf_index,anchored_at,created_at&order=created_at.desc&limit=200"
+      ),
+      supabaseRequest(
+        "stellar_anchor_batches?select=id,network,merkle_root,leaf_count,status,source_account,transaction_hash,ledger_sequence,explorer_url,attempt_count,next_retry_at,last_error,confirmed_at,created_at&order=created_at.desc&limit=100"
+      ),
+      supabaseRequest(
+        "user_reputation_snapshots?select=id,user_id,completed_trades,cancelled_trades,expired_trades,completion_rate,disputes_total,open_disputes,resolved_disputes,reputation_band,commitment_hash,integrity_record_id,created_at&order=created_at.desc&limit=200"
+      ),
+    ]);
+    const batchesById = Object.fromEntries(batches.map((batch) => [batch.id, batch]));
+    const reputationByRecordId = Object.fromEntries(
+      reputations.map((snapshot) => [snapshot.integrity_record_id, snapshot])
+    );
+    return {
+      schemaReady: true,
+      enabled: config.stellarIntegrityEnabled,
+      network: config.stellarNetwork,
+      records: records.map((record) => ({
+        ...record,
+        batch: batchesById[record.batch_id] || null,
+        reputation: reputationByRecordId[record.id] || null,
+      })),
+      batches,
+      totals: {
+        records: records.length,
+        anchored: records.filter((record) => record.status === "anchored").length,
+        pending: records.filter((record) => ["pending", "batched"].includes(record.status)).length,
+        failedBatches: batches.filter((batch) => batch.status === "failed").length,
+      },
+    };
+  } catch (error) {
+    if (!isMissingIntegritySchema(error)) throw error;
+    return {
+      schemaReady: false,
+      enabled: config.stellarIntegrityEnabled,
+      network: config.stellarNetwork,
+      records: [],
+      batches: [],
+      totals: { records: 0, anchored: 0, pending: 0, failedBatches: 0 },
+      warning: "Apply supabase/migrations/008_stellar_integrity_reputation.sql before enabling Stellar integrity.",
+    };
+  }
+}
+
 async function handleAdminApi(req, res, url) {
   if (!requireAdmin(req)) return forbiddenAdmin(res);
 
@@ -473,6 +531,22 @@ async function handleAdminApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/admin/api/compliance") {
     return jsonResponse(res, 200, { ok: true, data: await getComplianceDashboard() });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/integrity") {
+    return jsonResponse(res, 200, { ok: true, data: await getIntegrityDashboard() });
+  }
+
+  const integrityVerifyMatch = url.pathname.match(/^\/admin\/api\/integrity\/([^/]+)\/verify$/);
+  if (req.method === "POST" && integrityVerifyMatch) {
+    const verification = await verifyIntegrityRecord(integrityVerifyMatch[1], {
+      checkStellar: true,
+    });
+    return jsonResponse(res, verification.verified ? 200 : 409, {
+      ok: verification.verified,
+      data: verification,
+      error: verification.verified ? undefined : verification.reason,
+    });
   }
 
   if (req.method === "GET" && url.pathname === "/admin/api/compliance/dsr") {
@@ -752,7 +826,28 @@ async function handleAdminApi(req, res, url) {
     const dispute = await getDisputeWithDeal(disputeStatusMatch[1]);
     if (dispute) {
       await applyDisputeDealOutcome(dispute, outcome, body.status);
-      await notifyDisputeParticipants({ ...dispute, status: body.status, resolution: body.resolution || null }, outcome);
+      const updatedDispute = {
+        ...dispute,
+        status: body.status,
+        resolution: body.resolution || null,
+        resolved_at: ["resolved", "rejected"].includes(body.status)
+          ? new Date().toISOString()
+          : dispute.resolved_at,
+      };
+      if (["resolved", "rejected"].includes(body.status)) {
+        await recordDisputeOutcomeIntegrity(updatedDispute, outcome).catch((error) => {
+          console.error(`[stellar-integrity] dispute record failed for ${dispute.id}: ${error.message}`);
+        });
+      }
+      if (body.status === "resolved" && outcome === "close_completed") {
+        const completedDeal = await getDealById(dispute.deal_id);
+        await recordCompletedDealIntegrity(completedDeal, {
+          completionBasis: "admin_resolution",
+        }).catch((error) => {
+          console.error(`[stellar-integrity] admin completion record failed for ${dispute.deal_id}: ${error.message}`);
+        });
+      }
+      await notifyDisputeParticipants(updatedDispute, outcome);
     }
 
     return jsonResponse(res, 200, { ok: true, data: rows[0] });

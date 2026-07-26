@@ -32,6 +32,7 @@ npm run dev
 - [Meta WhatsApp setup](docs/meta-whatsapp-setup.md)
 - [Admin platform](docs/admin-platform.md)
 - [Admin subdomain setup](docs/admin-subdomain.md)
+- [Stellar integrity layer](docs/stellar-integrity.md)
 - [Real WhatsApp test](docs/real-whatsapp-test.md)
 
 ## Recommended First Build

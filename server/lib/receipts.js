@@ -1,4 +1,5 @@
 const { getPublicUrl } = require("../config");
+const crypto = require("node:crypto");
 const { supabaseRequest, filterValue, uploadSupabaseStorage, createStorageSignedUrl } = require("./supabase");
 const { getWhatsAppMedia, uploadWhatsAppMedia, sendWhatsAppMedia, mediaExtension } = require("./whatsapp");
 const { textResponse } = require("./http");
@@ -17,6 +18,7 @@ async function storeDealProof(user, dealId, incoming, receiptCheck = {}) {
   const extension = mediaExtension(media.contentType, incoming.media.filename);
   const filename = incoming.media.filename || `akara-receipt-${Date.now()}.${extension}`;
   const objectPath = `${dealId}/${user.id}/receipt-${Date.now()}.${extension}`;
+  const contentSha256 = crypto.createHash("sha256").update(media.buffer).digest("hex");
   await uploadSupabaseStorage("deal-proofs", objectPath, media.buffer, media.contentType);
   let whatsappMediaId = null;
   try {
@@ -32,6 +34,7 @@ async function storeDealProof(user, dealId, incoming, receiptCheck = {}) {
       user_id: user.id,
       proof_path: objectPath,
       proof_type: "transfer_receipt",
+      content_sha256: contentSha256,
       ocr_status: receiptCheck.ocr_status || "pending",
       ocr_text: receiptCheck.ocr_text || null,
       ocr_amount: receiptCheck.ocr_amount || null,

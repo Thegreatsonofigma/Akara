@@ -251,6 +251,41 @@ button {
   background: currentColor;
 }
 
+.nav-integrity::before {
+  width: 10px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+}
+
+.nav-integrity::after {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.integrity-summary {
+  margin-bottom: 16px;
+}
+
+.integrity-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-link {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.mini-link:hover {
+  text-decoration: underline;
+}
+
 .nav-users::before {
   width: 6px;
   height: 6px;

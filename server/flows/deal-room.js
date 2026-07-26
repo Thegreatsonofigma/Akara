@@ -42,6 +42,7 @@ const { storeDealProof, dealUserHasProof, sendDealProofToUser } = require("../li
 const { sendExchangeCompletionCard } = require("../lib/listing-card");
 const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
 const { FEE_BILLING_THRESHOLD, feeLedgerNote, recordDealFees } = require("../db/fees");
+const { recordCompletedDealIntegrity } = require("../db/integrity");
 
 const REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 const receiptDeadlineTimers = new Map();
@@ -522,6 +523,11 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
     syncCompletedDealsCount(completedDeal.taker_user_id),
   ]).catch((error) => {
     console.error(`[deal] completed count sync failed for ${dealCode}: ${error.message}`);
+  });
+  await recordCompletedDealIntegrity(completedDeal, {
+    completionBasis: "mutual_confirmation",
+  }).catch((error) => {
+    console.error(`[stellar-integrity] completion record failed for ${dealCode}: ${error.message}`);
   });
   await notifyExchangeCompleteForOtherUser(otherUserId, completedDeal, otherRole).catch((error) => {
     console.error(`[deal] completion notice failed for ${dealCode}: ${error.message}`);

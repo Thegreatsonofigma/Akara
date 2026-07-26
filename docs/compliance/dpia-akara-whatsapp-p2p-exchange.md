@@ -47,6 +47,7 @@ Akara processes user data to:
 - support messages;
 - audit logs;
 - risk flags.
+- salted integrity commitments, Merkle proofs, and reputation snapshots.
 
 ## 5. Why A DPIA Is Needed
 
@@ -84,6 +85,11 @@ A DPIA is appropriate because Akara may process:
 | Inaccurate automated parsing causes wrong trade flow. | Medium. | Medium. | Review screens, confirmation prompts, natural language fallback, user edit/cancel options. | Low to medium. |
 | Cross-border vendor processing without proper controls. | High. | Medium. | Vendor register, DPAs, transfer assessment, subprocessor review. | Medium until vendor contracts are final. |
 | User thinks Akara guarantees payment or holds funds. | High. | Medium. | Clear no-custody language, trade-room warnings, terms, dispute limits, receipts, no compensation promise. | Medium. |
+| Public-ledger data enables identification or financial profiling. | High. | Low after controls. | Publish only a batched salted Merkle root. Keep names, phone numbers, UUIDs, currencies, amounts, receipts, KYC, payout data, dispute text, salts, and individual commitments off-chain. | Low. |
+| Weak or reused salt allows dictionary attacks against predictable trade data. | High. | Low. | Generate an independent cryptographically random 32-byte salt for every record and keep it in restricted storage. | Low. |
+| Stellar signing key is stolen and used to create false future anchors. | High. | Low to medium. | Dedicated low-balance account, encrypted secret storage, public-key pinning, no user funds, incident disable switch, account rotation runbook, anchor monitoring. | Medium. |
+| Stellar or Horizon is unavailable during trade completion. | Medium. | Medium. | Outbox queue, Merkle batching, signed-transaction recovery, retries, and fail-open trade completion. Fiat exchange state never depends on ledger availability. | Low. |
+| An admin changes a record after it was represented as verified. | High. | Medium. | Salted commitment recomputation, Merkle proof verification, Stellar transaction check, and database triggers protecting anchored records and reputation snapshots. Corrections append a new record. | Low to medium. |
 
 ## 8. Safeguards To Implement Before Production
 
@@ -100,6 +106,9 @@ A DPIA is appropriate because Akara may process:
 - Store IDs, selfies, and receipts in restricted storage.
 - Maintain vendor DPAs and transfer assessments.
 - Train admins on dispute handling and privacy.
+- Keep direct identifiers, transaction values, and source records off public ledgers.
+- Complete testnet verification and contract-independent security review before mainnet integrity anchoring.
+- Publish a clear notice that non-identifying integrity commitments are permanent once submitted.
 
 ## 9. Outcome
 
@@ -119,3 +128,5 @@ Review this DPIA when Akara:
 - suffers a data breach;
 - receives a regulator inquiry;
 - materially changes dispute or payout flows.
+- changes what is included in an integrity commitment;
+- changes Stellar network, signer, Horizon provider, retention, or public verification behavior.
