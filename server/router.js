@@ -1137,7 +1137,7 @@ async function routeMessage(text, user, session, incoming = {}) {
   // guard.
   if (incoming.media?.id) {
     const liveSession = session?.current_flow ? session : await getSession(user.whatsapp_phone);
-    if (liveSession?.current_flow === "deal_room" && liveSession.current_step === "awaiting_dispute_proof") {
+    if (liveSession?.current_flow === "deal_room") {
       return handleDealRoom(text, user, liveSession, incoming);
     }
   }
@@ -1249,6 +1249,7 @@ function normalizeInteractiveCommand(command) {
     profile_trust: "my trust record",
     add_payout: "add payout",
     publish_bulk: "publish all",
+    retry_receipt: "upload receipt",
     verify: "verify",
   };
   if (map[command]) return map[command];

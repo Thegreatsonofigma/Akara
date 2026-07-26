@@ -1,5 +1,5 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
-const { caption, fieldBlock, formatMoney, title } = require("../lib/format");
+const { caption, labeled, fieldBlock, formatMoney, title } = require("../lib/format");
 const { displayReference } = require("./listings");
 const { getUserById } = require("./users");
 const { getDefaultPaymentProfile } = require("./payments");
@@ -193,13 +193,10 @@ function dealNextStepCopy(deal, role) {
 function dealMiniSummary(deal, role) {
   const { youSend, youReceive } = dealPartySummary(role, deal);
   return [
-    fieldBlock("Transaction ref", displayReference(deal.deal_code, "deal")),
-    "",
-    fieldBlock("You send", formatMoney(youSend.amount, youSend.currency)),
-    "",
-    fieldBlock("You receive", formatMoney(youReceive.amount, youReceive.currency)),
-    "",
-    fieldBlock("Status", readableDealStatus(deal, role)),
+    labeled("Transaction ref", displayReference(deal.deal_code, "deal")),
+    labeled("You send", formatMoney(youSend.amount, youSend.currency)),
+    labeled("You receive", formatMoney(youReceive.amount, youReceive.currency)),
+    labeled("Status", readableDealStatus(deal, role)),
     "",
     caption(dealNextStepCopy(deal, role)),
   ].join("\n");

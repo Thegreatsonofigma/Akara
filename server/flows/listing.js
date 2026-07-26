@@ -1,5 +1,5 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
-const { sendWhatsAppText } = require("../lib/whatsapp");
+const { sendWhatsAppText, sendWhatsAppButtons } = require("../lib/whatsapp");
 const { config } = require("../config");
 const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber, formatCooldown } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
@@ -290,35 +290,52 @@ function tradeOpenedMessage({
   firstInstruction,
   quoteCode = "",
 }) {
-  return [
+  const facts = [
+    labeled("You send", formatMoney(youSend.amount, youSend.currency)),
+    labeled("You receive", formatMoney(youReceive.amount, youReceive.currency)),
+    labeled("Payment window", "15 minutes"),
+    quoteCode ? labeled("Terms locked", quoteCode) : "",
+    labeled("Service fee", feeIncludedText()),
+    residualLine ? labeled("Still listed", residualLine) : "",
+  ].filter(Boolean).join("\n");
+
+  const body = [
     title(`${heading} ${dealCode}`),
     intro ? caption(intro) : "",
-    "",
-    fieldBlock("You send", formatMoney(youSend.amount, youSend.currency)),
-    "",
-    fieldBlock("You receive", formatMoney(youReceive.amount, youReceive.currency)),
-    "",
-    fieldBlock("Payment window", "15 minutes"),
-    "",
-    quoteCode ? fieldBlock("Terms locked", quoteCode) : "",
-    fieldBlock("Service fee", feeIncludedText()),
-    residualLine ? ["", fieldBlock("Still listed", residualLine)].join("\n") : "",
-    "",
+    facts,
     title("Send to"),
     caption(paymentDestinationTitle(paymentProfile)),
     formatPaymentProfile(paymentProfile),
-    "",
     title("Expect in your account"),
     caption(paymentExpectationLine(youReceive.amount, youReceive.currency, expectedProfile)),
-    "",
-    title("Actions"),
-    `${action("paid")} after you send`,
-    `${action("received")} when your money lands`,
-    `${action("dispute")} if anything looks wrong`,
-    "",
     firstInstruction,
     fundsDisclaimer(),
   ].filter(Boolean).join("\n\n");
+
+  return {
+    type: "whatsapp_buttons",
+    body,
+    buttons: [
+      { id: "paid", title: "Paid" },
+      { id: "received", title: "Received" },
+      { id: "dispute", title: "Dispute" },
+    ],
+    preserveLayout: true,
+    fallbackText: [
+      body,
+      "",
+      `${action("paid")} after you send`,
+      `${action("received")} when your money lands`,
+      `${action("dispute")} if anything looks wrong`,
+    ].join("\n"),
+  };
+}
+
+async function sendTradeOpenedNotice(phone, notice) {
+  if (notice?.type === "whatsapp_buttons") {
+    return sendWhatsAppButtons(phone, notice);
+  }
+  return sendWhatsAppText(phone, notice);
 }
 
 function formatListingReview(context) {
@@ -1008,7 +1025,7 @@ async function tryAutoMatchListing(user, listing) {
       quoteCode: lockedQuote?.quote_code || "",
     });
 
-    sendWhatsAppText(maker.whatsapp_phone, makerNotice).catch((error) => {
+    sendTradeOpenedNotice(maker.whatsapp_phone, makerNotice).catch((error) => {
       console.error(`[deal] auto-match notice failed for ${maker.whatsapp_phone}: ${error.message}`);
     });
   }
@@ -1395,10 +1412,10 @@ async function openListingTrade(user, listing, options = {}) {
 
     const makerShouldReceiveNotice = options.returnRole !== "maker";
     const takerShouldReceiveNotice = options.returnRole === "maker";
-    if (makerShouldReceiveNotice) sendWhatsAppText(maker.whatsapp_phone, makerNotice).catch((error) => {
+    if (makerShouldReceiveNotice) sendTradeOpenedNotice(maker.whatsapp_phone, makerNotice).catch((error) => {
       console.error(`[deal] maker notice failed for ${maker.whatsapp_phone}: ${error.message}`);
     });
-    if (takerShouldReceiveNotice && user.whatsapp_phone) sendWhatsAppText(user.whatsapp_phone, takerNotice).catch((error) => {
+    if (takerShouldReceiveNotice && user.whatsapp_phone) sendTradeOpenedNotice(user.whatsapp_phone, takerNotice).catch((error) => {
       console.error(`[deal] taker notice failed for ${user.whatsapp_phone}: ${error.message}`);
     });
   }

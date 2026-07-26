@@ -852,6 +852,15 @@ async function run() {
   );
   check("receipt parser keeps image-only receipt pending", receiptCheck.ocr_status === "pending", JSON.stringify(receiptCheck));
 
+  receiptCheck = await analyzeReceiptEvidence(
+    { amount: 80000, currency: "NGN" },
+    {
+      text: "Paid 80,000 NGN",
+      media: { id: "m2", filename: "receipt-80000-ngn.png", mimeType: "image/png" },
+    }
+  );
+  check("receipt caption cannot substitute for image OCR", receiptCheck.ocr_status === "pending", JSON.stringify(receiptCheck));
+
   // ---------- one-shot listing creation + publish + free service fee in review
   scenario("one-shot listing");
   reply = await send(ALICE, "hello, I have 50k naira and want 55k RWF");
@@ -1342,15 +1351,69 @@ async function run() {
   reply = await send(ALICE, fixedOfferNumber || "1");
   check("displayed fixed-offer number opens the trade", reply.includes("Akara Trade opened ✅"), reply);
   check("selection enters deal room", (await sessionFlow(ALICE)) === "deal_room");
+  check(
+    "trade opening keeps payment facts compact and inline",
+    reply.includes("*You send:*")
+      && reply.includes("*You receive:*")
+      && reply.includes("*Payment window:* 15 minutes")
+      && reply.includes("*Service fee:* Free")
+      && !reply.includes("_You send_"),
+    reply
+  );
+  check(
+    "trade opening uses native payment actions",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "paid,received,dispute",
+    JSON.stringify(lastButtonPayload())
+  );
+  check(
+    "trade opening removes the duplicate typed action block",
+    !reply.includes("*Actions*") && !reply.includes("`paid` after you send"),
+    reply
+  );
   const openedDealCode = (await getSession(ALICE))?.context_json?.deal_code || __table("deals").at(-1)?.deal_code;
 
   // ---------- deal room actions
   scenario("deal room");
   reply = await send(ALICE, "status");
-  check("status shows summary", reply.includes("_Transaction ref_") && reply.includes(`*${openedDealCode}*`), reply);
+  check("status shows summary", reply.includes("*Transaction ref:*") && reply.includes(openedDealCode), reply);
 
   reply = await send(ALICE, "i don pay");
   check("paid asks for receipt", reply.includes("Receipt needed"), reply);
+
+  const dealBeforeInvalidReceipt = __table("deals").find((row) => row.deal_code === openedDealCode);
+  const textSendsBeforeInvalidReceipt = textSends.length;
+  reply = await send(ALICE, "Hi Doreen", {
+    media: { id: "unrelated-receipt", mimeType: "image/png", filename: "unrelated.png" },
+    interpret: { action: "greeting", answer: "Hi Doreen, good to hear from you." },
+  });
+  check(
+    "receipt media stays in the active trade instead of becoming a greeting",
+    reply.includes("Receipt could not be verified") && !reply.includes("good to hear from you"),
+    reply
+  );
+  check(
+    "unverified receipt leaves payment status unchanged",
+    !dealBeforeInvalidReceipt?.taker_sent_at,
+    JSON.stringify(dealBeforeInvalidReceipt)
+  );
+  check(
+    "unverified receipt is not forwarded to the other party",
+    !textSends.slice(textSendsBeforeInvalidReceipt).some((message) => message.to === BOB),
+    JSON.stringify(textSends.slice(textSendsBeforeInvalidReceipt))
+  );
+  check(
+    "receipt rejection offers retry and dispute buttons",
+    lastButtonPayload()?.buttons?.map((button) => button.id).join(",") === "retry_receipt,dispute",
+    JSON.stringify(lastButtonPayload())
+  );
+  check(
+    "receipt rejection keeps the upload step active",
+    (await getSession(ALICE))?.current_step === "awaiting_receipt",
+    JSON.stringify(await getSession(ALICE))
+  );
+
+  reply = await send(ALICE, "retry_receipt");
+  check("receipt retry button restores the upload prompt", reply.includes("*Upload receipt*"), reply);
 
   reply = await send(BOB, "received");
   check("bob confirms receipt", reply.includes("Receipt confirmed ✅"), reply);
@@ -1530,7 +1593,7 @@ async function run() {
 
   reply = await send(CHARLIE, "accept");
   check("partial acceptance opens trade", reply.includes("Akara Trade opened ✅"), reply);
-  check("partial acceptance tells owner remaining value", reply.includes("_Still listed_") && reply.includes("*10,000 RWF for 10,000 NGN*"), reply);
+  check("partial acceptance tells owner remaining value", reply.includes("*Still listed:* 10,000 RWF for 10,000 NGN"), reply);
   const partialSource = __table("listings").find((listing) => listing.listing_code === "AKR-LIST-993");
   const partialResidual = __table("listings").find((listing) => (
     listing.owner_user_id === charlieRow.id

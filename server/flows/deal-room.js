@@ -1,5 +1,5 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
-const { title, caption, action, fieldBlock, formatMoney, formatCooldown } = require("../lib/format");
+const { title, caption, action, labeled, fieldBlock, formatMoney, formatCooldown } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { parseCurrencyAmountPairs } = require("../nlp/currency");
 const { hasDirectionalExchangeText } = require("../nlp/exchange");
@@ -301,16 +301,26 @@ function paymentNotedReply(dealCode, youSend, youReceive, proof, sideComplete = 
   ].join("\n"), !sideComplete);
 }
 
-function receiptMismatchReply(dealCode, receiptCheck) {
-  return [
-    title("Receipt does not match"),
+function receiptRejectedReply(dealCode, youSend, receiptCheck) {
+  const isMismatch = receiptCheck.ocr_status === "mismatch";
+  const body = [
+    title(isMismatch ? "Receipt does not match" : "Receipt could not be verified"),
     "",
-    fieldBlock("Transaction ref", dealCode),
+    labeled("Transaction ref", dealCode),
+    labeled("Expected payment", formatMoney(youSend.amount, youSend.currency)),
     "",
-    receiptCheck.ocr_mismatch_reason || "The receipt amount or currency does not match the locked trade.",
+    isMismatch
+      ? receiptCheck.ocr_mismatch_reason || "The amount or currency does not match this trade."
+      : "I could not clearly verify the payment amount and currency from this file.",
     "",
-    "Upload the correct receipt before I notify your trade partner.",
+    "No payment update was sent to the other party.",
+    "Upload a clear bank or MoMo receipt showing the amount, currency, recipient and successful payment status.",
   ].join("\n");
+
+  return whatsappButtonsReply(body, [
+    { id: "retry_receipt", title: "Upload another" },
+    { id: "dispute", title: "Dispute" },
+  ]);
 }
 
 function receiptEvidenceNote(proof) {
@@ -329,10 +339,10 @@ async function analyzeIncomingReceipt(youSend, incoming) {
 
 async function storePaymentReceiptOrReply(user, dealId, dealCode, youSend, incoming) {
   const receiptCheck = await analyzeIncomingReceipt(youSend, incoming);
-  if (receiptCheck.ocr_status === "mismatch") {
+  if (receiptCheck.ocr_status !== "matched") {
     return {
       blocked: true,
-      reply: receiptMismatchReply(dealCode, receiptCheck),
+      reply: receiptRejectedReply(dealCode, youSend, receiptCheck),
       proof: null,
     };
   }
@@ -866,6 +876,24 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     return disputeProofPrompt(dealCode, reason);
   }
 
+  if (command === "upload receipt" || command === "retry_receipt") {
+    const receiptDueAt = context.receipt_due_at || new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    await upsertSession(user, user.whatsapp_phone, "deal_room", "awaiting_receipt", {
+      ...context,
+      deal_id: dealId,
+      deal_code: deal.deal_code || context.deal_code,
+      awaiting_receipt_user_id: user.id,
+      receipt_due_at: receiptDueAt,
+    });
+    return [
+      title("Upload receipt"),
+      "",
+      labeled("Expected payment", formatMoney(youSend.amount, youSend.currency)),
+      "",
+      "Send a clear bank or MoMo receipt showing the amount, currency, recipient and successful payment status.",
+    ].join("\n");
+  }
+
   if (session.current_step === "awaiting_receipt" && context.awaiting_receipt_user_id === user.id && !incoming.media?.id) {
     const dueAt = context.receipt_due_at ? new Date(context.receipt_due_at) : null;
     if (dueAt && dueAt.getTime() <= Date.now()) {
@@ -1150,11 +1178,7 @@ async function handleDealRoom(text, user, session, incoming = {}) {
     "",
     dealMiniSummary(deal, role),
     "",
-    `${action("paid")} after sending your side`,
-    `${action("received")} when your money lands`,
-    `${action("remind")} if your trade partner is taking too long`,
-    `${action("cancel trade")} to close this trade`,
-    `${action("dispute")} if something looks wrong`,
+    caption("Use the buttons below to update this trade. You can also type remind or cancel trade."),
   ].join("\n"));
 }
 

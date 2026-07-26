@@ -213,9 +213,12 @@ async function analyzeReceiptEvidence(expected = {}, incoming = {}) {
     }
   }
 
-  const text = [typedText, ocrText].filter(Boolean).join("\n").trim();
-  const parsed = parseReceiptEvidenceText(text);
-  const scored = scoreParsedReceipt(expected, text, {
+  // A caption or filename can describe an upload, but it cannot prove what
+  // appears on the receipt. Media receipts only pass from text Tesseract read
+  // from the file itself; typed text is used only for text-only evidence.
+  const evidenceText = incoming.media?.id ? ocrText.trim() : typedText;
+  const parsed = parseReceiptEvidenceText(evidenceText);
+  const scored = scoreParsedReceipt(expected, evidenceText, {
     ...parsed,
     confidence: ocrConfidence,
   });
@@ -229,7 +232,7 @@ async function analyzeReceiptEvidence(expected = {}, incoming = {}) {
     };
   }
 
-  if (!text && ocrSkippedReason) {
+  if (!evidenceText && ocrSkippedReason) {
     return {
       ...scored,
       ocr_engine: "tesseract",
