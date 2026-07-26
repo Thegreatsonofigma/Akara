@@ -16,6 +16,9 @@ const coolveticaPromise = readFile(
 const camptonBlackPromise = readFile(
   path.join(process.cwd(), "public/fonts/CamptonBlack.otf")
 );
+const listingBackgroundPromise = readFile(
+  path.join(process.cwd(), "public/cards/listing-card-base.png")
+).then((buffer) => `data:image/png;base64,${buffer.toString("base64")}`);
 
 function amountFontSize(value: string) {
   if (value.length <= 6) return 292;
@@ -26,7 +29,7 @@ function amountFontSize(value: string) {
 }
 
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ code: string }> }
 ) {
   const { code: rawCode } = await params;
@@ -34,15 +37,13 @@ export async function GET(
   const listing = await getPublicListing(code);
   if (!listing) return new Response("Listing not found", { status: 404 });
 
-  const [coolvetica, camptonBlack] = await Promise.all([
+  const [coolvetica, camptonBlack, backgroundUrl] = await Promise.all([
     coolveticaPromise,
     camptonBlackPromise,
+    listingBackgroundPromise,
   ]);
   const haveAmount = formatListingAmount(listing.have_amount);
   const wantAmount = formatListingAmount(listing.want_amount);
-  // next/og cannot decode WebP assets inside ImageResponse on Vercel.
-  // Keep a lossless PNG renderer source so the final dynamic response remains PNG.
-  const backgroundUrl = new URL("/cards/listing-card-base.png", request.url).toString();
 
   return new ImageResponse(
     (
