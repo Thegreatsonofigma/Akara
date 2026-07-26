@@ -306,6 +306,12 @@ function removeSeededDeals(deals) {
   }
 }
 
+function withdrawOpenNegotiationFixtures() {
+  for (const offer of __table("negotiable_offers")) {
+    if (["pending", "countered"].includes(offer.status)) offer.status = "withdrawn";
+  }
+}
+
 // ---------------------------------------------------------------- tests
 
 async function run() {
@@ -379,6 +385,19 @@ async function run() {
       want_amount: 100000,
       want_currency: "KES",
     }, 20)
+  );
+  check(
+    "wide reciprocal rates can enter negotiation when discovery is open",
+    Boolean(buildNegotiationPlan({
+      ...fairCandidate,
+      have_amount: 30000,
+      want_amount: 100000,
+    }, {
+      ...fairSource,
+      have_amount: 100000,
+      want_amount: 100000,
+      want_currency: "KES",
+    }, 100))
   );
 
   // ---------- intent regex units
@@ -2141,6 +2160,7 @@ async function run() {
   await send(ALICE, "cancel");
 
   scenario("auto match passes favorable rate to user");
+  withdrawOpenNegotiationFixtures();
   for (const phone of [ALICE, BOB]) {
     const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
     if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
@@ -2202,6 +2222,7 @@ async function run() {
   favorableDeal.status = "cancelled";
 
   scenario("favorable partial fill preserves requester minimum");
+  withdrawOpenNegotiationFixtures();
   for (const phone of [ALICE, BOB]) {
     const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
     if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
@@ -2240,6 +2261,7 @@ async function run() {
   requesterPartialDeal.status = "cancelled";
 
   scenario("non-crossing negotiable reciprocal");
+  withdrawOpenNegotiationFixtures();
   for (const phone of [ALICE, BOB]) {
     const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
     if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
@@ -2252,7 +2274,7 @@ async function run() {
   const negotiationCandidate = seedListing(bobRow, {
     code: "AKR-LIST-203",
     have_currency: "NGN",
-    have_amount: 90000,
+    have_amount: 30000,
     want_currency: "RWF",
     want_amount: 100000,
     listing_type: "negotiable",
@@ -2263,7 +2285,9 @@ async function run() {
   reply = await send(ALICE, "publish");
   check(
     "non-crossing negotiable pair opens negotiation instead of a trade",
-    reply.includes("*Listing live · negotiation opened*") && !reply.includes("Akara Trade opened"),
+    reply.includes("*Listing live · negotiation opened*")
+      && reply.includes("requested rates differ")
+      && !reply.includes("Akara Trade opened"),
     reply
   );
   const reciprocalOffer = __table("negotiable_offers").at(-1);
@@ -2276,8 +2300,8 @@ async function run() {
   );
   check(
     "reciprocal negotiation proposes values both listings can cover",
-    Number(reciprocalOffer?.offered_amount) === 94868.33
-      && Number(reciprocalOffer?.receive_amount) === 90000,
+    Number(reciprocalOffer?.offered_amount) === 54772.26
+      && Number(reciprocalOffer?.receive_amount) === 30000,
     JSON.stringify(reciprocalOffer)
   );
   const ownerNegotiationButtons = buttonSends
@@ -2294,6 +2318,35 @@ async function run() {
     JSON.stringify(lastButtonPayload())
   );
   check("both users enter the same negotiation", (await sessionFlow(ALICE)) === "negotiation" && (await sessionFlow(BOB)) === "negotiation");
+  const secondNegotiationSource = seedListing(aliceRow, {
+    code: "AKR-LIST-204",
+    have_currency: "GHS",
+    have_amount: 1000,
+    want_currency: "XAF",
+    want_amount: 500000,
+    listing_type: "negotiable",
+  });
+  const secondNegotiationCandidate = seedListing(bobRow, {
+    code: "AKR-LIST-205",
+    have_currency: "XAF",
+    have_amount: 100000,
+    want_currency: "GHS",
+    want_amount: 1000,
+    listing_type: "negotiable",
+  });
+  await runSmartMatchingSweep({ batchSize: 500 });
+  check(
+    "an open negotiation prevents competing automatic proposals",
+    secondNegotiationSource.status === "active"
+      && secondNegotiationCandidate.status === "active"
+      && !__table("negotiable_offers").some((offer) => (
+        offer.listing_id === secondNegotiationCandidate.id
+        || String(offer.message || "").includes(secondNegotiationSource.id)
+      )),
+    JSON.stringify({ secondNegotiationSource, secondNegotiationCandidate })
+  );
+  secondNegotiationSource.status = "closed";
+  secondNegotiationCandidate.status = "closed";
   reply = await send(ALICE, "change_proposal");
   check("change proposal button explains how to send new values", reply.includes("*Change proposal*") && reply.includes("Example:"), reply);
   reply = await send(BOB, "accept");

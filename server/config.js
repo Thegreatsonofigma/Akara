@@ -105,7 +105,7 @@ const config = {
   ),
   negotiationMaxGapPercent: Math.min(
     100,
-    positiveNumberEnv("AKARA_NEGOTIATION_MAX_GAP_PERCENT", 20)
+    positiveNumberEnv("AKARA_NEGOTIATION_MAX_GAP_PERCENT", 100)
   ),
   coinProfileApiUrl: optionalEnv("COIN_PROFILE_API_URL"),
   coinProfileApiKey: optionalEnv("COIN_PROFILE_API_KEY"),
