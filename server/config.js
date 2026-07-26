@@ -86,6 +86,15 @@ const config = {
     3000,
     nonNegativeIntegerEnv("AKARA_MATCHING_BATCH_WINDOW_MS", 1200)
   ),
+  matchingSweepEnabled: booleanEnv("AKARA_MATCHING_SWEEP_ENABLED", true),
+  matchingSweepIntervalMs: Math.max(
+    5000,
+    positiveIntegerEnv("AKARA_MATCHING_SWEEP_INTERVAL_MS", 30000)
+  ),
+  matchingSweepBatchSize: Math.min(
+    500,
+    positiveIntegerEnv("AKARA_MATCHING_SWEEP_BATCH_SIZE", 100)
+  ),
   matchingPairCooldownMs: Math.max(
     60000,
     positiveIntegerEnv("AKARA_MATCHING_PAIR_COOLDOWN_MS", 30 * 60 * 1000)
