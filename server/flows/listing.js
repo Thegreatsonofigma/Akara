@@ -1193,10 +1193,23 @@ function negotiationCounterMessage(listing, offer) {
 // currency moves what the taker receives, and one message can carry both. A
 // bare number keeps the historical meaning (the want side). Returns null when
 // no amount is found, or { error } when a currency doesn't belong here.
+function parseBareNegotiationAmount(text) {
+  const withoutReferences = String(text || "")
+    .replace(/\bAKR-(?:LIST|TXN)-[A-Z0-9-]+\b/gi, " ")
+    .trim();
+  const amount = parseAmount(withoutReferences);
+  if (!amount) return null;
+
+  const command = compactText(withoutReferences);
+  const isOnlyAnAmount = /^\d[\d,.]*(?:\s*(?:k|m|thousand|grand|million))?$/.test(command);
+  const hasProposalLanguage = /\b(counter|offer|propose|proposal|want|need|send|receive|get|pay|instead|rather)\b/.test(command);
+  return isOnlyAnAmount || hasProposalLanguage ? amount : null;
+}
+
 function parseNegotiationProposal(text, listing) {
   const pairs = parseCurrencyAmountPairs(text);
   if (!pairs.length) {
-    const amount = parseAmount(text);
+    const amount = parseBareNegotiationAmount(text);
     if (!amount) return null;
     return { want_amount: amount };
   }
@@ -1458,6 +1471,7 @@ function mergedOfferPatch(listing, offer, proposal) {
 async function handleNegotiation(text, user, session) {
   const context = session.context_json || {};
   const command = compactText(text);
+  const messageProposal = parseCurrencyAmountPairs(text).length || parseBareNegotiationAmount(text);
 
   if (isReminderIntent(command) && context.offer_id) {
     const offer = await getNegotiableOfferById(context.offer_id);
@@ -1477,7 +1491,7 @@ async function handleNegotiation(text, user, session) {
     return sendNegotiationReminder({ user, offer, listing, targetUser });
   }
 
-  if (isCancelIntent(text) || isDeclineIntent(text)) {
+  if (!messageProposal && (isCancelIntent(text) || isDeclineIntent(text))) {
     if (context.offer_id) {
       await supabaseRequest(`negotiable_offers?id=eq.${filterValue(context.offer_id)}`, {
         method: "PATCH",
@@ -1503,7 +1517,10 @@ async function handleNegotiation(text, user, session) {
       return "That negotiable listing is no longer live. Type find offers to browse again.";
     }
 
-    if (/\b(accept|take|open|deal|start|go ahead|posted|same terms|terms)\b/.test(command)) {
+    const proposal = parseNegotiationProposal(text, listing);
+    if (proposal?.error) return proposal.error;
+
+    if (!proposal && /\b(accept|take|open|deal|start|go ahead|posted|same terms|terms)\b/.test(command)) {
       await clearSession(user, user.whatsapp_phone);
       return reserveListing(user, listing, {
         force: true,
@@ -1512,7 +1529,6 @@ async function handleNegotiation(text, user, session) {
       });
     }
 
-    const proposal = parseNegotiationProposal(text, listing);
     if (!proposal) {
       return [
         title("Send a proposal"),
@@ -1566,7 +1582,10 @@ async function handleNegotiation(text, user, session) {
       return "I could not find the trader who sent that proposal.";
     }
 
-    if (/\b(accept|approve|agree|yes|deal|open)\b/.test(command)) {
+    const proposal = parseNegotiationProposal(text, listing);
+    if (proposal?.error) return proposal.error;
+
+    if (!proposal && /\b(accept|approve|agree|yes|deal|open)\b/.test(command)) {
       await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "accepted" }),
@@ -1584,7 +1603,7 @@ async function handleNegotiation(text, user, session) {
       });
     }
 
-    if (/\b(decline|reject|pass|no)\b/.test(command)) {
+    if (!proposal && /\b(decline|reject|pass|no)\b/.test(command)) {
       await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "declined" }),
@@ -1604,7 +1623,6 @@ async function handleNegotiation(text, user, session) {
       return "Proposal declined. No trade was opened.";
     }
 
-    const proposal = parseNegotiationProposal(text, listing);
     if (!proposal) {
       return [
         title("Reply to proposal"),
@@ -1615,8 +1633,6 @@ async function handleNegotiation(text, user, session) {
         `${action(`counter ${formatMoney(offerReceiveAmount(listing, offer), listing.have_currency)}`)} to change what you send`,
       ].join("\n");
     }
-    if (proposal.error) return proposal.error;
-
     const patch = mergedOfferPatch(listing, offer, proposal);
     const updated = (await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
       method: "PATCH",
@@ -1661,7 +1677,10 @@ async function handleNegotiation(text, user, session) {
       return "That negotiable listing is no longer live.";
     }
 
-    if (session.current_step === "taker_waiting" && offer.status === "pending") {
+    const proposal = parseNegotiationProposal(text, listing);
+    if (proposal?.error) return proposal.error;
+
+    if (session.current_step === "taker_waiting" && offer.status === "pending" && !proposal) {
       return [
         title("Proposal still pending"),
         "",
@@ -1670,7 +1689,7 @@ async function handleNegotiation(text, user, session) {
       ].join("\n");
     }
 
-    if (/\b(accept|approve|agree|yes|deal|open)\b/.test(command)) {
+    if (!proposal && /\b(accept|approve|agree|yes|deal|open)\b/.test(command)) {
       await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "accepted" }),
@@ -1687,7 +1706,7 @@ async function handleNegotiation(text, user, session) {
       });
     }
 
-    if (/\b(decline|reject|pass|no)\b/.test(command)) {
+    if (!proposal && /\b(decline|reject|pass|no)\b/.test(command)) {
       await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "declined" }),
@@ -1700,9 +1719,7 @@ async function handleNegotiation(text, user, session) {
       return "Counter declined. No trade was opened.";
     }
 
-    const proposal = parseNegotiationProposal(text, listing);
     if (!proposal) return negotiationCounterMessage(listing, offer);
-    if (proposal.error) return proposal.error;
 
     const patch = mergedOfferPatch(listing, offer, proposal);
     const updated = (await supabaseRequest(`negotiable_offers?id=eq.${filterValue(offer.id)}`, {

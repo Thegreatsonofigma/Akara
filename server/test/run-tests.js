@@ -58,6 +58,11 @@ const { containsPreviewableUrl } = whatsapp;
 const listSends = [];
 const buttonSends = [];
 const mediaSends = [];
+const textSends = [];
+whatsapp.sendWhatsAppText = async (to, text) => {
+  textSends.push({ to, text });
+  return { logged: true };
+};
 whatsapp.sendWhatsAppList = async (to, payload) => {
   listSends.push({ to, payload });
   return { logged: true };
@@ -653,6 +658,9 @@ async function run() {
 	    JSON.stringify(__table("audit_events").filter((row) => row.entity_type === "support_request"))
 	  );
 
+	  reply = await send(ALICE, "I need an admin to resolve this dispute: 10k NGN for 12k RWF and 20k GHS for 30k XAF");
+	  check("explicit dispute context still routes to support", reply.includes("*Support request received*"), reply);
+
 	  reply = await send(ALICE, "report issue");
 	  check("report issue asks for one concise message", reply.includes("*Report an issue*"), reply);
 	  reply = await send(ALICE, "My payout account update is stuck");
@@ -736,6 +744,125 @@ async function run() {
     parsedBulkListings.every((listing) => listing.listing_type === "negotiable"),
     JSON.stringify(parsedBulkListings)
   );
+  const inheritedBulkListings = parseBulkListingDetails(
+    "Create 50k NGN for 55k RWF; 60k for 66k; 70k for 77k"
+  );
+  check(
+    "bulk parser inherits the first currency pair across shorthand items",
+    inheritedBulkListings.length === 3
+      && inheritedBulkListings[1]?.have_currency === "NGN"
+      && inheritedBulkListings[1]?.have_amount === 60000
+      && inheritedBulkListings[1]?.want_currency === "RWF"
+      && inheritedBulkListings[1]?.want_amount === 66000
+      && inheritedBulkListings[2]?.have_amount === 70000
+      && inheritedBulkListings[2]?.want_amount === 77000,
+    JSON.stringify(inheritedBulkListings)
+  );
+  const numberedBulkListings = parseBulkListingDetails(
+    "Create 3 offers NGN to RWF:\n1. 50k for 55k\n2. 60k for 66k\n3. 70k for 77k"
+  );
+  check(
+    "bulk parser ignores batch counts and numbered-list labels",
+    numberedBulkListings.length === 3
+      && numberedBulkListings.map((listing) => listing.have_amount).join(",") === "50000,60000,70000"
+      && numberedBulkListings.map((listing) => listing.want_amount).join(",") === "55000,66000,77000",
+    JSON.stringify(numberedBulkListings)
+  );
+  const naturalTenOfferMessage = "Hi Akara, got a few exchanges I'm trying to sort out. I have **RWF 6,500,000** and I'm looking for **₦780,000**. I also have **GHS 15,000** and I need **KES 175,000**. Looking to swap **XAF 2,200,000** for **RWF 5,100,000**. I have **KES 95,000** and I'd like **₦1,050,000**. Another one, I have **₦850,000** and I'm looking for **GHS 11,500**. I've also got **RWF 3,800,000** and I want **XAF 1,650,000**. I have **KES 140,000** available if anyone can do **RWF 1,750,000**. I also have **GHS 8,500** and I'm after **XAF 1,900,000**. Looking to exchange **XAF 4,500,000** for **KES 165,000**, and finally I have **₦2,000,000** that I'd like to swap for **RWF 1,250,000**. Everything is ready from my side, so if any of these work for you, let's trade.";
+  const naturalTenListings = parseBulkListingDetails(naturalTenOfferMessage);
+  check("natural paragraph parser finds all ten offers", naturalTenListings.length === 10, JSON.stringify(naturalTenListings));
+  check(
+    "naira symbols remain attached to their four offers",
+    naturalTenListings[0]?.want_currency === "NGN"
+      && naturalTenListings[0]?.want_amount === 780000
+      && naturalTenListings[3]?.want_currency === "NGN"
+      && naturalTenListings[3]?.want_amount === 1050000
+      && naturalTenListings[4]?.have_currency === "NGN"
+      && naturalTenListings[4]?.have_amount === 850000
+      && naturalTenListings[9]?.have_currency === "NGN"
+      && naturalTenListings[9]?.have_amount === 2000000,
+    JSON.stringify(naturalTenListings)
+  );
+
+  const BULK_ROUTING = "250700000015";
+  const bulkRoutingUser = seedVerifiedUser(BULK_ROUTING, "Bulk Routing User");
+  seedPayout(bulkRoutingUser, "NGN");
+  seedPayout(bulkRoutingUser, "RWF");
+  reply = await send(BULK_ROUTING, "I want to create a bulk offer", {
+    interpret: { action: "get_support" },
+  });
+  check("bulk start request opens concise batch guidance", reply.includes("*Create listings in bulk*"), reply);
+  check("bulk guidance explains mixed currency pairs", reply.includes("30k KES for 4.2m RWF") && reply.includes("20k GHS for 300k XAF"), reply);
+  check("bulk start request cannot be misrouted to support", !reply.includes("*Akara support*"), reply);
+  const tenListingMessage = [
+    "Can someone help me create these NGN to RWF listings:",
+    ...Array.from({ length: 10 }, (_, index) =>
+      `${11 + index}k for ${21 + index}k`
+    ),
+  ].join("; ");
+  const supportEventsBeforeBulkRouting = __table("audit_events").filter((row) => row.entity_type === "support_request").length;
+  reply = await send(BULK_ROUTING, tenListingMessage, {
+    interpret: { action: "get_support" },
+  });
+  check("ten-listing message opens one bulk review", reply.includes("*Review 10 listings*"), reply);
+  check("generic help wording cannot hijack bulk creation", !reply.includes("*Support request received*") && !reply.includes("*Akara support*"), reply);
+  check(
+    "misclassified bulk message does not create a support record",
+    __table("audit_events").filter((row) => row.entity_type === "support_request").length === supportEventsBeforeBulkRouting,
+    JSON.stringify(__table("audit_events").filter((row) => row.entity_type === "support_request"))
+  );
+  reply = await send(BULK_ROUTING, "cancel");
+  check("ten-listing review can be cancelled", (await sessionFlow(BULK_ROUTING)) === null);
+
+  const NATURAL_BULK = "250700000022";
+  const naturalBulkUser = seedVerifiedUser(NATURAL_BULK, "Natural Bulk User");
+  for (const currency of ["NGN", "RWF", "GHS", "KES", "XAF"]) {
+    seedPayout(naturalBulkUser, currency);
+  }
+  reply = await send(NATURAL_BULK, naturalTenOfferMessage, {
+    interpret: { action: "find_offer" },
+  });
+  check("complete natural paragraph overrides a mistaken search classification", reply.includes("*Review 10 listings*"), reply);
+  const naturalBulkSession = await getSession(NATURAL_BULK);
+  check("all ten natural offers reach the combined review state", naturalBulkSession?.context_json?.listings?.length === 10, JSON.stringify(naturalBulkSession));
+  reply = await send(NATURAL_BULK, "cancel");
+  check("natural ten-offer review can be cancelled", (await sessionFlow(NATURAL_BULK)) === null);
+
+  const EXPLICIT_BULK_SEARCH = "250700000023";
+  const explicitBulkSearchUser = seedVerifiedUser(EXPLICIT_BULK_SEARCH, "Explicit Search User");
+  seedPayout(explicitBulkSearchUser, "NGN");
+  seedPayout(explicitBulkSearchUser, "RWF");
+  seedPayout(explicitBulkSearchUser, "GHS");
+  seedPayout(explicitBulkSearchUser, "XAF");
+  reply = await send(
+    EXPLICIT_BULK_SEARCH,
+    "Find offers for 50k NGN for 55k RWF and 20k GHS for 300k XAF",
+    { interpret: { action: "find_offer" } }
+  );
+  check("an explicit multi-pair marketplace search is not published as a batch", !reply.includes("*Review 2 listings*") && (await sessionFlow(EXPLICIT_BULK_SEARCH)) !== "bulk_listing", reply);
+
+  const BULK_SHORTHAND = "250700000021";
+  const bulkShorthandUser = seedVerifiedUser(BULK_SHORTHAND, "Bulk Shorthand User");
+  seedPayout(bulkShorthandUser, "GHS");
+  seedPayout(bulkShorthandUser, "XAF");
+  const shorthandListingCount = __table("listings").length;
+  reply = await send(
+    BULK_SHORTHAND,
+    "Create 101k GHS for 121k XAF; 102k for 122k; 103k for 123k"
+  );
+  check("shorthand bulk request reviews all provided offers", reply.includes("*Review 3 listings*"), reply);
+  reply = await send(BULK_SHORTHAND, "publish");
+  const shorthandCreated = __table("listings").slice(shorthandListingCount);
+  check("shorthand bulk publication creates every offer", shorthandCreated.length === 3, JSON.stringify(shorthandCreated));
+  check(
+    "shorthand bulk publication preserves every amount pair",
+    shorthandCreated.map((listing) => `${listing.have_amount}:${listing.want_amount}`).join(",")
+      === "101000:121000,102000:122000,103000:123000",
+    JSON.stringify(shorthandCreated)
+  );
+  shorthandCreated.forEach((listing) => {
+    listing.status = "closed";
+  });
 
   const listingCountBeforeBulk = __table("listings").length;
   reply = await send(ALICE, "Create 61k NGN for 72k RWF; I have 80k RWF and want 90k NGN");
@@ -1196,6 +1323,35 @@ async function run() {
   const twoWayDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-092")?.id);
   check("deal keeps negotiated send side", Number(twoWayDeal?.want_amount) === 105000, JSON.stringify(twoWayDeal));
   check("deal keeps negotiated receive side", Number(twoWayDeal?.have_amount) === 98000, JSON.stringify(twoWayDeal));
+
+  // ---------- natural owner counter with a leading rejection
+  scenario("natural-language counter");
+  const naturalCounterListing = seedListing(charlieRow, {
+    code: "AKR-LIST-7093",
+    have_currency: "RWF",
+    have_amount: 4200000,
+    want_currency: "KES",
+    want_amount: 30000,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(BOB, "open AKR-LIST-7093");
+  check("natural counter fixture opens negotiation", reply.includes("*Negotiable listing*"), reply);
+  reply = await send(BOB, "I can send 30,000 Kenyan shillings for 4,200,000 Rwandan francs");
+  check("original natural proposal reaches the owner", reply.includes("30,000 KES") && reply.includes("4,200,000 RWF"), reply);
+
+  const textSendsBeforeNaturalCounter = textSends.length;
+  reply = await send(CHARLIE, "No. I want 46,500 Kenyan shillings");
+  const naturalCounterNotice = textSends
+    .slice(textSendsBeforeNaturalCounter)
+    .find((message) => message.to === BOB)?.text || "";
+  check("leading no plus a new value creates a counter", reply.includes("*Counter sent*") && reply.includes("46,500 KES"), reply);
+  check("new counter replaces the earlier value for the other user", naturalCounterNotice.includes("46,500 KES") && !naturalCounterNotice.includes("30,000 KES"), naturalCounterNotice);
+  check("one-sided natural counter retains the other side", naturalCounterNotice.includes("4,200,000 RWF"), naturalCounterNotice);
+  reply = await send(BOB, "decline AKR-LIST-7093");
+  check("plain decline still closes a counter", reply.includes("Counter declined"), reply);
+  const naturalCounterListingIndex = __table("listings").indexOf(naturalCounterListing);
+  if (naturalCounterListingIndex >= 0) __table("listings").splice(naturalCounterListingIndex, 1);
 
   // ---------- partial fill matching
   scenario("partial fill matching");
