@@ -189,14 +189,38 @@ function isSupportCommand(text) {
 function isHumanSupportRequest(text, session = null) {
   const value = String(text || "").trim().toLowerCase();
   if (!value) return false;
-  const asksForHuman = /\b(human|person|someone|somebody|admin|customer care|customer service|support agent|support team)\b/.test(value);
+  const namesSupportRole = /\b(human agent|human support|admin|customer care|customer service|support agent|support team)\b/.test(value);
+  const asksToReachSomeone = (
+    /\b(speak|talk|contact|connect|reach|escalate)\b.*\b(human|person|someone|somebody|admin|agent|team)\b/.test(value)
+    || /\b(need|want)\b.*\b(person|someone|somebody)\b.*\b(resolve|review|investigate|fix|support)\b/.test(value)
+  );
+  const namesSeriousIssue = /\b(dispute|complaint|conflict|scam|fraud|not received|no alert)\b/.test(value);
   const reportsProblem = /\b(issue|problem|complaint|conflict|dispute|wrong|stuck|failed|not working|cannot|can'?t)\b/.test(value);
   const asksForReview = /\b(resolve|review|look into|check|investigate|help|assist|respond|reply|fix|sort out)\b/.test(value);
   const activeTrade = session?.current_flow === "deal_room" || Boolean(extractDealCode(text));
 
-  if (asksForHuman) return true;
   if (activeTrade) return false;
+  if (namesSupportRole || asksToReachSomeone || namesSeriousIssue) return true;
   return reportsProblem && asksForReview;
+}
+
+function bulkListingRequest(text, interpretedAction, session = null) {
+  const pairs = parseCurrencyAmountPairs(text);
+  const listings = pairs.length >= 4 ? parseBulkListingDetails(text) : [];
+  const looksLikeSearch = interpretedAction === "find_offer"
+    || interpretedAction === "browse_offers"
+    || /\b(find|search|show|browse|available|who\s+(?:has|gets?|needs?|wants?))\b/i.test(text);
+  const protectedFlow = ["deal_room", "negotiation"].includes(session?.current_flow);
+  const explicitSupportContext = /\b(dispute|complaint|conflict|scam|fraud|support ticket|customer care|customer service|admin review)\b/i.test(text);
+
+  return {
+    pairs,
+    listings,
+    eligible: pairs.length >= 4
+      && !looksLikeSearch
+      && !protectedFlow
+      && !explicitSupportContext,
+  };
 }
 
 function supportCategory(text) {
@@ -340,6 +364,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   const command = normalizeInteractiveCommand(text.trim().toLowerCase());
   const interpretedAction = interpreted?.action || "unknown";
   const details = interpreted?.details || {};
+  const bulkRequest = bulkListingRequest(text, interpretedAction, session);
 
   if (isVerified(user) && !session?.current_flow && /^[1-6]$/.test(command)) {
     await clearSession(user, user.whatsapp_phone);
@@ -371,17 +396,18 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   if (session?.current_flow === "support"
       && session.current_step === "awaiting_issue"
+      && !bulkRequest.eligible
       && !isSupportCommand(command)
       && !isMenuCommand(text)) {
     return handleSupport(text, user, session);
   }
 
-  if (interpretedAction === "get_support" || isSupportCommand(command)) {
+  if ((interpretedAction === "get_support" && !bulkRequest.eligible) || isSupportCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return supportOptionsReply();
   }
 
-  if (isHumanSupportRequest(text, session)) {
+  if (!bulkRequest.eligible && isHumanSupportRequest(text, session)) {
     const dealCode = extractDealCode(text);
     return submitSupportRequest(user, text, {
       category: supportCategory(text),
@@ -451,6 +477,24 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     ].join("\n"));
   }
 
+  if (bulkRequest.eligible) {
+    if (!bulkRequest.listings.length) {
+      return [
+        title("Check the listing pairs"),
+        "",
+        "I found several values, but I could not match every send amount with one receive amount.",
+        "",
+        "Separate each listing with a comma, semicolon, or new line.",
+        "",
+        "Example:",
+        "50k NGN for 55k RWF; 20k GHS for 990k XAF",
+      ].join("\n");
+    }
+    if (isOnHold(user)) return accountOnHoldReply(user);
+    await clearSession(user, user.whatsapp_phone);
+    return prepareBulkListingPreview(user, bulkRequest.listings);
+  }
+
   // Settings confirmations are destructive yes/no questions, so they are
   // resolved deterministically before anything else can hijack the reply.
   if (session?.current_flow === "settings" && ["confirm_bulk_action", "confirm_delete_payout"].includes(session.current_step)) {
@@ -466,7 +510,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
     return sendMenuList(user, mainMenu(user));
   }
 
-  if (interpretedAction === "get_support" || isSupportCommand(command)) {
+  if ((interpretedAction === "get_support" && !bulkRequest.eligible) || isSupportCommand(command)) {
     await clearSession(user, user.whatsapp_phone);
     return supportOptionsReply();
   }
@@ -537,30 +581,6 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
       && !isThanksMessage(text)
       && !isWellbeingQuestion(text)) {
     return handleNegotiation(text, user, session);
-  }
-
-  const bulkPairs = parseCurrencyAmountPairs(text);
-  const bulkListings = bulkPairs.length >= 4 ? parseBulkListingDetails(text) : [];
-  const looksLikeBulkSearch = interpretedAction === "find_offer"
-    || interpretedAction === "browse_offers"
-    || /\b(find|search|show|browse|available|who\s+(?:has|gets?|needs?|wants?))\b/i.test(text);
-  const protectedFlow = ["deal_room", "negotiation"].includes(session?.current_flow);
-  if (bulkPairs.length >= 4 && !looksLikeBulkSearch && !protectedFlow) {
-    if (!bulkListings.length) {
-      return [
-        title("Check the listing pairs"),
-        "",
-        "I found several values, but I could not match every send amount with one receive amount.",
-        "",
-        "Separate each listing with a comma, semicolon, or new line.",
-        "",
-        "Example:",
-        "50k NGN for 55k RWF; 20k GHS for 990k XAF",
-      ].join("\n");
-    }
-    if (isOnHold(user)) return accountOnHoldReply(user);
-    await clearSession(user, user.whatsapp_phone);
-    return prepareBulkListingPreview(user, bulkListings);
   }
 
   if (["post", "make offer", "create listing", "create offer", "list offer"].includes(command)) {

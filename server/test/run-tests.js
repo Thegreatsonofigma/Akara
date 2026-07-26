@@ -653,6 +653,9 @@ async function run() {
 	    JSON.stringify(__table("audit_events").filter((row) => row.entity_type === "support_request"))
 	  );
 
+	  reply = await send(ALICE, "I need an admin to resolve this dispute: 10k NGN for 12k RWF and 20k GHS for 30k XAF");
+	  check("explicit dispute context still routes to support", reply.includes("*Support request received*"), reply);
+
 	  reply = await send(ALICE, "report issue");
 	  check("report issue asks for one concise message", reply.includes("*Report an issue*"), reply);
 	  reply = await send(ALICE, "My payout account update is stuck");
@@ -736,6 +739,30 @@ async function run() {
     parsedBulkListings.every((listing) => listing.listing_type === "negotiable"),
     JSON.stringify(parsedBulkListings)
   );
+
+  const BULK_ROUTING = "250700000015";
+  const bulkRoutingUser = seedVerifiedUser(BULK_ROUTING, "Bulk Routing User");
+  seedPayout(bulkRoutingUser, "NGN");
+  seedPayout(bulkRoutingUser, "RWF");
+  const tenListingMessage = [
+    "Can someone help me create these listings:",
+    ...Array.from({ length: 10 }, (_, index) =>
+      `${11 + index}k NGN for ${21 + index}k RWF`
+    ),
+  ].join("; ");
+  const supportEventsBeforeBulkRouting = __table("audit_events").filter((row) => row.entity_type === "support_request").length;
+  reply = await send(BULK_ROUTING, tenListingMessage, {
+    interpret: { action: "get_support" },
+  });
+  check("ten-listing message opens one bulk review", reply.includes("*Review 10 listings*"), reply);
+  check("generic help wording cannot hijack bulk creation", !reply.includes("*Support request received*") && !reply.includes("*Akara support*"), reply);
+  check(
+    "misclassified bulk message does not create a support record",
+    __table("audit_events").filter((row) => row.entity_type === "support_request").length === supportEventsBeforeBulkRouting,
+    JSON.stringify(__table("audit_events").filter((row) => row.entity_type === "support_request"))
+  );
+  reply = await send(BULK_ROUTING, "cancel");
+  check("ten-listing review can be cancelled", (await sessionFlow(BULK_ROUTING)) === null);
 
   const listingCountBeforeBulk = __table("listings").length;
   reply = await send(ALICE, "Create 61k NGN for 72k RWF; I have 80k RWF and want 90k NGN");
