@@ -10,16 +10,22 @@ import {
   Phone,
 } from "@phosphor-icons/react";
 import { trackAkaraEvent } from "@/components/analytics/Analytics";
+import { cn } from "@/lib/cn";
 
 type FormState = "idle" | "submitting" | "success" | "error";
 
 type WaitlistFormProps = {
   source?: string;
+  tone?: "dark" | "brand";
 };
 
-export function WaitlistForm({ source = "website" }: WaitlistFormProps) {
+export function WaitlistForm({
+  source = "website",
+  tone = "dark",
+}: WaitlistFormProps) {
   const [state, setState] = useState<FormState>("idle");
   const [message, setMessage] = useState("");
+  const dark = tone === "dark";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -84,7 +90,12 @@ export function WaitlistForm({ source = "website" }: WaitlistFormProps) {
   if (state === "success") {
     return (
       <div
-        className="flex min-h-28 w-full max-w-3xl items-center justify-center gap-3 rounded-2xl bg-black px-6 py-5 text-left text-white"
+        className={cn(
+          "flex min-h-28 w-full max-w-3xl items-center justify-center gap-3 rounded-2xl px-6 py-5 text-left",
+          dark
+            ? "border border-white/10 bg-white/[0.05] text-white"
+            : "bg-black text-white",
+        )}
         role="status"
       >
         <CheckCircle
@@ -109,7 +120,10 @@ export function WaitlistForm({ source = "website" }: WaitlistFormProps) {
           <span className="sr-only">Email address</span>
           <EnvelopeSimple
             size={19}
-            className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-black/50"
+            className={cn(
+              "pointer-events-none absolute left-4 top-1/2 -translate-y-1/2",
+              dark ? "text-white/40" : "text-black/50",
+            )}
             aria-hidden="true"
           />
           <input
@@ -118,7 +132,12 @@ export function WaitlistForm({ source = "website" }: WaitlistFormProps) {
             autoComplete="email"
             inputMode="email"
             placeholder="Email address"
-            className="h-14 w-full rounded-2xl border border-black/15 bg-white pl-12 pr-4 text-base font-medium text-black outline-none transition focus:border-black focus:ring-2 focus:ring-black/10"
+            className={cn(
+              "h-14 w-full rounded-2xl border pl-12 pr-4 text-base font-medium outline-none transition",
+              dark
+                ? "border-white/10 bg-white/[0.055] text-white placeholder:text-white/35 focus:border-brand/65 focus:bg-white/[0.08] focus:ring-2 focus:ring-brand/10"
+                : "border-black/15 bg-white text-black placeholder:text-black/40 focus:border-black focus:ring-2 focus:ring-black/10",
+            )}
           />
         </label>
 
@@ -126,7 +145,10 @@ export function WaitlistForm({ source = "website" }: WaitlistFormProps) {
           <span className="sr-only">Phone number</span>
           <Phone
             size={19}
-            className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-black/50"
+            className={cn(
+              "pointer-events-none absolute left-4 top-1/2 -translate-y-1/2",
+              dark ? "text-white/40" : "text-black/50",
+            )}
             aria-hidden="true"
           />
           <input
@@ -135,14 +157,24 @@ export function WaitlistForm({ source = "website" }: WaitlistFormProps) {
             autoComplete="tel"
             inputMode="tel"
             placeholder="Phone number"
-            className="h-14 w-full rounded-2xl border border-black/15 bg-white pl-12 pr-4 text-base font-medium text-black outline-none transition focus:border-black focus:ring-2 focus:ring-black/10"
+            className={cn(
+              "h-14 w-full rounded-2xl border pl-12 pr-4 text-base font-medium outline-none transition",
+              dark
+                ? "border-white/10 bg-white/[0.055] text-white placeholder:text-white/35 focus:border-brand/65 focus:bg-white/[0.08] focus:ring-2 focus:ring-brand/10"
+                : "border-black/15 bg-white text-black placeholder:text-black/40 focus:border-black focus:ring-2 focus:ring-black/10",
+            )}
           />
         </label>
 
         <button
           type="submit"
           disabled={state === "submitting"}
-          className="inline-flex h-14 min-w-40 items-center justify-center gap-2 rounded-2xl bg-black px-6 text-base font-semibold text-white transition hover:bg-black/85 disabled:cursor-wait disabled:opacity-70"
+          className={cn(
+            "inline-flex h-14 min-w-40 items-center justify-center gap-2 rounded-2xl px-6 text-base font-semibold transition disabled:cursor-wait disabled:opacity-70",
+            dark
+              ? "bg-brand text-black hover:bg-white"
+              : "bg-black text-white hover:bg-black/85",
+          )}
         >
           {state === "submitting" ? (
             <CircleNotch
@@ -159,18 +191,29 @@ export function WaitlistForm({ source = "website" }: WaitlistFormProps) {
         </button>
       </div>
 
-      <label className="mt-4 flex items-start justify-center gap-2 text-left text-xs leading-relaxed text-black/60">
+      <label
+        className={cn(
+          "mt-4 flex items-start justify-center gap-2 text-left text-xs leading-relaxed",
+          dark ? "text-white/45" : "text-black/60",
+        )}
+      >
         <input
           type="checkbox"
           name="consent"
           required
-          className="mt-0.5 size-4 shrink-0 accent-black"
+          className={cn(
+            "mt-0.5 size-4 shrink-0",
+            dark ? "accent-brand" : "accent-black",
+          )}
         />
         <span>
           I agree to receive Akara launch updates. I can opt out at any time.{" "}
           <Link
             href="/legal/privacy-policy"
-            className="font-semibold text-black underline underline-offset-2"
+            className={cn(
+              "font-semibold underline underline-offset-2",
+              dark ? "text-white" : "text-black",
+            )}
           >
             Privacy notice
           </Link>
@@ -190,7 +233,13 @@ export function WaitlistForm({ source = "website" }: WaitlistFormProps) {
       {message ? (
         <p
           className={`mt-3 text-center text-sm font-semibold ${
-            state === "error" ? "text-[#9B1027]" : "text-black/70"
+            state === "error"
+              ? dark
+                ? "text-pink"
+                : "text-[#9B1027]"
+              : dark
+                ? "text-white/65"
+                : "text-black/70"
           }`}
           role={state === "error" ? "alert" : "status"}
         >

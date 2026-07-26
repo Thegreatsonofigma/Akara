@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Container } from "@/components/ui/Container";
+import { WaitlistDialog } from "@/components/waitlist/WaitlistDialog";
 import { getSeoGuide, SEO_GUIDES } from "@/lib/seo-guides";
 import { SEO_CORRIDORS, SITE } from "@/lib/site";
 
@@ -196,12 +197,12 @@ export default async function GuidePage({ params }: GuidePageProps) {
                 <p className="mt-4 text-2xl font-black leading-tight">
                   Join the list for first access to Akara on WhatsApp.
                 </p>
-                <a
-                  href={SITE.waitlistHref}
+                <WaitlistDialog
+                  source="guide_sidebar"
                   className="mt-6 inline-flex rounded-full bg-black px-5 py-3 text-sm font-black text-white"
                 >
                   Join waitlist
-                </a>
+                </WaitlistDialog>
               </div>
 
               <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-6">

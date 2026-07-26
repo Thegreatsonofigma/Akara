@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Container } from "@/components/ui/Container";
+import { WaitlistDialog } from "@/components/waitlist/WaitlistDialog";
 import { CURRENCIES, NO_CUSTODY_LINE, SEO_CORRIDORS, SITE } from "@/lib/site";
 
 type PageProps = {
@@ -133,12 +134,12 @@ export default async function ExchangeCorridorPage({ params }: PageProps) {
                 downloading another app.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <Link
-                  href={SITE.waitlistHref}
+                <WaitlistDialog
+                  source="exchange_corridor"
                   className="rounded-full bg-[#9DFF1E] px-6 py-3 text-sm font-black uppercase tracking-[0.18em] text-black transition hover:bg-white"
                 >
                   Join waitlist
-                </Link>
+                </WaitlistDialog>
                 <Link
                   href="/support"
                   className="rounded-full border border-white/20 px-6 py-3 text-sm font-bold uppercase tracking-[0.18em] text-white transition hover:border-white/60"
