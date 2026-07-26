@@ -584,6 +584,35 @@ async function run() {
   );
   check("capabilities answer does not repeat the static menu", !reply.includes("1. `make offer`"), reply);
 
+  reply = await send(ALICE, "I am new here and honestly do not know where to begin", {
+    interpret: {
+      action: "unknown",
+      answer: "No pressure. I can help you find an exchange or organize one of your own.",
+    },
+  });
+  check("open-ended orientation language receives a useful answer", reply.includes("No pressure"), reply);
+  check(
+    "open-ended orientation language receives the native menu without phrase matching",
+    lastListPayload()?.sections?.[0]?.rows?.length === 6,
+    JSON.stringify(lastListPayload())
+  );
+
+  await send(ALICE, "payouts", { interpret: { action: "view_payouts" } });
+  check("payout view establishes a settings context", (await sessionFlow(ALICE)) === "settings");
+  reply = await send(ALICE, "Why do people use peer exchange?", {
+    interpret: {
+      action: "question",
+      answer: "People often use peer exchange to find terms that fit how they already move money.",
+    },
+  });
+  check("a general answer can leave non-resumable settings context", reply.includes("People often use peer exchange"), reply);
+  check(
+    "a general answer after settings carries the native menu",
+    lastListPayload()?.sections?.[0]?.rows?.length === 6,
+    JSON.stringify(lastListPayload())
+  );
+  check("non-resumable settings context is cleared after conversational steering", (await sessionFlow(ALICE)) === null);
+
   // ---------- inactivity menu nudge
   scenario("inactivity menu nudge");
   const IDLE = "250700000004";

@@ -341,6 +341,19 @@ const FLOW_COMPATIBLE_ACTIONS = {
   support: new Set(["flow_reply", "get_support"]),
 };
 
+const RESUMABLE_CONVERSATION_FLOWS = new Set([
+  "create_listing",
+  "bulk_listing",
+  "find_offer",
+  "search_results",
+  "negotiation",
+  "payment_profile",
+  "deal_room",
+  "verification",
+  "kyc_upgrade",
+  "support",
+]);
+
 function actionInterruptsFlow(interpretedAction, flow) {
   if (!flow || !isFreshRequestAction(interpretedAction)) return false;
   const compatible = FLOW_COMPATIBLE_ACTIONS[flow];
@@ -355,7 +368,13 @@ async function conversationalReply(interpreted, text, user, session, options = {
     ...options,
   });
 
-  if (isVerified(user) && !session?.current_flow && !options.suppressNudge) {
+  const activeFlow = session?.current_flow || "";
+  const shouldShowMainMenu = isVerified(user)
+    && !options.suppressNudge
+    && (!activeFlow || !RESUMABLE_CONVERSATION_FLOWS.has(activeFlow));
+
+  if (shouldShowMainMenu) {
+    if (activeFlow) await clearSession(user, user.whatsapp_phone);
     return {
       type: "whatsapp_list",
       list: mainMenuListPayload(reply),
@@ -590,7 +609,7 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   if (isAccountMigrationQuestion(text)) {
     await clearSession(user, user.whatsapp_phone);
-    return scopedAssistantReply(text, user);
+    return conversationalReply(interpreted, text, user, null);
   }
 
   const accountOverview = await accountOverviewQuestionReply(user, text);

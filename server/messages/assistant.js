@@ -181,12 +181,15 @@ function conversationNudge(user, activeFlow = "") {
 
   const active = {
     create_listing: "Your listing draft is still open. Reply with the next detail when you are ready.",
+    bulk_listing: "Your bulk listing review is still open. Publish it, edit it, or cancel when you are ready.",
     find_offer: "Your offer search is still open. Reply with the next detail when you are ready.",
     search_results: "Your offer results are still open. Choose an offer or ask to see more.",
     negotiation: "Your negotiation is still open. Reply with your offer or decision when you are ready.",
     payment_profile: "Your payout setup is still open. Reply with the requested detail to continue.",
     deal_room: "Your Akara Trade is still open. Ask for its status whenever you need it.",
     verification: "Your verification is still open. Reply with the requested detail to continue.",
+    kyc_upgrade: "Your account upgrade is still under review. I will let you know when a decision is ready.",
+    support: "Your support report is still open. Send the issue you want the team to review.",
   }[activeFlow];
   if (active) return caption(active);
 

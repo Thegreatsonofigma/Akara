@@ -108,7 +108,7 @@ const SYSTEM_PROMPT = [
   "- bulk_delete_payouts: they want to delete ALL of their saved payout or payment details at once.",
   "- add_payout: they want to add, save, or register NEW payout details (bank account or mobile money). Set payment_currency when they name the currency it is for. Editing existing details is settings_action, not add_payout.",
   "- get_support: they want to contact Akara support, report an account-level problem, or email the support team.",
-  "- menu: they want the menu, help, or to know what Akara can do.",
+  "- menu: they want the menu, ask what they can do on Akara, ask what services or options are available, are unsure where to begin, ask to be shown around, or otherwise want guidance choosing an Akara action. Meaning matters more than exact wording.",
   "- verify: they ask to get verified or continue verification.",
   "- greeting: a greeting or conversation opener with no other request.",
   "- thanks: a short thank-you or appreciation message.",
