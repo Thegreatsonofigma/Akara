@@ -15,6 +15,7 @@ const { handleReceiptRedirect } = require("./lib/receipts");
 const { handleListingCardRoute } = require("./lib/listing-card");
 const { handleSecurityRoute, handleSecurityFlowResponse } = require("./lib/security");
 const { handleVerificationFlowResponse } = require("./flows/verification");
+const { runSmartMatchingSweep } = require("./flows/listing");
 const { findOrCreateUser, getUserById, isVerified } = require("./db/users");
 const { getSession, rememberFailedMessage } = require("./db/sessions");
 const { buildReply } = require("./router");
@@ -29,6 +30,7 @@ const DEFAULT_IDLE_MENU_AFTER_MS = 5 * 60 * 1000;
 const DEFAULT_IDLE_MENU_SCAN_MS = 60 * 1000;
 let idleMenuTimer = null;
 let stellarIntegrityTimer = null;
+let smartMatchingTimer = null;
 
 function isMainMenuReply(reply = "") {
   return /^\*(Find offers and trade with more confidence|Choose your next move|Hi .+, choose your next move)\*/i
@@ -232,6 +234,26 @@ function startStellarIntegrityScheduler() {
   anchorPendingRecords().catch((error) => {
     console.error(`[stellar-integrity] startup anchor failed: ${error.message}`);
   });
+}
+
+function startSmartMatchingScheduler() {
+  if (smartMatchingTimer || !config.matchingSweepEnabled) return;
+
+  const sweep = () => {
+    runSmartMatchingSweep().then((result) => {
+      if (result.matched || result.negotiations || result.failed) {
+        console.log(
+          `[matching] sweep scanned=${result.scanned} matched=${result.matched} negotiations=${result.negotiations} failed=${result.failed}`
+        );
+      }
+    }).catch((error) => {
+      console.error(`[matching] scheduled sweep failed: ${error.message}`);
+    });
+  };
+
+  smartMatchingTimer = setInterval(sweep, config.matchingSweepIntervalMs);
+  smartMatchingTimer.unref?.();
+  sweep();
 }
 
 async function isInboundMessageProcessed(messageId) {
@@ -521,6 +543,7 @@ function startServer() {
     console.log(`Akara send mode: ${config.sendMode}`);
   });
   startIdleMenuScheduler();
+  startSmartMatchingScheduler();
   startStellarIntegrityScheduler();
 }
 
@@ -528,4 +551,5 @@ module.exports = {
   server,
   startServer,
   sendIdleMenus,
+  runSmartMatchingSweep,
 };

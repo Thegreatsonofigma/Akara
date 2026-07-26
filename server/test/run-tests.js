@@ -23,6 +23,7 @@ process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_RECEIPT_OCR = "off";
 process.env.AKARA_ID_OCR = "off";
 process.env.AKARA_MATCHING_BATCH_WINDOW_MS = "0";
+process.env.AKARA_MATCHING_SWEEP_ENABLED = "false";
 process.env.AKARA_PUBLIC_URL = "https://akara-share.example";
 process.env.AKARA_SHARE_URL = "https://akara-share.example";
 
@@ -104,6 +105,7 @@ function lastMediaPayload() {
 
 const { buildReply } = require("../router");
 const { sendIdleMenus } = require("../app");
+const { runSmartMatchingSweep } = require("../flows/listing");
 const { findOrCreateUser } = require("../db/users");
 const { getSession, rememberFailedMessage } = require("../db/sessions");
 const intents = require("../nlp/intents");
@@ -2510,6 +2512,54 @@ async function run() {
     global.fetch = realFetch;
     Object.assign(config, { coinProfileApiUrl: "", coinProfileApiKey: "", coinProfileUsername: "" });
   }
+
+  scenario("recurring smart matching sweep");
+  const sweepMaker = seedVerifiedUser("250700000091", "Sweep Maker");
+  const sweepTaker = seedVerifiedUser("250700000092", "Sweep Taker");
+  for (const currency of ["GHS", "KES"]) {
+    seedPayout(sweepMaker, currency);
+    seedPayout(sweepTaker, currency);
+  }
+  for (const listing of __table("listings")) {
+    const isSweepPair = ["GHS", "KES"].includes(listing.have_currency)
+      && ["GHS", "KES"].includes(listing.want_currency);
+    if (isSweepPair && listing.status === "active") listing.status = "closed";
+  }
+  const sweepSource = seedListing(sweepMaker, {
+    code: "AKR-LIST-SW1",
+    have_currency: "KES",
+    have_amount: 100000,
+    want_currency: "GHS",
+    want_amount: 2000,
+    listing_type: "negotiable",
+    created_at: "2025-02-01T00:00:00.000Z",
+  });
+  const sweepCandidate = seedListing(sweepTaker, {
+    code: "AKR-LIST-SW2",
+    have_currency: "GHS",
+    have_amount: 2200,
+    want_currency: "KES",
+    want_amount: 100000,
+    listing_type: "negotiable",
+    created_at: "2025-02-01T00:00:01.000Z",
+  });
+  const dealsBeforeSweep = __table("deals").length;
+  const sweepResult = await runSmartMatchingSweep({ batchSize: 500 });
+  const sweepDeal = __table("deals").find((deal) => deal.listing_id === sweepCandidate.id);
+  check(
+    "recurring sweep matches reciprocal listings without a new chat message",
+    sweepResult.matched >= 1
+      && Boolean(sweepDeal)
+      && sweepSource.status === "reserved"
+      && sweepCandidate.status === "reserved",
+    JSON.stringify({ sweepResult, sweepDeal, sweepSource, sweepCandidate })
+  );
+  await runSmartMatchingSweep({ batchSize: 500 });
+  check(
+    "repeated sweeps do not duplicate an already claimed match",
+    __table("deals").length === dealsBeforeSweep + 1,
+    JSON.stringify(__table("deals").slice(dealsBeforeSweep))
+  );
 
   clearHistory(ALICE);
   clearHistory(BOB);

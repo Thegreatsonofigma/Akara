@@ -44,6 +44,8 @@ const {
 
 const NEGOTIATION_REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 const autoMatchRequeueTasks = new Map();
+let smartMatchingSweepTask = null;
+let smartMatchingSweepOffset = 0;
 
 function promptTextPart(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -1215,6 +1217,82 @@ async function sendMatchingReply(phone, reply) {
     return;
   }
   await sendWhatsAppText(phone, typeof reply === "string" ? reply : reply.fallbackText || reply.body || "");
+}
+
+async function performSmartMatchingSweep(options = {}) {
+  const requestedBatchSize = Number(options.batchSize || config.matchingSweepBatchSize);
+  const batchSize = Number.isFinite(requestedBatchSize)
+    ? Math.max(1, Math.min(500, Math.floor(requestedBatchSize)))
+    : 100;
+  const loadListings = (offset) => supabaseRequest(
+    [
+      "listings?select=id,listing_code,owner_user_id,have_currency,want_currency,have_amount,want_amount,rate,listing_type,status,created_at",
+      "status=eq.active",
+      "order=created_at.asc",
+      offset ? `offset=${offset}` : "",
+      `limit=${batchSize}`,
+    ].filter(Boolean).join("&")
+  );
+  let listings = await loadListings(smartMatchingSweepOffset);
+  if (!listings.length && smartMatchingSweepOffset) {
+    smartMatchingSweepOffset = 0;
+    listings = await loadListings(0);
+  }
+  smartMatchingSweepOffset = listings.length < batchSize
+    ? 0
+    : smartMatchingSweepOffset + batchSize;
+
+  const result = {
+    scanned: listings.length,
+    matched: 0,
+    negotiations: 0,
+    skipped: 0,
+    failed: 0,
+  };
+
+  for (const listing of listings) {
+    try {
+      const owner = await getUserById(listing.owner_user_id);
+      if (!matchingOwnerIsEligible(owner) || !owner.whatsapp_phone) {
+        result.skipped += 1;
+        continue;
+      }
+
+      const reply = await tryAutoMatchListing(owner, listing, { skipBatchWindow: true });
+      if (reply) {
+        await sendMatchingReply(owner.whatsapp_phone, reply);
+        result.matched += 1;
+        continue;
+      }
+
+      const negotiationReply = await tryStartReciprocalNegotiation(
+        owner,
+        listing,
+        { skipBatchWindow: true }
+      );
+      if (negotiationReply) {
+        await sendMatchingReply(owner.whatsapp_phone, negotiationReply);
+        result.negotiations += 1;
+        continue;
+      }
+
+      result.skipped += 1;
+    } catch (error) {
+      result.failed += 1;
+      console.error(`[matching] sweep failed for ${listing.listing_code || listing.id}: ${error.message}`);
+    }
+  }
+
+  return result;
+}
+
+async function runSmartMatchingSweep(options = {}) {
+  if (smartMatchingSweepTask) return smartMatchingSweepTask;
+  smartMatchingSweepTask = performSmartMatchingSweep(options)
+    .finally(() => {
+      smartMatchingSweepTask = null;
+    });
+  return smartMatchingSweepTask;
 }
 
 async function rematchLiveListing(listingId, excludeListingIds = []) {
@@ -2569,4 +2647,5 @@ module.exports = {
   handleBulkListing,
   handleNegotiation,
   requeueCancelledAutoMatch,
+  runSmartMatchingSweep,
 };
