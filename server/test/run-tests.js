@@ -1969,11 +1969,111 @@ async function run() {
   );
   check(
     "auto-match explains its compatibility basis",
-    reply.includes("Reverse currency pair, enough available value, and compatible rates."),
+    reply.includes("The currencies, available value and rates are compatible."),
     reply
   );
   await send(ALICE, "cancel trade");
   await send(ALICE, "cancel");
+
+  scenario("auto match passes favorable rate to user");
+  for (const phone of [ALICE, BOB]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
+  for (const testListing of __table("listings")) {
+    const isTestPair = ["NGN", "RWF"].includes(testListing.have_currency)
+      && ["NGN", "RWF"].includes(testListing.want_currency);
+    if (isTestPair && testListing.status === "active") testListing.status = "closed";
+  }
+  const exactReciprocal = seedListing(bobRow, {
+    code: "AKR-LIST-201",
+    have_currency: "NGN",
+    have_amount: 13000,
+    want_currency: "RWF",
+    want_amount: 10000,
+    listing_type: "negotiable",
+    created_at: "2025-01-01T00:00:00.000Z",
+  });
+  const favorableReciprocal = seedListing(bobRow, {
+    code: "AKR-LIST-202",
+    have_currency: "NGN",
+    have_amount: 500000,
+    want_currency: "RWF",
+    want_amount: 320000,
+    listing_type: "negotiable",
+    created_at: "2025-01-02T00:00:00.000Z",
+  });
+  reply = await send(ALICE, "I have 10000 RWF and want at least 13000 NGN");
+  check("favorable reciprocal request previews listing", reply.includes("*Review listing*"), reply);
+  reply = await send(ALICE, "publish");
+  const favorableDeal = __table("deals").at(-1);
+  check(
+    "better reciprocal rate is passed through to the user",
+    favorableDeal?.listing_id === favorableReciprocal.id
+      && exactReciprocal.status === "active"
+      && Number(favorableDeal?.want_amount) === 10000
+      && Number(favorableDeal?.have_amount) === 15625
+      && reply.includes("15,625 NGN"),
+    JSON.stringify({ favorableDeal, exactReciprocal, favorableReciprocal, reply })
+  );
+  check(
+    "price improvement is explained without asking for negotiation",
+    reply.includes("A better reciprocal rate was available")
+      && !reply.includes("negotiation opened"),
+    reply
+  );
+  const favorableResidual = __table("listings").find((row) => (
+    row.owner_user_id === bobRow.id
+      && row.status === "active"
+      && row.have_currency === "NGN"
+      && row.want_currency === "RWF"
+      && Number(row.have_amount) === 484375
+      && Number(row.want_amount) === 310000
+  ));
+  check(
+    "favorable partial fill preserves the reciprocal listing rate",
+    Boolean(favorableResidual) && favorableReciprocal.status === "reserved",
+    JSON.stringify({ favorableReciprocal, favorableResidual })
+  );
+  favorableDeal.status = "cancelled";
+
+  scenario("favorable partial fill preserves requester minimum");
+  for (const phone of [ALICE, BOB]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
+  for (const testListing of __table("listings")) {
+    const isTestPair = ["NGN", "RWF"].includes(testListing.have_currency)
+      && ["NGN", "RWF"].includes(testListing.want_currency);
+    if (isTestPair && testListing.status === "active") testListing.status = "closed";
+  }
+  seedListing(bobRow, {
+    code: "AKR-LIST-203",
+    have_currency: "NGN",
+    have_amount: 15625,
+    want_currency: "RWF",
+    want_amount: 10000,
+    listing_type: "negotiable",
+  });
+  reply = await send(ALICE, "I have 20000 RWF and want at least 26000 NGN");
+  reply = await send(ALICE, "publish");
+  const requesterPartialDeal = __table("deals").at(-1);
+  const requesterResidual = __table("listings").find((row) => (
+    row.owner_user_id === aliceRow.id
+      && row.status === "active"
+      && row.have_currency === "RWF"
+      && row.want_currency === "NGN"
+      && Number(row.have_amount) === 10000
+      && Number(row.want_amount) === 13000
+  ));
+  check(
+    "requester residual keeps the original minimum rate after price improvement",
+    Number(requesterPartialDeal?.want_amount) === 10000
+      && Number(requesterPartialDeal?.have_amount) === 15625
+      && Boolean(requesterResidual),
+    JSON.stringify({ requesterPartialDeal, requesterResidual })
+  );
+  requesterPartialDeal.status = "cancelled";
 
   scenario("non-crossing negotiable reciprocal");
   for (const phone of [ALICE, BOB]) {
@@ -1986,7 +2086,7 @@ async function run() {
     if (isTestPair && listing.status === "active") listing.status = "closed";
   }
   const negotiationCandidate = seedListing(bobRow, {
-    code: "AKR-LIST-201",
+    code: "AKR-LIST-204",
     have_currency: "NGN",
     have_amount: 100000,
     want_currency: "RWF",

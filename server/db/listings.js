@@ -192,6 +192,35 @@ async function createResidualListing(sourceListing, usedHaveAmount, usedWantAmou
   return rows[0] || null;
 }
 
+async function createRatePreservingResidualListing(sourceListing, usedHaveAmount) {
+  const sourceHaveAmount = moneyNumber(sourceListing.have_amount);
+  const sourceWantAmount = moneyNumber(sourceListing.want_amount);
+  const remainingHaveAmount = positiveMoney(sourceHaveAmount - moneyNumber(usedHaveAmount));
+  if (!remainingHaveAmount || sourceHaveAmount <= 0 || sourceWantAmount <= 0) return null;
+
+  const remainingWantAmount = positiveMoney(
+    remainingHaveAmount * (sourceWantAmount / sourceHaveAmount)
+  );
+  if (!remainingWantAmount) return null;
+
+  const listingCode = await generateReferenceCode("listing");
+  const rows = await supabaseRequest("listings", {
+    method: "POST",
+    body: JSON.stringify({
+      owner_user_id: sourceListing.owner_user_id,
+      listing_code: listingCode,
+      have_currency: sourceListing.have_currency,
+      want_currency: sourceListing.want_currency,
+      have_amount: remainingHaveAmount,
+      want_amount: remainingWantAmount,
+      listing_type: sourceListing.listing_type || "negotiable",
+      status: "active",
+    }),
+  });
+
+  return rows[0] || null;
+}
+
 module.exports = {
   displayReference,
   generateReferenceCode,
@@ -206,4 +235,5 @@ module.exports = {
   getUserListings,
   listingHasEnoughForDeal,
   createResidualListing,
+  createRatePreservingResidualListing,
 };

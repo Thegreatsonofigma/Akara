@@ -1,7 +1,7 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { sendWhatsAppText, sendWhatsAppButtons } = require("../lib/whatsapp");
 const { config } = require("../config");
-const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber, formatCooldown } = require("../lib/format");
+const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber, positiveMoney, formatCooldown } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { normalizeCurrency, parseAmount, parseCurrencyAmountPairs } = require("../nlp/currency");
 const {
@@ -30,6 +30,7 @@ const {
   listingStatusDisplay,
   listingHasEnoughForDeal,
   createResidualListing,
+  createRatePreservingResidualListing,
 } = require("../db/listings");
 const { mainMenu, feeIncludedText, listingShareCopy, explainMissingListing, currencyListReply } = require("../messages/copy");
 const { startPaymentProfileForCurrency } = require("./payment-profile");
@@ -930,21 +931,27 @@ async function findReciprocalListing(user, listing) {
       `want_currency=eq.${filterValue(listing.have_currency)}`,
       `owner_user_id=neq.${filterValue(user.id)}`,
       "order=created_at.asc",
-      "limit=20",
+      "limit=100",
     ].join("&")
   );
 
-  return rows.find((candidate) => {
-    if (candidate.owner_user_id === user.id) return false;
-    const candidateCoversListing = listingHasEnoughForDeal(candidate, listing.want_amount, listing.have_amount);
-    const listingCoversCandidate = listingHasEnoughForDeal(listing, candidate.want_amount, candidate.have_amount);
-    return reciprocalRatesCross(candidate, listing)
-      && (candidateCoversListing || listingCoversCandidate);
-  }) || null;
+  return rows
+    .filter((candidate) => (
+      candidate.owner_user_id !== user.id
+      && reciprocalRatesCross(candidate, listing)
+    ))
+    .sort((left, right) => reciprocalOfferRate(right) - reciprocalOfferRate(left))[0] || null;
+}
+
+function reciprocalOfferRate(candidate) {
+  const offered = moneyNumber(candidate?.have_amount);
+  const requested = moneyNumber(candidate?.want_amount);
+  if (offered <= 0 || requested <= 0) return 0;
+  return offered / requested;
 }
 
 function reciprocalRatesCross(candidate, listing) {
-  const candidateOffersPerListingUnit = moneyNumber(candidate.have_amount) / moneyNumber(candidate.want_amount);
+  const candidateOffersPerListingUnit = reciprocalOfferRate(candidate);
   const listingRequiresPerUnit = moneyNumber(listing.want_amount) / moneyNumber(listing.have_amount);
   if (!Number.isFinite(candidateOffersPerListingUnit) || !Number.isFinite(listingRequiresPerUnit)) return false;
   if (candidateOffersPerListingUnit <= 0 || listingRequiresPerUnit <= 0) return false;
@@ -1060,12 +1067,19 @@ async function tryAutoMatchListing(user, listing) {
   const takerReceiveProfile = await getDefaultPaymentProfile(user.id, match.have_currency);
   if (!makerReceiveProfile || !takerReceiveProfile) return null;
 
-  const matchCoversListing = listingHasEnoughForDeal(match, listing.want_amount, listing.have_amount);
-  const listingCoversMatch = listingHasEnoughForDeal(listing, match.want_amount, match.have_amount);
-  if (!matchCoversListing && !listingCoversMatch) return null;
+  const matchRate = reciprocalOfferRate(match);
+  const dealWantAmount = positiveMoney(
+    Math.min(moneyNumber(listing.have_amount), moneyNumber(match.want_amount))
+  );
+  const dealHaveAmount = positiveMoney(
+    Math.min(moneyNumber(match.have_amount), dealWantAmount * matchRate)
+  );
+  if (!dealHaveAmount || !dealWantAmount) return null;
 
-  const dealHaveAmount = matchCoversListing ? moneyNumber(listing.want_amount) : moneyNumber(match.have_amount);
-  const dealWantAmount = matchCoversListing ? moneyNumber(listing.have_amount) : moneyNumber(match.want_amount);
+  const listingMinimumAtFill = positiveMoney(
+    dealWantAmount * (moneyNumber(listing.want_amount) / moneyNumber(listing.have_amount))
+  );
+  const improvedRate = dealHaveAmount > listingMinimumAtFill;
   let matchResidual = null;
   let listingResidual = null;
 
@@ -1109,12 +1123,15 @@ async function tryAutoMatchListing(user, listing) {
     body: JSON.stringify({ status: "reserved" }),
   });
 
-  if (matchCoversListing) {
+  if (
+    dealHaveAmount < moneyNumber(match.have_amount)
+    || dealWantAmount < moneyNumber(match.want_amount)
+  ) {
     matchResidual = await createResidualListing(match, dealHaveAmount, dealWantAmount);
   }
 
-  if (listingCoversMatch) {
-    listingResidual = await createResidualListing(listing, dealWantAmount, dealHaveAmount);
+  if (dealWantAmount < moneyNumber(listing.have_amount)) {
+    listingResidual = await createRatePreservingResidualListing(listing, dealWantAmount);
   }
 
   await upsertSession(user, user.whatsapp_phone, "deal_room", "reserved", {
@@ -1131,7 +1148,9 @@ async function tryAutoMatchListing(user, listing) {
 
     const makerNotice = tradeOpenedMessage({
       heading: "Akara Trade opened ✅",
-      intro: "Reverse currency pair, enough available value, and compatible rates.",
+      intro: improvedRate
+        ? "Your posted rate satisfies this exchange, so Akara opened it at your better rate."
+        : "The currencies, available value and rates are compatible.",
       dealCode,
       youSend: { amount: dealHaveAmount, currency: match.have_currency },
       youReceive: { amount: dealWantAmount, currency: match.want_currency },
@@ -1149,7 +1168,9 @@ async function tryAutoMatchListing(user, listing) {
 
   return tradeOpenedMessage({
     heading: "Akara Trade opened ✅",
-    intro: "Reverse currency pair, enough available value, and compatible rates.",
+    intro: improvedRate
+      ? "A better reciprocal rate was available, so your exchange includes the higher amount."
+      : "The currencies, available value and rates are compatible.",
     dealCode,
     youSend: { amount: dealWantAmount, currency: match.want_currency },
     youReceive: { amount: dealHaveAmount, currency: match.have_currency },
