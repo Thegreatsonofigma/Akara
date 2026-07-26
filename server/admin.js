@@ -11,6 +11,7 @@ const {
   recordDisputeOutcomeIntegrity,
   verifyIntegrityRecord,
 } = require("./db/integrity");
+const { markLiquidityRouteDealCompleted } = require("./db/liquidity");
 const { mainMenu } = require("./messages/copy");
 const { title } = require("./lib/format");
 const { displayReference } = require("./db/listings");
@@ -470,13 +471,13 @@ function pickAllowed(body, allowed) {
 }
 
 function isMissingIntegritySchema(error) {
-  return /(integrity_records|stellar_anchor_batches|user_reputation_snapshots)/i.test(String(error?.message || ""))
+  return /(integrity_records|stellar_anchor_batches|user_reputation_snapshots|market_rate_snapshots|locked_quotes|reputation_credentials|liquidity_route_plans)/i.test(String(error?.message || ""))
     && /(does not exist|relation|42P01)/i.test(String(error?.message || ""));
 }
 
 async function getIntegrityDashboard() {
   try {
-    const [records, batches, reputations] = await Promise.all([
+    const [records, batches, reputations, marketRates, lockedQuotes, credentials, routes] = await Promise.all([
       supabaseRequest(
         "integrity_records?select=id,event_key,record_type,entity_type,entity_id,subject_ref,commitment_hash,status,batch_id,leaf_index,anchored_at,created_at&order=created_at.desc&limit=200"
       ),
@@ -485,6 +486,18 @@ async function getIntegrityDashboard() {
       ),
       supabaseRequest(
         "user_reputation_snapshots?select=id,user_id,completed_trades,cancelled_trades,expired_trades,completion_rate,disputes_total,open_disputes,resolved_disputes,reputation_band,commitment_hash,integrity_record_id,created_at&order=created_at.desc&limit=200"
+      ),
+      supabaseRequest(
+        "market_rate_snapshots?select=id,corridor_key,send_currency,receive_currency,median_rate,weighted_rate,low_rate,high_rate,best_rate,active_listing_count,completed_trade_count,total_visible_liquidity,commitment_hash,integrity_record_id,expires_at,created_at&order=created_at.desc&limit=100"
+      ),
+      supabaseRequest(
+        "locked_quotes?select=id,quote_code,listing_id,deal_id,send_currency,receive_currency,send_amount,receive_amount,rate,quote_type,status,terms_commitment_hash,integrity_record_id,expires_at,created_at&order=created_at.desc&limit=100"
+      ),
+      supabaseRequest(
+        "reputation_credentials?select=id,credential_code,user_id,reputation_band,claims,status,commitment_hash,integrity_record_id,expires_at,created_at&order=created_at.desc&limit=100"
+      ),
+      supabaseRequest(
+        "liquidity_route_plans?select=id,route_code,requester_user_id,send_currency,receive_currency,planned_send_amount,planned_receive_amount,coverage_percent,leg_count,status,commitment_hash,integrity_record_id,expires_at,created_at&order=created_at.desc&limit=100"
       ),
     ]);
     const batchesById = Object.fromEntries(batches.map((batch) => [batch.id, batch]));
@@ -501,11 +514,19 @@ async function getIntegrityDashboard() {
         reputation: reputationByRecordId[record.id] || null,
       })),
       batches,
+      marketRates,
+      lockedQuotes,
+      credentials,
+      routes,
       totals: {
         records: records.length,
         anchored: records.filter((record) => record.status === "anchored").length,
         pending: records.filter((record) => ["pending", "batched"].includes(record.status)).length,
         failedBatches: batches.filter((batch) => batch.status === "failed").length,
+        rateSnapshots: marketRates.length,
+        lockedQuotes: lockedQuotes.filter((quote) => ["locked", "converted_to_deal"].includes(quote.status)).length,
+        activeCredentials: credentials.filter((credential) => credential.status === "active").length,
+        routePlans: routes.length,
       },
     };
   } catch (error) {
@@ -516,8 +537,21 @@ async function getIntegrityDashboard() {
       network: config.stellarNetwork,
       records: [],
       batches: [],
-      totals: { records: 0, anchored: 0, pending: 0, failedBatches: 0 },
-      warning: "Apply supabase/migrations/008_stellar_integrity_reputation.sql before enabling Stellar integrity.",
+      marketRates: [],
+      lockedQuotes: [],
+      credentials: [],
+      routes: [],
+      totals: {
+        records: 0,
+        anchored: 0,
+        pending: 0,
+        failedBatches: 0,
+        rateSnapshots: 0,
+        lockedQuotes: 0,
+        activeCredentials: 0,
+        routePlans: 0,
+      },
+      warning: "Apply Supabase migrations 008 and 009 before enabling Stellar integrity.",
     };
   }
 }
@@ -845,6 +879,9 @@ async function handleAdminApi(req, res, url) {
           completionBasis: "admin_resolution",
         }).catch((error) => {
           console.error(`[stellar-integrity] admin completion record failed for ${dispute.deal_id}: ${error.message}`);
+        });
+        await markLiquidityRouteDealCompleted(completedDeal).catch((error) => {
+          console.error(`[liquidity-route] admin completion update failed for ${dispute.deal_id}: ${error.message}`);
         });
       }
       await notifyDisputeParticipants(updatedDispute, outcome);

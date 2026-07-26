@@ -60,6 +60,7 @@ const config = {
   whatsappAccessToken: optionalEnv("WHATSAPP_ACCESS_TOKEN"),
   whatsappGraphVersion: process.env.WHATSAPP_GRAPH_VERSION || "v20.0",
   whatsappPhoneNumberId: optionalEnv("WHATSAPP_PHONE_NUMBER_ID"),
+  typingIndicatorEnabled: booleanEnv("AKARA_TYPING_INDICATOR", true),
   akaraWhatsappNumber: optionalEnv("AKARA_WHATSAPP_NUMBER", "15556733907"),
   adminHost: optionalEnv("AKARA_ADMIN_HOST", "admin.tryakara.com"),
   akaraSecurityFlowId: optionalEnv("AKARA_SECURITY_FLOW_ID"),

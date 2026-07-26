@@ -43,6 +43,7 @@ const { sendExchangeCompletionCard } = require("../lib/listing-card");
 const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
 const { FEE_BILLING_THRESHOLD, feeLedgerNote, recordDealFees } = require("../db/fees");
 const { recordCompletedDealIntegrity } = require("../db/integrity");
+const { markLiquidityRouteDealCompleted } = require("../db/liquidity");
 
 const REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 const receiptDeadlineTimers = new Map();
@@ -528,6 +529,9 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
     completionBasis: "mutual_confirmation",
   }).catch((error) => {
     console.error(`[stellar-integrity] completion record failed for ${dealCode}: ${error.message}`);
+  });
+  await markLiquidityRouteDealCompleted(completedDeal).catch((error) => {
+    console.error(`[liquidity-route] completion update failed for ${dealCode}: ${error.message}`);
   });
   await notifyExchangeCompleteForOtherUser(otherUserId, completedDeal, otherRole).catch((error) => {
     console.error(`[deal] completion notice failed for ${dealCode}: ${error.message}`);

@@ -21,7 +21,7 @@ async function getMyListingsReply(user) {
     caption("Live and recent listings from your account."),
     "",
     listings.map((listing, index) => {
-      const shareUrl = listing.status === "active" ? listingShareUrl(listing.listing_code) : "";
+      const shareUrl = listing.status === "active" ? listingShareUrl(listing) : "";
       return [
         title(`${index + 1}. ${displayReference(listing.listing_code, "listing")}`),
         labeled("Send", formatMoney(listing.have_amount, listing.have_currency)),

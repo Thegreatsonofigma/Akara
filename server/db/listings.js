@@ -1,4 +1,4 @@
-const { config } = require("../config");
+const { config, getPublicUrl } = require("../config");
 const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { moneyNumber, positiveMoney } = require("../lib/format");
 
@@ -95,7 +95,14 @@ function listingVersionQuery(listing) {
 }
 
 function listingShareUrl(listingCode) {
-  const code = typeof listingCode === "object" ? listingCode.listing_code : listingCode;
+  const listing = typeof listingCode === "object" ? listingCode : null;
+  const code = listing ? listing.listing_code : listingCode;
+  const publicUrl = String(getPublicUrl() || "").replace(/\/+$/, "");
+  if (publicUrl) {
+    const version = listingVersionQuery(listing);
+    const versionQuery = version ? `?v=${encodeURIComponent(version)}` : "";
+    return `${publicUrl}/l/${encodeURIComponent(displayReference(code, "listing"))}${versionQuery}`;
+  }
   return listingWaOpenUrl(code);
 }
 

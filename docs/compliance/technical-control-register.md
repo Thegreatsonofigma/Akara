@@ -17,11 +17,15 @@ This register maps Akara's NDPC readiness controls to product or repository evid
 | Auditability | Product actions can be logged to `audit_events` for review. | `audit_events` table |
 | Admin access | Compliance endpoints require the same admin token gate as the existing admin API. | `server/admin.js` |
 | Redaction | Common sensitive fields can be masked before display or export. | `server/lib/privacy.js` |
-| Tamper-evident trade records | Completed trade, evidence-digest, dispute-outcome, and reputation snapshots are salted, hashed, batched into a Merkle root, and anchored to Stellar without blocking fiat completion. | `server/db/integrity.js`, `server/lib/integrity-crypto.js`, `server/lib/stellar.js` |
+| Tamper-evident product records | Completed trades, evidence digests, dispute outcomes, reputation snapshots, peer-market rates, accepted quotes, credentials, and liquidity routes are salted, hashed, batched into a Merkle root, and anchored to Stellar without blocking fiat completion. | `server/db/integrity.js`, `server/db/market.js`, `server/db/quotes.js`, `server/db/credentials.js`, `server/db/liquidity.js`, `server/lib/integrity-crypto.js`, `server/lib/stellar.js` |
 | Public-ledger minimisation | Direct identifiers, internal UUIDs, amounts, currencies, receipt files, KYC, payout data, and dispute text are excluded from the Stellar transaction. | `recordCompletedDealIntegrity` and `recordDisputeOutcomeIntegrity` in `server/db/integrity.js` |
 | Integrity key isolation | Anchoring requires a dedicated pinned Stellar key, HTTPS Horizon, a fee ceiling, and an independent HMAC secret. | `server/lib/stellar.js`, `.env.example`, `docs/stellar-integrity.md` |
 | Append-only reputation | Anchored records, confirmed batches, and reputation snapshots are protected from ordinary update or deletion by database triggers. | `supabase/migrations/008_stellar_integrity_reputation.sql` |
 | Independent verification | Admin can recompute the private commitment, verify its Merkle proof, and confirm the root against the Stellar transaction. | `/admin/api/integrity/:id/verify`, Admin > Integrity |
+| Locked quote immutability | Accepted currencies, amounts, rate, users, and expiry cannot be changed after a quote is created. A deal links to the quote it accepted. | `supabase/migrations/009_stellar_market_quotes_credentials_routes.sql`, `server/db/quotes.js` |
+| Market-rate transparency | Corridor guidance uses median, weighted median, interquartile range, visible depth, and recent completed trades; it is labelled as peer-market information rather than an official guaranteed rate. | `server/db/market.js`, `server/messages/assistant.js`, `server/flows/search.js` |
+| Privacy-safe reputation sharing | User-shareable credentials contain aggregate reputation claims only and exclude identity, payout, KYC, receipt, and transaction-value data. | `server/db/credentials.js`, `server/messages/assistant.js` |
+| Explicit split routing | Multi-offer plans contain two to four legs, preserve posted ratios, exclude the requester's listings, expire, and require each payment obligation to be opened explicitly. | `server/db/liquidity.js`, `server/flows/search.js` |
 
 ## Certification Boundary
 

@@ -8,7 +8,7 @@ const {
   sendWhatsAppList,
   sendWhatsAppButtons,
   sendWhatsAppFlow,
-  sendWhatsAppTyping,
+  startWhatsAppTyping,
   getOutboundTextByMessageId,
 } = require("./lib/whatsapp");
 const { handleReceiptRedirect } = require("./lib/receipts");
@@ -278,6 +278,7 @@ async function handleWebhookPost(req, res) {
 
   let failedMessages = 0;
   for (const incoming of messages) {
+    let stopTyping = () => {};
     try {
       console.log(`[webhook] incoming ${incoming.type} message from ${incoming.from}`);
 
@@ -293,9 +294,11 @@ async function handleWebhookPost(req, res) {
 
       if (incoming.messageId) activeInboundMessageIds.add(incoming.messageId);
 
-      if (process.env.AKARA_TYPING_INDICATOR === "true") {
-        sendWhatsAppTyping(incoming.messageId).catch((error) => {
-          console.error(`[webhook] typing indicator failed for ${incoming.from}: ${error.message}`);
+      if (config.typingIndicatorEnabled) {
+        stopTyping = startWhatsAppTyping(incoming.messageId, {
+          onError: (error) => {
+            console.error(`[webhook] typing indicator failed for ${incoming.from}: ${error.message}`);
+          },
         });
       }
 
@@ -346,6 +349,7 @@ async function handleWebhookPost(req, res) {
         console.error(`[webhook] fallback reply failed for ${incoming.from}: ${sendError.message}`);
       }
     } finally {
+      stopTyping();
       if (incoming.messageId) activeInboundMessageIds.delete(incoming.messageId);
     }
   }

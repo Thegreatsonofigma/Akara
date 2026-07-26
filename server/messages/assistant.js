@@ -1,9 +1,14 @@
-const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { title, caption, action, labeled } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { currencyMentions, currencyHelpLine } = require("../nlp/currency");
 const { isRateQuestion } = require("../nlp/intents");
 const { isVerified, firstName } = require("../db/users");
+const { getMarketRate } = require("../db/market");
+const {
+  issueReputationCredential,
+  getReputationCredential,
+  credentialShareUrl,
+} = require("../db/credentials");
 const { mainMenu } = require("./copy");
 
 function explainAkaraReply() {
@@ -151,30 +156,21 @@ async function rateAssistantReply(text) {
     ].join("\n");
   }
 
-  const rows = await supabaseRequest(
-    [
-      "listings?select=have_currency,want_currency,have_amount,want_amount,created_at",
-      "status=eq.active",
-      `have_currency=eq.${filterValue(toCurrency)}`,
-      `want_currency=eq.${filterValue(fromCurrency)}`,
-      "order=created_at.desc",
-      "limit=5",
-    ].join("&")
-  );
-
-  if (rows.length) {
-    const rates = rows
-      .map((row) => Number(row.have_amount) / Number(row.want_amount))
-      .filter((rate) => Number.isFinite(rate) && rate > 0);
-    const average = rates.reduce((sum, rate) => sum + rate, 0) / rates.length;
-    const best = Math.max(...rates);
+  const snapshot = await getMarketRate(fromCurrency, toCurrency);
+  if (snapshot) {
     return [
       title(`${fromCurrency} to ${toCurrency}`),
-      caption("Based on live Akara listings, not a central bank or forex feed."),
+      caption("Akara Market Rate uses live peer listings and recent completed exchanges."),
       "",
-      labeled("Typical", `1 ${fromCurrency} gets about ${average.toFixed(4)} ${toCurrency}`),
-      labeled("Best visible", `1 ${fromCurrency} gets ${best.toFixed(4)} ${toCurrency}`),
-      labeled("Listings checked", String(rows.length)),
+      labeled("Market rate", `1 ${fromCurrency} gets about ${Number(snapshot.weighted_rate).toFixed(4)} ${toCurrency}`),
+      labeled("Current range", `${Number(snapshot.low_rate).toFixed(4)} to ${Number(snapshot.high_rate).toFixed(4)} ${toCurrency}`),
+      labeled("Best visible", `1 ${fromCurrency} gets ${Number(snapshot.best_rate).toFixed(4)} ${toCurrency}`),
+      labeled(
+        "Market depth",
+        `${snapshot.active_listing_count} live · ${snapshot.completed_trade_count} recent completed`
+      ),
+      "",
+      caption("Peer-set market information, not a guaranteed exchange rate. Your accepted terms are locked before payment."),
       "",
       action(`find ${toCurrency} offers`),
     ].join("\n");
@@ -192,9 +188,60 @@ async function rateAssistantReply(text) {
   ].join("\n");
 }
 
+function trustCredentialMessage(credential, heading = "Akara Trust Record") {
+  const claims = credential.claims || {};
+  const link = credentialShareUrl(credential.credential_code);
+  return [
+    title(heading),
+    caption("A privacy-safe record of activity completed through Akara."),
+    "",
+    labeled("Credential", credential.credential_code),
+    labeled("Trust level", String(credential.reputation_band || "new").replace(/^./, (value) => value.toUpperCase())),
+    labeled("Completed trades", String(claims.completed_trades || 0)),
+    labeled("Completion rate", `${Number(claims.completion_rate || 0).toFixed(0)}%`),
+    labeled("Open disputes", String(claims.unresolved_disputes || 0)),
+    labeled("Record integrity", claims.integrity_status === "verified" ? "Stellar verified" : "Updating"),
+    labeled("Valid until", new Date(credential.expires_at).toLocaleDateString("en-GB")),
+    "",
+    link ? labeled("Share", link) : "",
+    "",
+    caption("This record contains no phone number, payout detail, ID number, or transaction amount."),
+  ].filter(Boolean).join("\n");
+}
+
+async function reputationAssistantReply(text, user) {
+  const code = String(text || "").match(/\bAKR-TRUST-[A-F0-9]{8}\b/i)?.[0];
+  if (code) {
+    const credential = await getReputationCredential(code);
+    if (!credential || credential.status !== "active" || Date.parse(credential.expires_at) <= Date.now()) {
+      return [
+        title("Trust record unavailable"),
+        "That Akara credential is invalid, expired, or revoked.",
+      ].join("\n");
+    }
+    return trustCredentialMessage(credential, "Verified Akara Trust Record");
+  }
+
+  if (!isVerified(user)) {
+    return "Complete verification before Akara can issue your Trust Record.";
+  }
+  const credential = await issueReputationCredential(user.id);
+  if (!credential) {
+    return [
+      title("Trust record unavailable"),
+      "Akara could not issue your Trust Record right now. Please try again shortly.",
+    ].join("\n");
+  }
+  return trustCredentialMessage(credential);
+}
+
 async function scopedAssistantReply(text, user) {
   const value = compactText(text);
 
+  if (/\bAKR-TRUST-[A-F0-9]{8}\b/i.test(text)
+      || /\b(trust record|reputation passport|reputation record|my reputation|my trust|trust credential)\b/.test(value)) {
+    return reputationAssistantReply(text, user);
+  }
   if (isRateQuestion(text)) return rateAssistantReply(text);
   if (/\b(what is akara|who are you|what do you do|how does akara work|explain akara)\b/.test(value)) return explainAkaraReply();
   if (/\b(refer|referral|referrals|invite|inviting|free trades?)\b/.test(value)) return referralAssistantReply();

@@ -317,6 +317,37 @@ async function sendWhatsAppTyping(messageId) {
   return text ? JSON.parse(text) : null;
 }
 
+function startWhatsAppTyping(messageId, options = {}) {
+  if (!messageId || !config.typingIndicatorEnabled || config.sendMode === "log") {
+    return () => {};
+  }
+
+  const refreshMs = Math.max(10000, Number(options.refreshMs || 20000));
+  let stopped = false;
+  let inFlight = false;
+
+  const pulse = async () => {
+    if (stopped || inFlight) return;
+    inFlight = true;
+    try {
+      await sendWhatsAppTyping(messageId);
+    } catch (error) {
+      options.onError?.(error);
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  pulse();
+  const timer = setInterval(pulse, refreshMs);
+  timer.unref?.();
+
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
 async function getWhatsAppMedia(mediaId) {
   if (!config.whatsappAccessToken) {
     throw new Error("WhatsApp access token is required to download media.");
@@ -481,6 +512,7 @@ module.exports = {
   getOutboundTextByMessageId,
   sendWhatsAppMedia,
   sendWhatsAppTyping,
+  startWhatsAppTyping,
   getWhatsAppMedia,
   uploadWhatsAppMedia,
   mediaExtension,

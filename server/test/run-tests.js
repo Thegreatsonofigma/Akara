@@ -22,6 +22,7 @@ process.env.AKARA_SECURITY_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_RECEIPT_OCR = "off";
 process.env.AKARA_ID_OCR = "off";
+process.env.AKARA_PUBLIC_URL = "https://akara-share.example";
 
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -470,7 +471,8 @@ async function run() {
   const tierSession = await getSession(TIER);
   check("tier limit stores pending publish", tierSession?.current_flow === "kyc_upgrade" && tierSession?.context_json?.return_flow === "publish_listing", JSON.stringify(tierSession));
 
-  const { listingCardVersion } = require("../lib/listing-card");
+  const { listingShareUrl } = require("../db/listings");
+  const { listingCardVersion, listingSharePage } = require("../lib/listing-card");
   check("listing card version changes with dynamic values", listingCardVersion({
     listing_code: "AKR-LIST-001",
     have_currency: "KES",
@@ -488,6 +490,31 @@ async function run() {
     listing_type: "fixed",
     status: "active",
   }), "Card version did not change after amount edit");
+
+  const shareListing = {
+    listing_code: "AKR-LIST-321",
+    have_currency: "NGN",
+    have_amount: 50000,
+    want_currency: "RWF",
+    want_amount: 55000,
+    listing_type: "negotiable",
+    status: "active",
+    updated_at: "2026-07-26T12:00:00.000Z",
+  };
+  const previewUrl = listingShareUrl(shareListing);
+  const previewPage = listingSharePage(shareListing);
+  check(
+    "listing share URL uses the previewable Akara listing page",
+    previewUrl.startsWith("https://akara-share.example/l/AKR-LIST-321?v="),
+    previewUrl
+  );
+  check(
+    "listing share page includes the dynamic card preview and WhatsApp deep link",
+    previewPage.includes('property="og:image" content="https://akara-share.example/l/AKR-LIST-321.png')
+      && previewPage.includes("https://wa.me/")
+      && previewPage.includes("open%20AKR-LIST-321"),
+    previewPage.slice(0, 600)
+  );
 
   reply = await send(ALICE, "hi, I want to convert 16,728 naira for 18,500 RWF. Is there any available offer that is within around this rate?", {
     interpret: { action: "find_offer", have_currency: "NGN", have_amount: 16728, want_currency: "RWF", want_amount: 18500 },

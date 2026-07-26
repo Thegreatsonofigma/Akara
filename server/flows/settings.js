@@ -91,6 +91,7 @@ async function viewProfileReply(user) {
     `${action("bank details")} for your payout information`,
     `${action("my listings")} for your posted offers`,
     `${action("history")} for your transactions`,
+    `${action("my trust record")} to view your shareable reputation`,
   ].filter(Boolean).join("\n\n");
 }
 

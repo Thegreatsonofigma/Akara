@@ -32,6 +32,7 @@ const {
 } = require("../db/listings");
 const { mainMenu, feeIncludedText, listingShareCopy, explainMissingListing, currencyListReply } = require("../messages/copy");
 const { startPaymentProfileForCurrency } = require("./payment-profile");
+const { createLockedQuote, attachQuoteToDeal } = require("../db/quotes");
 
 const NEGOTIATION_REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 
@@ -286,6 +287,7 @@ function tradeOpenedMessage({
   expectedProfile,
   residualLine = "",
   firstInstruction,
+  quoteCode = "",
 }) {
   return [
     title(`${heading} ${dealCode}`),
@@ -297,6 +299,7 @@ function tradeOpenedMessage({
     "",
     fieldBlock("Payment window", "15 minutes"),
     "",
+    quoteCode ? fieldBlock("Terms locked", quoteCode) : "",
     fieldBlock("Service fee", feeIncludedText()),
     residualLine ? ["", fieldBlock("Still listed", residualLine)].join("\n") : "",
     "",
@@ -615,6 +618,15 @@ async function tryAutoMatchListing(user, listing) {
 
   const dealCode = await generateReferenceCode("deal");
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const lockedQuote = await createLockedQuote({
+    listing: match,
+    makerUserId: match.owner_user_id,
+    takerUserId: user.id,
+    sendAmount: dealWantAmount,
+    receiveAmount: dealHaveAmount,
+    quoteType: "auto_match",
+    expiresAt,
+  });
   const deals = await supabaseRequest("deals", {
     method: "POST",
     body: JSON.stringify({
@@ -628,9 +640,11 @@ async function tryAutoMatchListing(user, listing) {
       want_amount: dealWantAmount,
       status: "reserved",
       reservation_expires_at: expiresAt,
+      ...(lockedQuote?.id ? { locked_quote_id: lockedQuote.id } : {}),
     }),
   });
   const deal = deals[0];
+  await attachQuoteToDeal(lockedQuote, deal.id);
 
   await supabaseRequest(`listings?id=eq.${filterValue(match.id)}`, {
     method: "PATCH",
@@ -672,6 +686,7 @@ async function tryAutoMatchListing(user, listing) {
       expectedProfile: makerReceiveProfile,
       residualLine: matchResidual ? `${formatMoney(matchResidual.have_amount, matchResidual.have_currency)} for ${formatMoney(matchResidual.want_amount, matchResidual.want_currency)}` : "",
       firstInstruction: "Check your bank or MoMo before sending your side.",
+      quoteCode: lockedQuote?.quote_code || "",
     });
 
     sendWhatsAppText(maker.whatsapp_phone, makerNotice).catch((error) => {
@@ -689,6 +704,7 @@ async function tryAutoMatchListing(user, listing) {
     expectedProfile: takerReceiveProfile,
     residualLine: listingResidual ? `${formatMoney(listingResidual.have_amount, listingResidual.have_currency)} for ${formatMoney(listingResidual.want_amount, listingResidual.want_currency)}` : "",
     firstInstruction: "Name check: the account name should match the verified person you are trading with.",
+    quoteCode: lockedQuote?.quote_code || "",
   });
 }
 
@@ -942,6 +958,18 @@ async function openListingTrade(user, listing, options = {}) {
 
   const dealCode = await generateReferenceCode("deal");
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const quoteType = options.quoteType
+    || (options.negotiableOfferId ? "negotiated" : options.routePlanId ? "routed" : "posted");
+  const lockedQuote = await createLockedQuote({
+    listing,
+    makerUserId: listing.owner_user_id,
+    takerUserId: user.id,
+    sendAmount: dealWantAmount,
+    receiveAmount: dealHaveAmount,
+    quoteType,
+    negotiableOfferId: options.negotiableOfferId || null,
+    expiresAt,
+  });
 
   const deals = await supabaseRequest("deals", {
     method: "POST",
@@ -956,6 +984,11 @@ async function openListingTrade(user, listing, options = {}) {
       want_amount: dealWantAmount,
       status: "reserved",
       reservation_expires_at: expiresAt,
+      ...(lockedQuote?.id ? { locked_quote_id: lockedQuote.id } : {}),
+      ...(options.routePlanId ? {
+        route_plan_id: options.routePlanId,
+        route_leg_index: options.routeLegIndex || null,
+      } : {}),
     }),
   });
 
@@ -965,6 +998,24 @@ async function openListingTrade(user, listing, options = {}) {
   });
 
   const deal = deals[0];
+  await attachQuoteToDeal(lockedQuote, deal.id);
+  if (options.routePlanId && options.routeLegIndex) {
+    await supabaseRequest(
+      [
+        "liquidity_route_legs?",
+        `route_plan_id=eq.${filterValue(options.routePlanId)}`,
+        `&leg_index=eq.${filterValue(options.routeLegIndex)}`,
+      ].join(""),
+      {
+        method: "PATCH",
+        body: JSON.stringify({ status: "opened", deal_id: deal.id }),
+      }
+    );
+    await supabaseRequest(`liquidity_route_plans?id=eq.${filterValue(options.routePlanId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "partially_opened" }),
+    });
+  }
   const residualListing = shouldCreateResidualListing
     ? await createResidualListing(listing, dealHaveAmount, dealWantAmount)
     : null;
@@ -989,6 +1040,7 @@ async function openListingTrade(user, listing, options = {}) {
     expectedProfile: makerReceiveProfile,
     firstInstruction: "When their payment is marked sent, check your bank or MoMo before sending your side.",
     residualLine,
+    quoteCode: lockedQuote?.quote_code || "",
   });
 
   const takerNotice = tradeOpenedMessage({
@@ -1000,6 +1052,7 @@ async function openListingTrade(user, listing, options = {}) {
     paymentProfile: makerReceiveProfile,
     expectedProfile: takerReceiveProfile,
     firstInstruction: "Name check: the account name should match the verified person you are trading with.",
+    quoteCode: lockedQuote?.quote_code || "",
   });
 
   if (maker?.whatsapp_phone) {
@@ -1205,6 +1258,8 @@ async function handleNegotiation(text, user, session) {
         force: true,
         want_amount: offer.offered_amount,
         have_amount: offer.receive_amount,
+        negotiableOfferId: offer.id,
+        quoteType: "negotiated",
         returnRole: "maker",
         takerIntro: "Your proposal was accepted, so I opened the trade room.",
         makerIntro: "You accepted a negotiable proposal, so I opened the trade room.",
@@ -1307,6 +1362,8 @@ async function handleNegotiation(text, user, session) {
         force: true,
         want_amount: offer.offered_amount,
         have_amount: offer.receive_amount,
+        negotiableOfferId: offer.id,
+        quoteType: "negotiated",
         takerIntro: "You accepted the counter proposal.",
         makerIntro: "The trader accepted your counter proposal.",
       });

@@ -98,6 +98,28 @@ async function createIntegrityRecord({
   }
 }
 
+async function recordIntegrityEvent({
+  eventKey,
+  recordType,
+  entityType,
+  entityId,
+  payload,
+  previousCommitmentHash = null,
+  schedule = true,
+}) {
+  if (!integrityRecordingEnabled()) return null;
+  const record = await createIntegrityRecord({
+    eventKey,
+    recordType,
+    entityType,
+    entityId,
+    payload,
+    previousCommitmentHash,
+  });
+  if (record && schedule) scheduleIntegrityAnchoring();
+  return record;
+}
+
 async function latestReputationSnapshot(userId) {
   const rows = await supabaseRequest(
     `user_reputation_snapshots?user_id=eq.${filterValue(userId)}&order=created_at.desc&limit=1`
@@ -326,6 +348,9 @@ async function recordCompletedDealIntegrity(deal, options = {}) {
     schema: "akara.trade-completion.v1",
     subject,
     listing_subject: opaqueSubject(config.integrityHmacSecret, "listing", deal.listing_id),
+    quote_subject: deal.locked_quote_id
+      ? opaqueSubject(config.integrityHmacSecret, "quote", deal.locked_quote_id)
+      : null,
     parties: {
       maker: opaqueSubject(config.integrityHmacSecret, "user", deal.maker_user_id),
       taker: opaqueSubject(config.integrityHmacSecret, "user", deal.taker_user_id),
@@ -754,6 +779,7 @@ async function verifyIntegrityRecord(recordId, options = {}) {
 
 module.exports = {
   integrityRecordingEnabled,
+  recordIntegrityEvent,
   calculateReputation,
   getLatestUserReputation,
   getLatestUserReputations,

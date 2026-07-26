@@ -63,6 +63,10 @@ const {
   getLatestUserReputations,
   verifyIntegrityRecord,
 } = require("../db/integrity");
+const { getMarketRate } = require("../db/market");
+const { createLockedQuote, attachQuoteToDeal } = require("../db/quotes");
+const { issueReputationCredential, getReputationCredential } = require("../db/credentials");
+const { planLiquidityRoute, createLiquidityRoutePlan } = require("../db/liquidity");
 
 const { __table, __reset } = fakeSupabase;
 let passed = 0;
@@ -192,6 +196,89 @@ async function run() {
   record.payload_snapshot.locked_terms.have_amount = "99999.00";
   const tampered = await verifyIntegrityRecord(record.id, { checkStellar: true });
   check("modified private snapshot fails verification", tampered.verified === false, JSON.stringify(tampered));
+
+  const marketListingA = {
+    id: crypto.randomUUID(),
+    listing_code: "AKR-LIST-MARKET-A",
+    owner_user_id: maker.id,
+    have_currency: "RWF",
+    want_currency: "NGN",
+    have_amount: 110000,
+    want_amount: 100000,
+    listing_type: "negotiable",
+    status: "active",
+    created_at: now,
+  };
+  const marketListingB = {
+    id: crypto.randomUUID(),
+    listing_code: "AKR-LIST-MARKET-B",
+    owner_user_id: taker.id,
+    have_currency: "RWF",
+    want_currency: "NGN",
+    have_amount: 114000,
+    want_amount: 100000,
+    listing_type: "negotiable",
+    status: "active",
+    created_at: now,
+  };
+  __table("listings").push(marketListingA, marketListingB);
+
+  const market = await getMarketRate("NGN", "RWF", { refresh: true });
+  check(
+    "Akara Market Rate combines live liquidity into a committed snapshot",
+    market?.active_listing_count === 2
+      && Number(market.weighted_rate) > 1
+      && /^[0-9a-f]{64}$/.test(market.commitment_hash),
+    JSON.stringify(market)
+  );
+
+  const quote = await createLockedQuote({
+    listing: marketListingA,
+    makerUserId: maker.id,
+    takerUserId: taker.id,
+    sendAmount: 50000,
+    receiveAmount: 55000,
+    quoteType: "negotiated",
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+  });
+  await attachQuoteToDeal(quote, deal.id);
+  check(
+    "accepted terms create an immutable branded quote",
+    /^AKR-QT-[A-F0-9]{8}$/.test(quote?.quote_code || "")
+      && __table("locked_quotes")[0]?.deal_id === deal.id,
+    JSON.stringify(quote)
+  );
+
+  const credential = await issueReputationCredential(maker.id);
+  const credentialLookup = await getReputationCredential(credential.credential_code);
+  check(
+    "reputation passport exposes privacy-safe claims",
+    credentialLookup?.claims?.completed_trades === 1
+      && !JSON.stringify(credentialLookup.claims).includes(maker.whatsapp_phone),
+    JSON.stringify(credentialLookup)
+  );
+
+  const route = planLiquidityRoute(
+    [
+      { ...marketListingA, owner_user_id: crypto.randomUUID(), have_amount: 55000, want_amount: 50000 },
+      { ...marketListingB, id: crypto.randomUUID(), owner_user_id: crypto.randomUUID(), have_amount: 55000, want_amount: 50000 },
+    ],
+    {
+      user_id: maker.id,
+      have_currency: "NGN",
+      want_currency: "RWF",
+      have_amount: 100000,
+      want_amount: 110000,
+    }
+  );
+  const savedRoute = await createLiquidityRoutePlan(maker.id, route);
+  check(
+    "partial-fill routing combines multiple peer listings without changing their rates",
+    route?.legs?.length === 2
+      && route.coverage_percent === 100
+      && savedRoute?.route_code?.startsWith("AKR-ROUTE-"),
+    JSON.stringify(savedRoute)
+  );
 
   if (failures.length) {
     console.error(`\n${failures.length} integrity test(s) failed:`);

@@ -462,6 +462,16 @@ Option D: Partner-supported fee
 
 ## Implementation Backlog
 
+### Implemented In The Stellar Integrity Upgrade
+
+- Corridor market-rate snapshots using active listings and recent completed trades.
+- Market position labels for matched offers.
+- Immutable quote records for posted, negotiated, automatic, and routed terms.
+- Privacy-safe, shareable Akara Trust Records.
+- Multi-listing split-route planning for two to four offers.
+- Stellar commitments for rate snapshots, quote locks, trust credentials, and routes.
+- Admin integrity counts for all four primitives.
+
 ### Now
 
 - Add internal trust labels and risk triggers.
@@ -476,9 +486,8 @@ Option D: Partner-supported fee
 
 ### Next
 
-- Add rate intelligence by corridor.
-- Add liquidity admin dashboard.
-- Add rate outlier alerts.
+- Add corridor trend charts and deeper liquidity controls to admin.
+- Add automated rate-outlier restriction rules after enough market history exists.
 - Add listing boost controls and fee experiment flags.
 - Prepare licensed partner success-fee integration.
 

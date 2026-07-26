@@ -5,7 +5,7 @@ Use this checklist before claiming Akara is ready for NDPC review.
 ## Database And Storage
 
 - [ ] Apply `supabase/migrations/004_ndpc_compliance_controls.sql` to production.
-- [ ] Apply `supabase/migrations/008_stellar_integrity_reputation.sql` before enabling integrity anchoring.
+- [ ] Apply `supabase/migrations/008_stellar_integrity_reputation.sql` and `009_stellar_market_quotes_credentials_routes.sql` before enabling integrity anchoring.
 - [ ] Confirm `verification-documents` storage bucket is private.
 - [ ] Confirm `deal-proofs` storage bucket is private.
 - [ ] Confirm Row Level Security is enabled on user, KYC, payout, trade, dispute, audit, and compliance tables.
@@ -31,7 +31,7 @@ Use this checklist before claiming Akara is ready for NDPC review.
 - [ ] Log breach containment, notification decisions, and remediation.
 - [ ] Keep processor DPA evidence URLs updated.
 - [ ] Review retention rules every quarter.
-- [ ] Verify completed trade and reputation commitments from Admin > Integrity.
+- [ ] Verify completed trade, rate, quote, route, credential, and reputation commitments from Admin > Integrity.
 
 ## Vendor And Legal Controls
 

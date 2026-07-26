@@ -269,6 +269,10 @@ button {
   margin-bottom: 16px;
 }
 
+.trust-primitives {
+  margin-top: 8px;
+}
+
 .integrity-actions {
   display: flex;
   align-items: center;

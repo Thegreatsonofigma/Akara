@@ -609,6 +609,7 @@ function renderIntegrity(data) {
   if (!data.schemaReady) {
     summary.innerHTML = `<div class="notice is-error">${escapeHtml(data.warning || "Integrity migration is required.")}</div>`;
     attachTable("integrity-table", [], []);
+    attachTable("trust-liquidity-table", [], []);
     return;
   }
 
@@ -619,6 +620,12 @@ function renderIntegrity(data) {
       <div><span>Anchored</span><strong>${escapeHtml(data.totals.anchored)}</strong></div>
       <div><span>Pending</span><strong>${escapeHtml(data.totals.pending)}</strong></div>
       <div><span>Failed batches</span><strong>${escapeHtml(data.totals.failedBatches)}</strong></div>
+    </div>
+    <div class="status-strip trust-primitives">
+      <div><span>Rate snapshots</span><strong>${escapeHtml(data.totals.rateSnapshots || 0)}</strong></div>
+      <div><span>Locked quotes</span><strong>${escapeHtml(data.totals.lockedQuotes || 0)}</strong></div>
+      <div><span>Trust records</span><strong>${escapeHtml(data.totals.activeCredentials || 0)}</strong></div>
+      <div><span>Split routes</span><strong>${escapeHtml(data.totals.routePlans || 0)}</strong></div>
     </div>
   `;
 
@@ -637,6 +644,45 @@ function renderIntegrity(data) {
     { label: "Anchored", render: (row) => escapeHtml(date(row.anchored_at)) },
     { label: "Action", render: integrityAction },
   ], data.records || []);
+
+  const activity = [
+    ...(data.marketRates || []).map((row) => ({
+      kind: "Market rate",
+      reference: row.corridor_key,
+      detail: `1 ${row.send_currency} = ${Number(row.weighted_rate).toFixed(4)} ${row.receive_currency}`,
+      status: `${row.active_listing_count} live · ${row.completed_trade_count} completed`,
+      created_at: row.created_at,
+    })),
+    ...(data.lockedQuotes || []).map((row) => ({
+      kind: "Locked quote",
+      reference: row.quote_code,
+      detail: `${money(row.send_amount, row.send_currency)} → ${money(row.receive_amount, row.receive_currency)}`,
+      status: row.status,
+      created_at: row.created_at,
+    })),
+    ...(data.credentials || []).map((row) => ({
+      kind: "Trust record",
+      reference: row.credential_code,
+      detail: `${row.reputation_band} · ${row.claims?.completed_trades || 0} completed`,
+      status: row.status,
+      created_at: row.created_at,
+    })),
+    ...(data.routes || []).map((row) => ({
+      kind: "Split route",
+      reference: row.route_code,
+      detail: `${money(row.planned_send_amount, row.send_currency)} → ${money(row.planned_receive_amount, row.receive_currency)}`,
+      status: `${row.coverage_percent}% · ${row.leg_count} legs · ${row.status}`,
+      created_at: row.created_at,
+    })),
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  attachTable("trust-liquidity-table", [
+    { label: "Type", render: (row) => escapeHtml(row.kind) },
+    { label: "Reference", render: (row) => `<code>${escapeHtml(row.reference)}</code>` },
+    { label: "Details", render: (row) => escapeHtml(row.detail) },
+    { label: "Status", render: (row) => escapeHtml(row.status) },
+    { label: "Created", render: (row) => escapeHtml(date(row.created_at)) },
+  ], activity);
 }
 
 function disputeControls(row) {
