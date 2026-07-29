@@ -1,7 +1,15 @@
 const http = require("node:http");
+const crypto = require("node:crypto");
 const { URL } = require("node:url");
 const { config, setRuntimePublicUrl } = require("./config");
-const { jsonResponse, textResponse, readJsonBody, serveFile } = require("./lib/http");
+const {
+  jsonResponse,
+  textResponse,
+  readRawBody,
+  parseJsonBody,
+  readJsonBody,
+  serveFile,
+} = require("./lib/http");
 const {
   extractMessages,
   sendWhatsAppText,
@@ -296,8 +304,29 @@ async function markInboundMessageProcessed(incoming) {
   });
 }
 
+function verifyMetaWebhookSignature(signatureHeader, rawBody) {
+  if (!config.metaAppSecret) return !config.requireWebhookSignature;
+
+  const match = String(signatureHeader || "").match(/^sha256=([a-f0-9]{64})$/i);
+  if (!match) return false;
+
+  const supplied = Buffer.from(match[1], "hex");
+  const expected = crypto
+    .createHmac("sha256", config.metaAppSecret)
+    .update(rawBody)
+    .digest();
+
+  return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+}
+
 async function handleWebhookPost(req, res) {
-  const payload = await readJsonBody(req);
+  const rawBody = await readRawBody(req);
+  if (!verifyMetaWebhookSignature(req.headers["x-hub-signature-256"], rawBody)) {
+    console.warn("[webhook] rejected request with an invalid Meta signature");
+    return textResponse(res, 401, "Unauthorized");
+  }
+
+  const payload = parseJsonBody(rawBody);
   const messages = extractMessages(payload);
   const changeCount = (payload.entry || []).reduce(
     (total, entry) => total + (entry.changes || []).length,
@@ -543,7 +572,11 @@ const server = http.createServer(async (req, res) => {
     return jsonResponse(res, 404, { ok: false, error: "Not found" });
   } catch (error) {
     console.error(error);
-    return jsonResponse(res, 500, { ok: false, error: error.message });
+    const statusCode = Number(error.statusCode) || 500;
+    return jsonResponse(res, statusCode, {
+      ok: false,
+      error: statusCode >= 500 ? "Internal server error" : error.message,
+    });
   }
 });
 
@@ -562,4 +595,5 @@ module.exports = {
   startServer,
   sendIdleMenus,
   runSmartMatchingSweep,
+  verifyMetaWebhookSignature,
 };

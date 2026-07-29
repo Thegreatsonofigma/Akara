@@ -6,7 +6,7 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node server/test/run-tests.js && node server/test/verification-test.js && node server/test/integrity-test.js",
+    "test": "node server/test/run-tests.js && node server/test/verification-test.js && node server/test/integrity-test.js && node server/test/webhook-security-test.js",
     "test:verification": "node server/test/verification-test.js",
     "test:integrity": "node server/test/integrity-test.js",
     "stellar:backfill": "node scripts/backfill-stellar-integrity.js",
