@@ -59,8 +59,18 @@ function positiveNumberEnv(name, fallback) {
 
 loadEnv(path.join(rootDir, ".env"));
 
+const isRailwayRuntime = Boolean(
+  process.env.RAILWAY_PROJECT_ID
+  || process.env.RAILWAY_SERVICE_ID
+  || process.env.RAILWAY_ENVIRONMENT_ID
+);
+
 const config = {
-  host: process.env.HOST || (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
+  // Railway healthchecks run outside the container, so a copied local
+  // HOST=127.0.0.1 value must never make the service unreachable.
+  host: isRailwayRuntime
+    ? "0.0.0.0"
+    : process.env.HOST || (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
   port: Number(process.env.PORT || 3000),
   adminToken: optionalEnv("AKARA_ADMIN_TOKEN", "local-admin"),
   supabaseUrl: requiredEnv("SUPABASE_URL"),

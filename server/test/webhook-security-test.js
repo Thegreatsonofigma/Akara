@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 process.env.NODE_ENV = "production";
+process.env.RAILWAY_PROJECT_ID = "test-railway-project";
+process.env.HOST = "127.0.0.1";
 process.env.SUPABASE_URL = "https://fake.supabase.co";
 process.env.SUPABASE_SERVICE_ROLE_KEY = "fake-service-role-key";
 process.env.META_APP_SECRET = "test-meta-app-secret";
@@ -15,6 +17,7 @@ process.env.AKARA_SHARE_URL = "https://api.tryakara.test";
 
 const crypto = require("node:crypto");
 const { verifyMetaWebhookSignature } = require("../app");
+const { config } = require("../config");
 
 let passed = 0;
 const failures = [];
@@ -28,6 +31,12 @@ function check(label, condition, detail = "") {
 }
 
 async function run() {
+  check(
+    "Railway overrides a copied localhost binding",
+    config.host === "0.0.0.0",
+    config.host
+  );
+
   const body = Buffer.from(JSON.stringify({
     object: "whatsapp_business_account",
     entry: [],
