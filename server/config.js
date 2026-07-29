@@ -60,7 +60,7 @@ function positiveNumberEnv(name, fallback) {
 loadEnv(path.join(rootDir, ".env"));
 
 const config = {
-  host: process.env.HOST || "127.0.0.1",
+  host: process.env.HOST || (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
   port: Number(process.env.PORT || 3000),
   adminToken: optionalEnv("AKARA_ADMIN_TOKEN", "local-admin"),
   supabaseUrl: requiredEnv("SUPABASE_URL"),
@@ -70,6 +70,11 @@ const config = {
   whatsappAccessToken: optionalEnv("WHATSAPP_ACCESS_TOKEN"),
   whatsappGraphVersion: process.env.WHATSAPP_GRAPH_VERSION || "v20.0",
   whatsappPhoneNumberId: optionalEnv("WHATSAPP_PHONE_NUMBER_ID"),
+  metaAppSecret: optionalEnv("META_APP_SECRET"),
+  requireWebhookSignature: booleanEnv(
+    "AKARA_REQUIRE_WEBHOOK_SIGNATURE",
+    process.env.NODE_ENV === "production"
+  ),
   typingIndicatorEnabled: booleanEnv("AKARA_TYPING_INDICATOR", true),
   akaraWhatsappNumber: optionalEnv("AKARA_WHATSAPP_NUMBER", "15556733907"),
   adminHost: optionalEnv("AKARA_ADMIN_HOST", "admin.tryakara.com"),
@@ -86,6 +91,23 @@ const config = {
     3000,
     nonNegativeIntegerEnv("AKARA_MATCHING_BATCH_WINDOW_MS", 1200)
   ),
+  matchingSweepEnabled: booleanEnv("AKARA_MATCHING_SWEEP_ENABLED", true),
+  matchingSweepIntervalMs: Math.max(
+    5000,
+    positiveIntegerEnv("AKARA_MATCHING_SWEEP_INTERVAL_MS", 30000)
+  ),
+  matchingSweepBatchSize: Math.min(
+    500,
+    positiveIntegerEnv("AKARA_MATCHING_SWEEP_BATCH_SIZE", 100)
+  ),
+  matchingResponseReminderMs: Math.max(
+    60000,
+    positiveIntegerEnv("AKARA_MATCHING_RESPONSE_REMINDER_MS", 5 * 60 * 1000)
+  ),
+  tradePaymentWindowMs: Math.max(
+    5 * 60 * 1000,
+    positiveIntegerEnv("AKARA_TRADE_PAYMENT_WINDOW_MS", 30 * 60 * 1000)
+  ),
   matchingPairCooldownMs: Math.max(
     60000,
     positiveIntegerEnv("AKARA_MATCHING_PAIR_COOLDOWN_MS", 30 * 60 * 1000)
@@ -96,7 +118,7 @@ const config = {
   ),
   negotiationMaxGapPercent: Math.min(
     100,
-    positiveNumberEnv("AKARA_NEGOTIATION_MAX_GAP_PERCENT", 20)
+    positiveNumberEnv("AKARA_NEGOTIATION_MAX_GAP_PERCENT", 40)
   ),
   coinProfileApiUrl: optionalEnv("COIN_PROFILE_API_URL"),
   coinProfileApiKey: optionalEnv("COIN_PROFILE_API_KEY"),
@@ -115,6 +137,33 @@ const config = {
   ),
   integrityHmacSecret: optionalEnv("AKARA_INTEGRITY_HMAC_SECRET"),
 };
+
+if (config.requireWebhookSignature && !config.metaAppSecret) {
+  throw new Error("Missing required environment variable: META_APP_SECRET");
+}
+
+if (process.env.NODE_ENV === "production") {
+  const invalidVariables = [];
+  if (config.sendMode !== "whatsapp") invalidVariables.push("AKARA_SEND_MODE=whatsapp");
+  if (!config.adminToken || config.adminToken === "local-admin" || config.adminToken.length < 32) {
+    invalidVariables.push("AKARA_ADMIN_TOKEN (at least 32 characters)");
+  }
+  if (
+    !config.whatsappVerifyToken
+    || config.whatsappVerifyToken === "dev_verify_token"
+    || config.whatsappVerifyToken.length < 16
+  ) {
+    invalidVariables.push("WHATSAPP_VERIFY_TOKEN (at least 16 characters)");
+  }
+  if (!config.whatsappAccessToken) invalidVariables.push("WHATSAPP_ACCESS_TOKEN");
+  if (!config.whatsappPhoneNumberId) invalidVariables.push("WHATSAPP_PHONE_NUMBER_ID");
+  if (!/^https:\/\//i.test(config.publicUrl)) invalidVariables.push("AKARA_PUBLIC_URL (HTTPS)");
+  if (!/^https:\/\//i.test(config.shareUrl)) invalidVariables.push("AKARA_SHARE_URL (HTTPS)");
+
+  if (invalidVariables.length) {
+    throw new Error(`Invalid production configuration: ${invalidVariables.join(", ")}`);
+  }
+}
 
 let runtimePublicUrl = "";
 

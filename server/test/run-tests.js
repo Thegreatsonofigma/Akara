@@ -23,6 +23,7 @@ process.env.AKARA_VERIFICATION_FLOW_ID = "replace_with_disabled";
 process.env.AKARA_RECEIPT_OCR = "off";
 process.env.AKARA_ID_OCR = "off";
 process.env.AKARA_MATCHING_BATCH_WINDOW_MS = "0";
+process.env.AKARA_MATCHING_SWEEP_ENABLED = "false";
 process.env.AKARA_PUBLIC_URL = "https://akara-share.example";
 process.env.AKARA_SHARE_URL = "https://akara-share.example";
 
@@ -104,7 +105,13 @@ function lastMediaPayload() {
 
 const { buildReply } = require("../router");
 const { sendIdleMenus } = require("../app");
+const {
+  reserveListingById,
+  runSmartMatchingSweep,
+  runPendingMatchReminderSweep,
+} = require("../flows/listing");
 const { findOrCreateUser } = require("../db/users");
+const { dealReservationExpiresAt } = require("../db/deals");
 const { getSession, rememberFailedMessage } = require("../db/sessions");
 const intents = require("../nlp/intents");
 const { clearHistory } = require("../nlp/history");
@@ -304,6 +311,12 @@ function removeSeededDeals(deals) {
   }
 }
 
+function withdrawOpenNegotiationFixtures() {
+  for (const offer of __table("negotiable_offers")) {
+    if (["pending", "countered"].includes(offer.status)) offer.status = "withdrawn";
+  }
+}
+
 // ---------------------------------------------------------------- tests
 
 async function run() {
@@ -377,6 +390,19 @@ async function run() {
       want_amount: 100000,
       want_currency: "KES",
     }, 20)
+  );
+  check(
+    "controlled reciprocal rate gaps can enter negotiation",
+    Boolean(buildNegotiationPlan({
+      ...fairCandidate,
+      have_amount: 60000,
+      want_amount: 100000,
+    }, {
+      ...fairSource,
+      have_amount: 100000,
+      want_amount: 100000,
+      want_currency: "KES",
+    }, 40))
   );
 
   // ---------- intent regex units
@@ -1468,8 +1494,9 @@ async function run() {
     "trade opening keeps payment facts compact and inline",
     reply.includes("*You send:*")
       && reply.includes("*You receive:*")
-      && reply.includes("*Payment window:* 15 minutes")
-      && reply.includes("*Service fee:* Free")
+      && reply.includes("*Rate:* Locked · *Time:* 30 min · *Fee:* Free")
+      && reply.includes("*Pay this account*")
+      && reply.includes("*Where yours will arrive*")
       && !reply.includes("_You send_"),
     reply
   );
@@ -1483,7 +1510,69 @@ async function run() {
     !reply.includes("*Actions*") && !reply.includes("`paid` after you send"),
     reply
   );
+  check(
+    "trade opening stays concise on a small phone",
+    reply.split("\n").filter((line) => line.trim()).length <= 18
+      && !reply.includes("Terms locked")
+      && !reply.includes("keeps both sides aligned"),
+    reply
+  );
   const openedDealCode = (await getSession(ALICE))?.context_json?.deal_code || __table("deals").at(-1)?.deal_code;
+  const secondTradeOwner = seedVerifiedUser("250700000077", "Second Trade Owner");
+  seedPayout(secondTradeOwner, "NGN");
+  seedPayout(secondTradeOwner, "RWF");
+  const secondTradeListing = seedListing(secondTradeOwner, {
+    code: "AKR-LIST-SECOND",
+    have_currency: "NGN",
+    have_amount: 50000,
+    want_currency: "RWF",
+    want_amount: 60000,
+    listing_type: "fixed",
+  });
+  const dealsBeforeSecondAttempt = __table("deals").length;
+  const secondTradeReply = await reserveListingById(aliceRow, secondTradeListing.id);
+  check(
+    "a user cannot open a second trade while the first is active",
+    secondTradeReply?.body?.includes("*Finish your open trade first*")
+      && secondTradeReply?.body?.includes(openedDealCode)
+      && __table("deals").length === dealsBeforeSecondAttempt
+      && secondTradeListing.status === "active",
+    JSON.stringify({ secondTradeReply, secondTradeListing })
+  );
+  check(
+    "the open-trade block provides one direct return action",
+    secondTradeReply?.buttons?.map((button) => button.id).join(",") === "trade_status",
+    JSON.stringify(secondTradeReply)
+  );
+  const peerBusyTaker = seedVerifiedUser("250700000078", "Peer Busy Taker");
+  seedPayout(peerBusyTaker, "NGN");
+  seedPayout(peerBusyTaker, "RWF");
+  const peerBusyListing = seedListing(bobRow, {
+    code: "AKR-LIST-PEER-BUSY",
+    have_currency: "NGN",
+    have_amount: 70000,
+    want_currency: "RWF",
+    want_amount: 80000,
+    listing_type: "fixed",
+  });
+  const peerBusyReply = await reserveListingById(peerBusyTaker, peerBusyListing.id);
+  check(
+    "a listing owner already in a trade cannot be placed in a second one",
+    peerBusyReply.includes("*This peer is completing another trade*")
+      && peerBusyListing.status === "active"
+      && __table("deals").length === dealsBeforeSecondAttempt,
+    JSON.stringify({ peerBusyReply, peerBusyListing })
+  );
+  reply = await send(ALICE, "I want to close a trade");
+  check(
+    "close-trade request shows only live trades in a native picker",
+    lastListPayload()?.sections?.length === 1
+      && lastListPayload()?.sections?.[0]?.title === "Live trades"
+      && lastListPayload()?.sections?.[0]?.rows?.length === 1
+      && lastListPayload()?.sections?.[0]?.rows?.[0]?.id === `close_trade_${openedDealCode}`
+      && !lastListPayload()?.sections?.[0]?.rows?.some((row) => /completed|cancelled|expired/i.test(row.description || "")),
+    JSON.stringify(lastListPayload())
+  );
 
   // ---------- deal room actions
   scenario("deal room");
@@ -1608,6 +1697,11 @@ async function run() {
     const index = __table("listings").indexOf(listing);
     if (index >= 0) __table("listings").splice(index, 1);
   }
+  if (recalledDeal) recalledDeal.status = "cancelled";
+  for (const phone of [ALICE, BOB]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
 
   // ---------- negotiable listing negotiation
   scenario("negotiable listing negotiation");
@@ -1635,6 +1729,11 @@ async function run() {
   check("owner acceptance opens trade", reply.includes("Akara Trade opened ✅"), reply);
   const negotiatedDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-091")?.id);
   check("negotiated amount becomes deal amount", Number(negotiatedDeal?.want_amount) === 105000, JSON.stringify(negotiatedDeal));
+  if (negotiatedDeal) negotiatedDeal.status = "closed";
+  for (const phone of [ALICE, CHARLIE]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
 
   // ---------- two-way negotiation: counters can move either side
   scenario("two-way negotiation");
@@ -1668,6 +1767,51 @@ async function run() {
   const twoWayDeal = __table("deals").find((row) => row.listing_id === __table("listings").find((listing) => listing.listing_code === "AKR-LIST-092")?.id);
   check("deal keeps negotiated send side", Number(twoWayDeal?.want_amount) === 105000, JSON.stringify(twoWayDeal));
   check("deal keeps negotiated receive side", Number(twoWayDeal?.have_amount) === 98000, JSON.stringify(twoWayDeal));
+  if (twoWayDeal) twoWayDeal.status = "closed";
+  for (const phone of [BOB, CHARLIE]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
+
+  // ---------- a counter may improve what the listing owner receives
+  scenario("executable higher counter");
+  const higherCounterMakerPhone = "250700000071";
+  const higherCounterTakerPhone = "250700000072";
+  const higherCounterMaker = seedVerifiedUser(higherCounterMakerPhone, "Higher Counter Maker");
+  const higherCounterTaker = seedVerifiedUser(higherCounterTakerPhone, "Higher Counter Taker");
+  for (const currency of ["NGN", "GHS"]) {
+    seedPayout(higherCounterMaker, currency);
+    seedPayout(higherCounterTaker, currency);
+  }
+  const higherCounterListing = seedListing(higherCounterMaker, {
+    code: "AKR-LIST-650",
+    have_currency: "NGN",
+    have_amount: 45000,
+    want_currency: "GHS",
+    want_amount: 50000,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(higherCounterTakerPhone, "open AKR-LIST-650");
+  check("higher-counter fixture opens negotiation", reply.includes("*Negotiable listing*"), reply);
+  reply = await send(higherCounterTakerPhone, "I can send 50,000 GHS for 45,000 NGN");
+  check("initial executable proposal reaches the owner", reply.includes("50,000 GHS") && reply.includes("45,000 NGN"), reply);
+  reply = await send(higherCounterMakerPhone, "I need 65,000 GHS");
+  check(
+    "owner can request more without increasing the amount they send",
+    reply.includes("*Counter sent*") && reply.includes("65,000 GHS") && reply.includes("45,000 NGN"),
+    reply
+  );
+  reply = await send(higherCounterTakerPhone, "accept");
+  const higherCounterDeal = __table("deals").find((row) => row.listing_id === higherCounterListing.id);
+  check(
+    "the exact counter shown to the user can be accepted",
+    reply.includes("Akara Trade opened ✅")
+      && Number(higherCounterDeal?.want_amount) === 65000
+      && Number(higherCounterDeal?.have_amount) === 45000,
+    JSON.stringify({ reply, higherCounterDeal })
+  );
+  if (higherCounterDeal) higherCounterDeal.status = "closed";
 
   // ---------- natural owner counter with a leading rejection
   scenario("natural-language counter");
@@ -1731,6 +1875,12 @@ async function run() {
   check("partial source listing is reserved", partialSource?.status === "reserved", JSON.stringify(partialSource));
   check("partial residual listing remains live", Boolean(partialResidual), JSON.stringify(__table("listings").filter((listing) => listing.owner_user_id === charlieRow.id)));
   if (partialResidual) partialResidual.status = "closed";
+  const partialDeal = __table("deals").find((deal) => deal.listing_id === partialSource?.id);
+  if (partialDeal) partialDeal.status = "closed";
+  for (const phone of [ALICE, CHARLIE]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
 
   // ---------- flow interrupts (model-driven, never asks twice)
   scenario("flow interrupts");
@@ -2041,10 +2191,16 @@ async function run() {
   );
   check(
     "auto-match explains its compatibility basis",
-    reply.includes("The currencies, available value and rates are compatible."),
+    reply.includes("A reciprocal offer matched your listing."),
     reply
   );
   reply = await send(ALICE, "cancel trade");
+  check(
+    "auto-match cancellation first asks which live trade to close",
+    lastListPayload()?.sections?.[0]?.rows?.[0]?.id === `close_trade_${autoMatchedDeal.deal_code}`,
+    JSON.stringify(lastListPayload())
+  );
+  reply = await send(ALICE, `close_trade_${autoMatchedDeal.deal_code}`);
   check(
     "pre-payment cancellation requeues the locked auto-match portions",
     reply.includes("locked portions were restored")
@@ -2065,6 +2221,7 @@ async function run() {
   await send(ALICE, "cancel");
 
   scenario("auto match passes favorable rate to user");
+  withdrawOpenNegotiationFixtures();
   for (const phone of [ALICE, BOB]) {
     const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
     if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
@@ -2085,6 +2242,7 @@ async function run() {
   });
   reply = await send(ALICE, "I have 10000 RWF and want at least 13000 NGN");
   check("favorable reciprocal request previews listing", reply.includes("*Review listing*"), reply);
+  const buttonsBeforeFavorableMatch = buttonSends.length;
   reply = await send(ALICE, "publish");
   const favorableDeal = __table("deals").at(-1);
   check(
@@ -2097,9 +2255,17 @@ async function run() {
   );
   check(
     "price improvement is explained without asking for negotiation",
-    reply.includes("receive more than your minimum")
+    reply.includes("Better rate: you get an extra 1,252.19 NGN")
       && !reply.includes("negotiation opened"),
     reply
+  );
+  const favorableMakerNotice = buttonSends
+    .slice(buttonsBeforeFavorableMatch)
+    .find((entry) => entry.to === BOB)?.payload?.body || "";
+  check(
+    "the reciprocal peer sees the value kept through the better rate",
+    favorableMakerNotice.includes("Better rate: you keep 1,372.81 NGN"),
+    favorableMakerNotice
   );
   const favorableResidual = __table("listings").find((row) => (
     row.owner_user_id === bobRow.id
@@ -2117,6 +2283,7 @@ async function run() {
   favorableDeal.status = "cancelled";
 
   scenario("favorable partial fill preserves requester minimum");
+  withdrawOpenNegotiationFixtures();
   for (const phone of [ALICE, BOB]) {
     const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
     if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
@@ -2155,6 +2322,7 @@ async function run() {
   requesterPartialDeal.status = "cancelled";
 
   scenario("non-crossing negotiable reciprocal");
+  withdrawOpenNegotiationFixtures();
   for (const phone of [ALICE, BOB]) {
     const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
     if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
@@ -2167,7 +2335,7 @@ async function run() {
   const negotiationCandidate = seedListing(bobRow, {
     code: "AKR-LIST-203",
     have_currency: "NGN",
-    have_amount: 90000,
+    have_amount: 60000,
     want_currency: "RWF",
     want_amount: 100000,
     listing_type: "negotiable",
@@ -2178,7 +2346,9 @@ async function run() {
   reply = await send(ALICE, "publish");
   check(
     "non-crossing negotiable pair opens negotiation instead of a trade",
-    reply.includes("*Listing live · negotiation opened*") && !reply.includes("Akara Trade opened"),
+    reply.includes("*Listing live · negotiation opened*")
+      && reply.includes("requested rates differ")
+      && !reply.includes("Akara Trade opened"),
     reply
   );
   const reciprocalOffer = __table("negotiable_offers").at(-1);
@@ -2191,8 +2361,8 @@ async function run() {
   );
   check(
     "reciprocal negotiation proposes values both listings can cover",
-    Number(reciprocalOffer?.offered_amount) === 94868.33
-      && Number(reciprocalOffer?.receive_amount) === 90000,
+    Number(reciprocalOffer?.offered_amount) === 77459.67
+      && Number(reciprocalOffer?.receive_amount) === 60000,
     JSON.stringify(reciprocalOffer)
   );
   const ownerNegotiationButtons = buttonSends
@@ -2209,6 +2379,35 @@ async function run() {
     JSON.stringify(lastButtonPayload())
   );
   check("both users enter the same negotiation", (await sessionFlow(ALICE)) === "negotiation" && (await sessionFlow(BOB)) === "negotiation");
+  const secondNegotiationSource = seedListing(aliceRow, {
+    code: "AKR-LIST-204",
+    have_currency: "GHS",
+    have_amount: 1000,
+    want_currency: "XAF",
+    want_amount: 500000,
+    listing_type: "negotiable",
+  });
+  const secondNegotiationCandidate = seedListing(bobRow, {
+    code: "AKR-LIST-205",
+    have_currency: "XAF",
+    have_amount: 100000,
+    want_currency: "GHS",
+    want_amount: 1000,
+    listing_type: "negotiable",
+  });
+  await runSmartMatchingSweep({ batchSize: 500 });
+  check(
+    "an open negotiation prevents competing automatic proposals",
+    secondNegotiationSource.status === "active"
+      && secondNegotiationCandidate.status === "active"
+      && !__table("negotiable_offers").some((offer) => (
+        offer.listing_id === secondNegotiationCandidate.id
+        || String(offer.message || "").includes(secondNegotiationSource.id)
+      )),
+    JSON.stringify({ secondNegotiationSource, secondNegotiationCandidate })
+  );
+  secondNegotiationSource.status = "closed";
+  secondNegotiationCandidate.status = "closed";
   reply = await send(ALICE, "change_proposal");
   check("change proposal button explains how to send new values", reply.includes("*Change proposal*") && reply.includes("Example:"), reply);
   reply = await send(BOB, "accept");
@@ -2511,6 +2710,181 @@ async function run() {
     Object.assign(config, { coinProfileApiUrl: "", coinProfileApiKey: "", coinProfileUsername: "" });
   }
 
+  scenario("recurring smart matching sweep");
+  const sweepMaker = seedVerifiedUser("250700000091", "Sweep Maker");
+  const sweepTaker = seedVerifiedUser("250700000092", "Sweep Taker");
+  for (const currency of ["GHS", "KES"]) {
+    seedPayout(sweepMaker, currency);
+    seedPayout(sweepTaker, currency);
+  }
+  for (const listing of __table("listings")) {
+    const isSweepPair = ["GHS", "KES"].includes(listing.have_currency)
+      && ["GHS", "KES"].includes(listing.want_currency);
+    if (isSweepPair && listing.status === "active") listing.status = "closed";
+  }
+  const sweepSource = seedListing(sweepMaker, {
+    code: "AKR-LIST-SW1",
+    have_currency: "KES",
+    have_amount: 100000,
+    want_currency: "GHS",
+    want_amount: 2000,
+    listing_type: "negotiable",
+    created_at: "2025-02-01T00:00:00.000Z",
+  });
+  const sweepCandidate = seedListing(sweepTaker, {
+    code: "AKR-LIST-SW2",
+    have_currency: "GHS",
+    have_amount: 2200,
+    want_currency: "KES",
+    want_amount: 100000,
+    listing_type: "negotiable",
+    created_at: "2025-02-01T00:00:01.000Z",
+  });
+  const dealsBeforeSweep = __table("deals").length;
+  const sweepResult = await runSmartMatchingSweep({ batchSize: 500 });
+  const sweepDeal = __table("deals").find((deal) => deal.listing_id === sweepCandidate.id);
+  check(
+    "recurring sweep matches reciprocal listings without a new chat message",
+    sweepResult.matched >= 1
+      && Boolean(sweepDeal)
+      && sweepSource.status === "reserved"
+      && sweepCandidate.status === "reserved",
+    JSON.stringify({ sweepResult, sweepDeal, sweepSource, sweepCandidate })
+  );
+  await runSmartMatchingSweep({ batchSize: 500 });
+  check(
+    "repeated sweeps do not duplicate an already claimed match",
+    __table("deals").length === dealsBeforeSweep + 1,
+    JSON.stringify(__table("deals").slice(dealsBeforeSweep))
+  );
+
+  scenario("restart-safe automatic match reminders");
+  const legacyCreatedAt = Date.parse("2026-07-26T11:00:00.000Z");
+  const legacyEffectiveExpiry = dealReservationExpiresAt({
+    created_at: new Date(legacyCreatedAt).toISOString(),
+    reservation_expires_at: new Date(legacyCreatedAt + 15 * 60 * 1000).toISOString(),
+  });
+  check(
+    "existing 15-minute reservations inherit the new 30-minute window",
+    legacyEffectiveExpiry?.getTime() === legacyCreatedAt + 30 * 60 * 1000,
+    legacyEffectiveExpiry?.toISOString() || ""
+  );
+  const reminderMaker = seedVerifiedUser("250700000093", "Reminder Maker");
+  const reminderTaker = seedVerifiedUser("250700000094", "Reminder Taker");
+  const reminderListing = seedListing(reminderMaker, {
+    code: "AKR-LIST-RM1",
+    have_currency: "RWF",
+    have_amount: 150000,
+    want_currency: "KES",
+    want_amount: 18000,
+    listing_type: "fixed",
+    status: "reserved",
+  });
+  const reminderNow = Date.parse("2026-07-26T12:10:00.000Z");
+  const reminderCreatedAt = new Date(reminderNow - 6 * 60 * 1000).toISOString();
+  const reminderDeal = {
+    id: crypto.randomUUID(),
+    deal_code: "AKR-TXN-RM1",
+    listing_id: reminderListing.id,
+    maker_user_id: reminderMaker.id,
+    taker_user_id: reminderTaker.id,
+    have_currency: "RWF",
+    want_currency: "KES",
+    have_amount: 150000,
+    want_amount: 18000,
+    status: "reserved",
+    reservation_expires_at: new Date(reminderNow + 9 * 60 * 1000).toISOString(),
+    created_at: reminderCreatedAt,
+  };
+  __table("deals").push(reminderDeal);
+  __table("audit_events").push({
+    id: crypto.randomUUID(),
+    actor_type: "system",
+    entity_type: "deal",
+    entity_id: reminderDeal.id,
+    event_name: "smart_match_cleared",
+    event_payload: {},
+    created_at: reminderCreatedAt,
+  });
+  const buttonsBeforeAutomaticReminder = buttonSends.length;
+  const automaticReminderResult = await runPendingMatchReminderSweep({
+    nowMs: reminderNow,
+    reminderAfterMs: 5 * 60 * 1000,
+  });
+  const automaticReminderSends = buttonSends.slice(buttonsBeforeAutomaticReminder);
+  check(
+    "five-minute sweep reminds both inactive peers without a chat message",
+    automaticReminderResult.sent === 2
+      && automaticReminderSends.length === 2
+      && automaticReminderSends.every((entry) => entry.payload?.body?.includes("Your matched exchange is waiting")),
+    JSON.stringify({ automaticReminderResult, automaticReminderSends })
+  );
+  const automaticReminderEvents = __table("audit_events").filter(
+    (event) => event.entity_id === reminderDeal.id
+      && event.event_name === "automatic_match_reminder_sent"
+  );
+  check(
+    "automatic reminder delivery is persisted for restart recovery",
+    automaticReminderEvents.length === 2,
+    JSON.stringify(automaticReminderEvents)
+  );
+  const buttonsBeforeRepeatedReminder = buttonSends.length;
+  const repeatedAutomaticReminder = await runPendingMatchReminderSweep({
+    nowMs: reminderNow + 30000,
+    reminderAfterMs: 5 * 60 * 1000,
+  });
+  check(
+    "later sweeps do not duplicate an automatic reminder",
+    repeatedAutomaticReminder.sent === 0 && buttonSends.length === buttonsBeforeRepeatedReminder,
+    JSON.stringify(repeatedAutomaticReminder)
+  );
+
+  const reminderNegotiationListing = seedListing(reminderMaker, {
+    code: "AKR-LIST-RM2",
+    have_currency: "GHS",
+    have_amount: 2000,
+    want_currency: "KES",
+    want_amount: 100000,
+    listing_type: "negotiable",
+  });
+  const reminderOffer = {
+    id: crypto.randomUUID(),
+    listing_id: reminderNegotiationListing.id,
+    offering_user_id: reminderTaker.id,
+    offered_amount: 98000,
+    offered_currency: "KES",
+    receive_amount: 2000,
+    receive_currency: "GHS",
+    status: "pending",
+    message: `reciprocal_source:${crypto.randomUUID()}`,
+    created_at: reminderCreatedAt,
+    updated_at: reminderCreatedAt,
+  };
+  __table("negotiable_offers").push(reminderOffer);
+  __table("audit_events").push({
+    id: crypto.randomUUID(),
+    actor_type: "system",
+    entity_type: "negotiable_offer",
+    entity_id: reminderOffer.id,
+    event_name: "smart_match_negotiation_suggested",
+    event_payload: {},
+    created_at: reminderCreatedAt,
+  });
+  const buttonsBeforeNegotiationReminder = buttonSends.length;
+  const negotiationReminderResult = await runPendingMatchReminderSweep({
+    nowMs: reminderNow,
+    reminderAfterMs: 5 * 60 * 1000,
+  });
+  const negotiationReminderSend = buttonSends.at(-1);
+  check(
+    "pending negotiation reminds the peer who owes the decision",
+    negotiationReminderResult.sent === 1
+      && buttonSends.length === buttonsBeforeNegotiationReminder + 1
+      && negotiationReminderSend?.to === reminderMaker.whatsapp_phone
+      && negotiationReminderSend?.payload?.buttons?.map((button) => button.id).join(",") === "accept,counter,decline",
+    JSON.stringify({ negotiationReminderResult, negotiationReminderSend })
+  );
+
   clearHistory(ALICE);
   clearHistory(BOB);
   clearHistory(CHIDI);
@@ -2530,7 +2904,7 @@ run()
     }
     realLog("All offline tests passed ✅");
     // The deal room schedules real receipt-deadline timers; exit explicitly
-    // so a pending 15-minute setTimeout cannot keep the test process alive.
+    // so a pending payment-window setTimeout cannot keep the test process alive.
     process.exit(0);
   })
   .catch((error) => {

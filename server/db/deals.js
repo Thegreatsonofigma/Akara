@@ -1,4 +1,5 @@
 const { supabaseRequest, filterValue } = require("../lib/supabase");
+const { config } = require("../config");
 const { caption, labeled, fieldBlock, formatMoney, title } = require("../lib/format");
 const { displayReference } = require("./listings");
 const { getUserById } = require("./users");
@@ -6,6 +7,14 @@ const { getDefaultPaymentProfile } = require("./payments");
 const { sendWhatsAppText } = require("../lib/whatsapp");
 
 const DEAL_SELECT = "deals?select=id,deal_code,maker_user_id,taker_user_id,have_currency,want_currency,have_amount,want_amount,status,maker_sent_at,taker_sent_at,maker_received_at,taker_received_at,reservation_expires_at,created_at";
+const BLOCKING_DEAL_STATUSES = [
+  "reserved",
+  "instructions_viewed",
+  "maker_sent",
+  "taker_sent",
+  "partially_confirmed",
+  "disputed",
+];
 
 async function getDealById(dealId) {
   const rows = await supabaseRequest(`deals?id=eq.${filterValue(dealId)}&limit=1`);
@@ -42,6 +51,31 @@ async function getLatestOpenDealForUser(userId) {
   }
 
   return null;
+}
+
+async function getBlockingOpenDealForUser(userId) {
+  const deals = await getOpenDealsForUser(userId);
+  return deals[0] || null;
+}
+
+async function getOpenDealsForUser(userId, limit = 10) {
+  const rows = await supabaseRequest(
+    [
+      DEAL_SELECT,
+      `or=(maker_user_id.eq.${filterValue(userId)},taker_user_id.eq.${filterValue(userId)})`,
+      `status=in.(${BLOCKING_DEAL_STATUSES.join(",")})`,
+      "order=created_at.desc",
+      `limit=${Math.max(1, Math.min(50, Number(limit) || 10))}`,
+    ].join("&")
+  );
+
+  const openDeals = [];
+  for (const deal of rows) {
+    if (await expireDealIfElapsed(deal)) continue;
+    openDeals.push(deal);
+  }
+
+  return openDeals;
 }
 
 async function getCompletedTradeCount(userId) {
@@ -102,10 +136,23 @@ function hasDealPaymentActivity(deal) {
 }
 
 function isDealWindowElapsed(deal) {
-  if (!deal?.reservation_expires_at) return false;
+  const expiresAt = dealReservationExpiresAt(deal);
+  if (!expiresAt) return false;
   if (["closed", "cancelled", "expired", "disputed"].includes(deal.status)) return false;
   if (hasDealPaymentActivity(deal)) return false;
-  return new Date(deal.reservation_expires_at).getTime() <= Date.now();
+  return expiresAt.getTime() <= Date.now();
+}
+
+function dealReservationExpiresAt(deal) {
+  if (!deal) return null;
+  const storedMs = new Date(deal.reservation_expires_at || 0).getTime();
+  const createdMs = new Date(deal.created_at || 0).getTime();
+  const configuredMs = createdMs > 0 ? createdMs + config.tradePaymentWindowMs : 0;
+  const effectiveMs = Math.max(
+    Number.isFinite(storedMs) ? storedMs : 0,
+    Number.isFinite(configuredMs) ? configuredMs : 0
+  );
+  return effectiveMs > 0 ? new Date(effectiveMs) : null;
 }
 
 async function expireDealIfElapsed(deal) {
@@ -228,10 +275,13 @@ module.exports = {
   getDealById,
   getDealByCodeForUser,
   getLatestOpenDealForUser,
+  getBlockingOpenDealForUser,
+  getOpenDealsForUser,
   getCompletedTradeCount,
   syncCompletedDealsCount,
   userRoleInDeal,
   isCompletedDeal,
+  dealReservationExpiresAt,
   expireDealIfElapsed,
   dealPartySummary,
   dealSentField,

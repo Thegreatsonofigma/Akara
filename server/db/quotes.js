@@ -103,7 +103,16 @@ async function attachQuoteToDeal(quote, dealId) {
   });
 }
 
+async function cancelLockedQuote(quote) {
+  if (!quote?.id) return;
+  await supabaseRequest(`locked_quotes?id=eq.${filterValue(quote.id)}&status=eq.locked`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: "cancelled" }),
+  });
+}
+
 module.exports = {
   createLockedQuote,
   attachQuoteToDeal,
+  cancelLockedQuote,
 };
