@@ -44,6 +44,10 @@ const COUNTRY_LABELS = {
   GA: "Gabon",
   OTHER: "Other",
 };
+const COUNTRY_CHOICES = Object.entries(COUNTRY_LABELS).map(([id, label]) => ({
+  id,
+  label,
+}));
 
 const COUNTRY_CITY_EXAMPLES = {
   nigeria: ["Lagos", "Abuja"],
@@ -142,6 +146,54 @@ function idTypePromptReply(context = {}, body = "Choose the ID you want to use."
     list: idTypeListPayload(context, body),
     fallbackText: idTypePrompt(context),
   };
+}
+
+function verificationFlowEnabled() {
+  return config.akaraVerificationMode === "flow" && Boolean(config.akaraVerificationFlowId);
+}
+
+function countryPromptCopy(kind) {
+  if (kind === "nationality") return "Choose your nationality, or type the country name.";
+  if (kind === "residence") return "Choose the country you currently live in, or type its name.";
+  return "Choose the country that issued your ID, or type its name.";
+}
+
+function countryListPayload(kind, body = countryPromptCopy(kind)) {
+  return {
+    body,
+    button: "Choose country",
+    sections: [
+      {
+        title: "Countries",
+        rows: COUNTRY_CHOICES.map(({ id, label }) => ({
+          id: `verify_country:${kind}:${id}`,
+          title: label === "Other" ? "Another country" : label,
+          description: label === "Other" ? "Type a country not shown here." : `Select ${label}.`,
+        })),
+      },
+    ],
+  };
+}
+
+function countryPromptReply(kind, body = countryPromptCopy(kind)) {
+  return {
+    type: "whatsapp_list",
+    list: countryListPayload(kind, body),
+    fallbackText: body,
+  };
+}
+
+function parseCountryAnswer(input, expectedKind) {
+  const raw = String(input || "").trim();
+  const match = raw.match(/^verify_country:(nationality|residence|id_country):([a-z]+)$/i);
+  if (!match) {
+    return { value: normalizeShortText(raw, 60), needsCustom: false };
+  }
+
+  if (match[1].toLowerCase() !== expectedKind) return { value: "", needsCustom: false };
+  const code = match[2].toUpperCase();
+  if (code === "OTHER") return { value: "", needsCustom: true };
+  return { value: COUNTRY_LABELS[code] || "", needsCustom: false };
 }
 
 function whatsappButtonsReply(body, buttons, fallbackText = body) {
@@ -577,6 +629,38 @@ function verificationReviewEditPrompt() {
   ].join("\n");
 }
 
+function verificationReviewEditListReply() {
+  const rows = [
+    ["legal_name", "Legal name", "Correct your verified legal name."],
+    ["nationality", "Nationality", "Change your country of nationality."],
+    ["residence", "Residence", "Change the country where you live."],
+    ["city", "City", "Correct your current city."],
+    ["id_type", "ID type", "Choose a different document type."],
+    ["id_country", "ID country", "Change the ID issuing country."],
+    ["document", "ID document", "Upload a clearer or corrected ID."],
+    ["selfie", "Selfie", "Upload a new selfie."],
+    ["payout", "Payout detail", "Add a corrected payout account."],
+  ];
+  return {
+    type: "whatsapp_list",
+    list: {
+      body: "Choose the verification detail you want to correct.",
+      button: "Choose detail",
+      sections: [
+        {
+          title: "Verification details",
+          rows: rows.map(([id, rowTitle, description]) => ({
+            id: `verify_edit:${id}`,
+            title: rowTitle,
+            description,
+          })),
+        },
+      ],
+    },
+    fallbackText: verificationReviewEditPrompt(),
+  };
+}
+
 function verificationReviewEditStepPrompt(step, context = {}) {
   const prompts = {
     review_edit_legal_name: LEGAL_NAME_PROMPT,
@@ -592,7 +676,7 @@ function verificationReviewEditStepPrompt(step, context = {}) {
 }
 
 function verificationReviewEditStep(text) {
-  const command = compactText(text);
+  const command = compactText(String(text || "").replace(/^verify_edit:/i, ""));
   if (/^(1|legal name|name|full name)$/.test(command) || /\blegal name\b/.test(command)) return "review_edit_legal_name";
   if (/^(2|nationality|country of origin)$/.test(command) || /\bnationality\b/.test(command)) return "review_edit_nationality";
   if (/^(3|residence|country|country of residence|where i live)$/.test(command) || /\b(residence|live in)\b/.test(command)) return "review_edit_residence_country";
@@ -639,7 +723,7 @@ async function startVerification(user) {
 
   await updateUser(user.id, { verification_status: "pending_input", verification_score: 10 });
 
-  if (config.akaraVerificationFlowId) {
+  if (verificationFlowEnabled()) {
     const token = crypto.randomBytes(18).toString("base64url");
     await upsertSession(user, user.whatsapp_phone, "verification", "flow_details", {
       request_id: requestId,
@@ -653,11 +737,12 @@ async function startVerification(user) {
   });
 
   return [
-    "Let's verify your Akara profile.",
+    title("Verify your Akara profile"),
+    caption("Identity, selfie and payout-name checks help protect every exchange."),
     "",
     LEGAL_NAME_PROMPT,
     "",
-    "Akara stores this for safety review. Do not send someone else's document.",
+    caption("Use only your own legal details and documents."),
   ].join("\n");
 }
 
@@ -918,7 +1003,7 @@ async function handleVerification(text, user, session, incoming = {}) {
   if (!requestId) return startVerification(user);
 
   if (step === "flow_details") {
-    if (config.akaraVerificationFlowId) {
+    if (verificationFlowEnabled()) {
       const token = context.verification_flow_token || crypto.randomBytes(18).toString("base64url");
       await upsertSession(user, user.whatsapp_phone, "verification", "flow_details", {
         request_id: requestId,
@@ -976,6 +1061,15 @@ async function handleVerification(text, user, session, incoming = {}) {
         if (directStep === "review_edit_id_type") {
           return idTypePromptReply(context, "Choose the corrected ID type.");
         }
+        if (directStep === "review_edit_nationality") {
+          return countryPromptReply("nationality", "Choose the corrected nationality.");
+        }
+        if (directStep === "review_edit_residence_country") {
+          return countryPromptReply("residence", "Choose the corrected country of residence.");
+        }
+        if (directStep === "review_edit_id_country") {
+          return countryPromptReply("id_country", "Choose the corrected ID issuing country.");
+        }
         return verificationReviewEditStepPrompt(directStep, context);
       }
 
@@ -983,7 +1077,7 @@ async function handleVerification(text, user, session, incoming = {}) {
         request_id: requestId,
         payment_count: Number(context.payment_count || 0),
       });
-      return verificationReviewEditPrompt();
+      return verificationReviewEditListReply();
     }
 
     if (/\b(cancel|stop|pause|later|not now)\b/.test(command)) {
@@ -1005,7 +1099,7 @@ async function handleVerification(text, user, session, incoming = {}) {
     if (isSubmitVerificationIntent(text)) return finishVerificationSubmission(user, requestId);
 
     const nextStep = verificationReviewEditStep(text);
-    if (!nextStep) return verificationReviewEditPrompt();
+    if (!nextStep) return verificationReviewEditListReply();
 
     if (nextStep === "payment_currency") {
       await upsertSession(user, user.whatsapp_phone, "verification", "payment_currency", {
@@ -1026,6 +1120,15 @@ async function handleVerification(text, user, session, incoming = {}) {
     });
     if (nextStep === "review_edit_id_type") {
       return idTypePromptReply(context, "Choose the corrected ID type.");
+    }
+    if (nextStep === "review_edit_nationality") {
+      return countryPromptReply("nationality", "Choose the corrected nationality.");
+    }
+    if (nextStep === "review_edit_residence_country") {
+      return countryPromptReply("residence", "Choose the corrected country of residence.");
+    }
+    if (nextStep === "review_edit_id_country") {
+      return countryPromptReply("id_country", "Choose the corrected ID issuing country.");
     }
     return verificationReviewEditStepPrompt(nextStep, context);
   }
@@ -1078,7 +1181,7 @@ async function handleVerification(text, user, session, incoming = {}) {
     context.legal_name = legalName;
     await updateUser(user.id, { legal_name: legalName });
     await upsertSession(user, user.whatsapp_phone, "verification", "nationality", context);
-    return NATIONALITY_PROMPT;
+    return countryPromptReply("nationality");
   }
 
   if (step === "review_edit_legal_name") {
@@ -1096,17 +1199,21 @@ async function handleVerification(text, user, session, incoming = {}) {
   }
 
   if (step === "nationality") {
-    const nationality = normalizeShortText(text, 60);
+    const answer = parseCountryAnswer(text, "nationality");
+    if (answer.needsCustom) return "Type your nationality as a country name.";
+    const nationality = answer.value;
     if (!isValidPlaceName(nationality)) return "Send your nationality as a country name. Example: Nigeria.";
 
     context.nationality = nationality;
     await updateUser(user.id, { nationality });
     await upsertSession(user, user.whatsapp_phone, "verification", "residence_country", context);
-    return RESIDENCE_PROMPT;
+    return countryPromptReply("residence");
   }
 
   if (step === "review_edit_nationality") {
-    const nationality = normalizeShortText(text, 60);
+    const answer = parseCountryAnswer(text, "nationality");
+    if (answer.needsCustom) return "Type your nationality as a country name.";
+    const nationality = answer.value;
     if (!isValidPlaceName(nationality)) return "Send your nationality as a country name. Example: Nigeria.";
 
     await updateUser(user.id, { nationality });
@@ -1114,7 +1221,9 @@ async function handleVerification(text, user, session, incoming = {}) {
   }
 
   if (step === "residence_country") {
-    const residenceCountry = normalizeShortText(text, 60);
+    const answer = parseCountryAnswer(text, "residence");
+    if (answer.needsCustom) return "Type the country where you currently live.";
+    const residenceCountry = answer.value;
     if (!isValidPlaceName(residenceCountry)) return "Send the country you live in as a name. Example: Rwanda.";
 
     context.residence_country = residenceCountry;
@@ -1124,7 +1233,9 @@ async function handleVerification(text, user, session, incoming = {}) {
   }
 
   if (step === "review_edit_residence_country") {
-    const residenceCountry = normalizeShortText(text, 60);
+    const answer = parseCountryAnswer(text, "residence");
+    if (answer.needsCustom) return "Type the country where you currently live.";
+    const residenceCountry = answer.value;
     if (!isValidPlaceName(residenceCountry)) return "Send the country you live in as a name. Example: Rwanda.";
 
     await updateUser(user.id, { residence_country: residenceCountry });
@@ -1161,7 +1272,7 @@ async function handleVerification(text, user, session, incoming = {}) {
       body: JSON.stringify({ id_type: idType }),
     });
     await upsertSession(user, user.whatsapp_phone, "verification", "id_country", context);
-    return ID_COUNTRY_PROMPT;
+    return countryPromptReply("id_country");
   }
 
   if (step === "review_edit_id_type") {
@@ -1178,7 +1289,9 @@ async function handleVerification(text, user, session, incoming = {}) {
   }
 
   if (step === "id_country") {
-    const idCountry = normalizeShortText(text, 60);
+    const answer = parseCountryAnswer(text, "id_country");
+    if (answer.needsCustom) return "Type the country that issued your ID.";
+    const idCountry = answer.value;
     if (!isValidPlaceName(idCountry)) return "Send the country that issued your ID as a name. Example: Nigeria.";
 
     context.id_country = idCountry;
@@ -1191,7 +1304,9 @@ async function handleVerification(text, user, session, incoming = {}) {
   }
 
   if (step === "review_edit_id_country") {
-    const idCountry = normalizeShortText(text, 60);
+    const answer = parseCountryAnswer(text, "id_country");
+    if (answer.needsCustom) return "Type the country that issued your ID.";
+    const idCountry = answer.value;
     if (!isValidPlaceName(idCountry)) return "Send the country that issued your ID as a name. Example: Nigeria.";
 
     await supabaseRequest(`verification_requests?id=eq.${filterValue(requestId)}`, {

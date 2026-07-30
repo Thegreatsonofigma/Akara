@@ -541,7 +541,9 @@ async function run() {
   scenario("verification WhatsApp Flow");
   const U6 = "250711000006";
   const oldFlowId = config.akaraVerificationFlowId;
+  const oldFlowMode = config.akaraVerificationMode;
   config.akaraVerificationFlowId = "flow_verification_test";
+  config.akaraVerificationMode = "flow";
 
   try {
     const flowUser = await findOrCreateUser(U6, "Flow User");
@@ -583,6 +585,24 @@ async function run() {
     check("Flow parks user at document upload", (await sessionState(U6)).step === "document_front");
   } finally {
     config.akaraVerificationFlowId = oldFlowId;
+    config.akaraVerificationMode = oldFlowMode;
+  }
+
+  scenario("manual verification launch mode");
+  const U8 = "250711000008";
+  const savedFlowId = config.akaraVerificationFlowId;
+  const savedFlowMode = config.akaraVerificationMode;
+  config.akaraVerificationFlowId = "unpublished_flow_must_not_open";
+  config.akaraVerificationMode = "manual";
+  try {
+    const manualUser = await findOrCreateUser(U8, "Manual User");
+    const manualReply = await startVerification(manualUser);
+    check("manual mode ignores an unpublished Flow ID", typeof manualReply === "string", JSON.stringify(manualReply));
+    check("manual mode starts with legal name", manualReply.toLowerCase().includes("legal name"), manualReply);
+    check("manual mode stores the legal-name step", (await sessionState(U8)).step === "legal_name");
+  } finally {
+    config.akaraVerificationFlowId = savedFlowId;
+    config.akaraVerificationMode = savedFlowMode;
   }
 }
 

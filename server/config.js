@@ -89,7 +89,9 @@ const config = {
   typingIndicatorEnabled: booleanEnv("AKARA_TYPING_INDICATOR", true),
   akaraWhatsappNumber: optionalEnv("AKARA_WHATSAPP_NUMBER", "15556733907"),
   adminHost: optionalEnv("AKARA_ADMIN_HOST", "admin.tryakara.com"),
+  akaraSecurityMode: optionalEnv("AKARA_SECURITY_MODE", "web").toLowerCase(),
   akaraSecurityFlowId: optionalEnv("AKARA_SECURITY_FLOW_ID"),
+  akaraVerificationMode: optionalEnv("AKARA_VERIFICATION_MODE", "manual").toLowerCase(),
   akaraVerificationFlowId: optionalEnv("AKARA_VERIFICATION_FLOW_ID"),
   publicUrl: optionalEnv("AKARA_PUBLIC_URL"),
   shareUrl: optionalEnv("AKARA_SHARE_URL", "https://tryakara.com"),
@@ -170,6 +172,18 @@ if (process.env.NODE_ENV === "production") {
   if (!config.whatsappPhoneNumberId) invalidVariables.push("WHATSAPP_PHONE_NUMBER_ID");
   if (!/^https:\/\//i.test(config.publicUrl)) invalidVariables.push("AKARA_PUBLIC_URL (HTTPS)");
   if (!/^https:\/\//i.test(config.shareUrl)) invalidVariables.push("AKARA_SHARE_URL (HTTPS)");
+  if (!["web", "flow"].includes(config.akaraSecurityMode)) {
+    invalidVariables.push("AKARA_SECURITY_MODE (web or flow)");
+  }
+  if (!["manual", "flow"].includes(config.akaraVerificationMode)) {
+    invalidVariables.push("AKARA_VERIFICATION_MODE (manual or flow)");
+  }
+  if (config.akaraSecurityMode === "flow" && !config.akaraSecurityFlowId) {
+    invalidVariables.push("AKARA_SECURITY_FLOW_ID (required when AKARA_SECURITY_MODE=flow)");
+  }
+  if (config.akaraVerificationMode === "flow" && !config.akaraVerificationFlowId) {
+    invalidVariables.push("AKARA_VERIFICATION_FLOW_ID (required when AKARA_VERIFICATION_MODE=flow)");
+  }
 
   if (invalidVariables.length) {
     throw new Error(`Invalid production configuration: ${invalidVariables.join(", ")}`);

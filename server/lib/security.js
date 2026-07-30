@@ -107,9 +107,13 @@ function authorizationPrompt(url, actionLabel) {
 }
 
 function securityFlowPrompt(type, token, actionLabel) {
-  if (!config.akaraSecurityFlowId) return null;
+  if (config.akaraSecurityMode !== "flow" || !config.akaraSecurityFlowId) return null;
 
   const setup = type === "setup";
+  const screenHeading = setup ? "Set up your passcode" : "Authorize this action";
+  const screenBody = setup
+    ? "Create a private 6 digit code for payout changes and other sensitive actions."
+    : "Approve this request with your Akara passcode.";
   return {
     type: "whatsapp_flow",
     fallbackText: setup
@@ -118,7 +122,7 @@ function securityFlowPrompt(type, token, actionLabel) {
     flow: {
       flowId: config.akaraSecurityFlowId,
       flowToken: token,
-      screen: setup ? "SETUP_PIN" : "AUTHORIZE_PIN",
+      screen: "SECURITY_PIN",
       headerText: setup ? "Setup Akara code" : "Authorize action",
       body: setup
         ? "Set your Akara code securely inside WhatsApp. It protects payout changes and other sensitive actions."
@@ -129,6 +133,8 @@ function securityFlowPrompt(type, token, actionLabel) {
         mode: setup ? "setup" : "authorize",
         challenge_token: token,
         action_label: actionLabel,
+        screen_heading: screenHeading,
+        screen_body: screenBody,
       },
     },
   };

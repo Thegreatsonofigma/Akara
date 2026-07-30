@@ -2,6 +2,12 @@
 
 Akara can collect identity text details in a native WhatsApp Flow tray, then continue inside chat for the ID document and selfie uploads.
 
+For production launches where Meta has not approved or published the Flow,
+Akara uses its complete manual WhatsApp verification journey instead. The
+manual journey keeps users in chat, uses native WhatsApp lists and reply
+buttons for key choices, collects ID and selfie evidence, performs OCR and
+identity checks, and sends mismatches to admin review.
+
 ## What this Flow collects
 
 - Full legal name
@@ -31,6 +37,7 @@ separate dropdown picker.
 8. Copy the Flow ID into `.env`:
 
 ```bash
+AKARA_VERIFICATION_MODE=flow
 AKARA_VERIFICATION_FLOW_ID=your_meta_whatsapp_verification_flow_id
 WHATSAPP_FLOW_MODE=draft
 ```
@@ -41,6 +48,16 @@ Meta's browser preview renders and validates each screen, but its embedded
 preview may not execute `navigate` actions. Test the full transition by sending
 the draft Flow to a staging recipient in WhatsApp. Remove
 `WHATSAPP_FLOW_MODE=draft` after publishing the Flow.
+
+Do not set `AKARA_VERIFICATION_MODE=flow` until Meta has successfully
+published the Flow. For the production-safe manual journey use:
+
+```bash
+AKARA_VERIFICATION_MODE=manual
+```
+
+The Flow ID may remain configured while manual mode is active; Akara will not
+launch it.
 
 ## Flow JSON
 
