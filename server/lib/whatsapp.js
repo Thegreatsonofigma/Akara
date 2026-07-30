@@ -210,6 +210,7 @@ async function sendWhatsAppFlow(to, {
         flow_id: flowId,
         flow_token: flowToken,
         flow_cta: button,
+        ...(config.whatsappFlowMode ? { mode: config.whatsappFlowMode } : {}),
         flow_action: "navigate",
         flow_action_payload: {
           screen,

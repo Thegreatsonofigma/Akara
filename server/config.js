@@ -80,6 +80,7 @@ const config = {
   whatsappAccessToken: optionalEnv("WHATSAPP_ACCESS_TOKEN"),
   whatsappGraphVersion: process.env.WHATSAPP_GRAPH_VERSION || "v20.0",
   whatsappPhoneNumberId: optionalEnv("WHATSAPP_PHONE_NUMBER_ID"),
+  whatsappFlowMode: optionalEnv("WHATSAPP_FLOW_MODE"),
   metaAppSecret: optionalEnv("META_APP_SECRET"),
   requireWebhookSignature: booleanEnv(
     "AKARA_REQUIRE_WEBHOOK_SIGNATURE",
