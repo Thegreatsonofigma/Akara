@@ -1087,6 +1087,11 @@ function paymentProfileInterrupt(interpretedAction) {
     && !["add_payout", "settings_action"].includes(interpretedAction);
 }
 
+function isPaymentProfileInteractiveCommand(command) {
+  return /^(?:payout_currency:[a-z]{3}|payout_network:.+|payout_bank:.+|payout_bank_page:\d+|payout_bank_search|confirm_account_owner|wrong_account|edit_account_number|edit_account_bank|retry_account_check|retry_bank_search|submit|another|edit)$/i
+    .test(String(command || ""));
+}
+
 async function routeMessage(text, user, session, incoming = {}) {
   const command = normalizeInteractiveCommand(text.trim().toLowerCase());
   const retryCommands = ["retry", "try again", "retry_last_message"];
@@ -1198,6 +1203,15 @@ async function routeMessage(text, user, session, incoming = {}) {
   if (command === "demo approve") {
     await clearSession(user, user.whatsapp_phone);
     return sendVerificationStartList(user, "Demo approval is disabled. Use the button below to submit a real verification request.");
+  }
+
+  if (isPaymentProfileInteractiveCommand(command)) {
+    if (session?.current_flow === "verification") {
+      return handleVerification(text, user, session, incoming);
+    }
+    if (session?.current_flow === "payment_profile") {
+      return handlePaymentProfile(text, user, session);
+    }
   }
 
   if (isVerified(user) && ["post", "make offer", "create listing", "create offer", "list offer"].includes(command)) {

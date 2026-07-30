@@ -1,7 +1,7 @@
 const crypto = require("node:crypto");
 const { config } = require("../config");
 const { supabaseRequest, filterValue, uploadSupabaseStorage } = require("../lib/supabase");
-const { getWhatsAppMedia, mediaExtension, sendWhatsAppList } = require("../lib/whatsapp");
+const { getWhatsAppMedia, mediaExtension } = require("../lib/whatsapp");
 const { title, caption, action, labeled, normalizeShortText } = require("../lib/format");
 const { compactText } = require("../nlp/slang");
 const { getUserById, updateUser, latestVerificationRequest } = require("../db/users");
@@ -558,10 +558,6 @@ function verificationReviewPrompt() {
   return [
     title("Review verification"),
     caption("Check everything before Akara submits it."),
-    "",
-    `${action("submit")} if everything is correct`,
-    `${action("edit")} to correct something`,
-    `${action("cancel")} to pause`,
   ].join("\n");
 }
 
@@ -589,11 +585,6 @@ function formatVerificationReview(freshUser, request = {}, payouts = []) {
     "",
     title("Payout details"),
     payoutLines,
-    "",
-    title("Actions"),
-    `${action("submit")} if everything is correct`,
-    `${action("edit")} to correct something`,
-    `${action("cancel")} to pause`,
   ].join("\n");
 }
 
@@ -884,13 +875,12 @@ async function finishVerificationSubmission(user, requestId) {
     await sendVerificationSuccessCard(user.whatsapp_phone, successCaption).catch((error) => {
       console.error(`[verification] success card failed for ${user.whatsapp_phone}: ${error.message}`);
     });
-    try {
-      await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(mainMenu()));
-      return null;
-    } catch (error) {
-      console.error(`[verification] menu list failed for ${user.whatsapp_phone}: ${error.message}`);
-      return mainMenu();
-    }
+    const menuBody = mainMenu(freshUser || user);
+    return {
+      type: "whatsapp_list",
+      list: mainMenuListPayload(menuBody),
+      fallbackText: menuBody,
+    };
   }
 
   return [

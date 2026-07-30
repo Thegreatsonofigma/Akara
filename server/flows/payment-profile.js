@@ -838,7 +838,7 @@ async function resolveAndConfirmAccount(flow, user, context) {
   const freshUser = await getUserById(user.id);
   const request = await latestVerificationRequest(user.id);
   const verifiedName = normalizeShortText(
-    request?.extracted_name || freshUser?.legal_name || user.legal_name || "",
+    freshUser?.legal_name || user?.legal_name || request?.extracted_name || "",
     120
   );
   context.payment_account_name = accountName;
@@ -1004,13 +1004,15 @@ async function finishPaymentProfileSave(user, flow, context) {
       payment_count: paymentCount,
     });
 
-    return [
+    const body = [
       "Payout detail saved ✅",
       "",
-      "Add another payout method?",
-      `${action("another")} to add one more`,
-      `${action("submit")} to review and submit`,
+      "Submit your verification now, or add another payout method.",
     ].join("\n");
+    return whatsappButtonsReply(body, [
+      { id: "submit", title: "Submit" },
+      { id: "another", title: "Add another" },
+    ], body);
   }
 
   if (context.return_flow === "publish_listing" && context.pending_listing) {
