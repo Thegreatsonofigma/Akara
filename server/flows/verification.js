@@ -364,11 +364,11 @@ function verificationFlowPrompt(token) {
   return {
     type: "whatsapp_flow",
     fallbackText: [
-      "Let's verify your Akara profile.",
+      "Verification tray unavailable",
       "",
-      LEGAL_NAME_PROMPT,
+      "Your secure verification form could not open right now.",
       "",
-      "If the verification tray does not open, reply with your legal name to continue in chat.",
+      "Your verification has not been submitted. Please try again shortly.",
     ].join("\n"),
     flow: {
       flowId: config.akaraVerificationFlowId,
@@ -918,6 +918,15 @@ async function handleVerification(text, user, session, incoming = {}) {
   if (!requestId) return startVerification(user);
 
   if (step === "flow_details") {
+    if (config.akaraVerificationFlowId) {
+      const token = context.verification_flow_token || crypto.randomBytes(18).toString("base64url");
+      await upsertSession(user, user.whatsapp_phone, "verification", "flow_details", {
+        request_id: requestId,
+        verification_flow_token: token,
+      });
+      return verificationFlowPrompt(token);
+    }
+
     if (String(text || "").trim()) {
       const fallbackContext = { request_id: requestId };
       await upsertSession(user, user.whatsapp_phone, "verification", "legal_name", fallbackContext);
@@ -926,15 +935,6 @@ async function handleVerification(text, user, session, incoming = {}) {
         current_step: "legal_name",
         context_json: fallbackContext,
       }, incoming);
-    }
-
-    if (config.akaraVerificationFlowId) {
-      const token = context.verification_flow_token || crypto.randomBytes(18).toString("base64url");
-      await upsertSession(user, user.whatsapp_phone, "verification", "flow_details", {
-        request_id: requestId,
-        verification_flow_token: token,
-      });
-      return verificationFlowPrompt(token);
     }
   }
 
