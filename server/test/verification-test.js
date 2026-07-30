@@ -86,7 +86,11 @@ const { buildReply } = require("../router");
 const { config } = require("../config");
 const { findOrCreateUser } = require("../db/users");
 const { getSession } = require("../db/sessions");
-const { startVerification, handleVerificationFlowResponse } = require("../flows/verification");
+const {
+  startVerification,
+  handleVerification,
+  handleVerificationFlowResponse,
+} = require("../flows/verification");
 
 const { __table, __reset } = fakeSupabase;
 
@@ -544,6 +548,15 @@ async function run() {
     const trayReply = await startVerification(flowUser);
     check("verification can start as WhatsApp Flow", trayReply?.type === "whatsapp_flow", JSON.stringify(trayReply));
     check("verification Flow uses KYC screen", trayReply?.flow?.screen === "KYC_DETAILS", JSON.stringify(trayReply?.flow || {}));
+    check("verification Flow fallback never collects KYC in chat", !trayReply?.fallbackText?.toLowerCase().includes("legal name"), trayReply?.fallbackText);
+
+    const pendingFlowSession = await sessionState(U6);
+    const typedWhilePending = await handleVerification("My Name Must Stay Private", flowUser, {
+      current_step: pendingFlowSession.step,
+      context_json: pendingFlowSession.context,
+    });
+    check("typed text cannot bypass the configured verification Flow", typedWhilePending?.type === "whatsapp_flow", JSON.stringify(typedWhilePending));
+    check("typed text does not advance the Flow session into chat", (await sessionState(U6)).step === "flow_details", JSON.stringify(await sessionState(U6)));
 
     const token = trayReply.flow.flowToken;
     reply = await handleVerificationFlowResponse({
