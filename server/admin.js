@@ -2,6 +2,11 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { rootDir, config } = require("./config");
 const { jsonResponse, readJsonBody } = require("./lib/http");
+const {
+  clientIp,
+  consumeRateLimit,
+  rateLimitResponse,
+} = require("./lib/rate-limit");
 const { supabaseRequest, filterValue, createStorageSignedUrl } = require("./lib/supabase");
 const { sendWhatsAppText } = require("./lib/whatsapp");
 const { sendVerificationSuccessCard, sendUpgradeSuccessCard, sendExchangeCompletionCard } = require("./lib/listing-card");
@@ -36,6 +41,7 @@ const {
   ALL_PERMISSIONS,
   ROLE_PERMISSIONS,
   authenticateAdminRequest,
+  adminSessionCookie,
   hasPermission,
   isMissingAdminSchema,
   loginAdmin,
@@ -43,6 +49,25 @@ const {
   recordAdminAudit,
   tokenHash,
 } = require("./lib/admin-auth");
+
+const ALLOWED_PRIVATE_STORAGE_BUCKETS = new Set([
+  "verification-documents",
+  "deal-proofs",
+]);
+
+function isSameOriginRequest(req) {
+  const fetchSite = String(req.headers["sec-fetch-site"] || "").toLowerCase();
+  if (fetchSite === "cross-site") return false;
+
+  const origin = String(req.headers.origin || "").trim();
+  if (!origin) return true;
+  try {
+    return new URL(origin).host.toLowerCase()
+      === String(req.headers.host || "").toLowerCase();
+  } catch {
+    return false;
+  }
+}
 
 function forbiddenAdmin(res) {
   return jsonResponse(res, 401, {
@@ -1129,14 +1154,33 @@ async function getAdminUserDetails(userId) {
 }
 
 async function handleAdminApi(req, res, url) {
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && !isSameOriginRequest(req)) {
+    return jsonResponse(res, 403, {
+      ok: false,
+      code: "ADMIN_ORIGIN_REJECTED",
+      error: "This administrative request did not originate from Akara.",
+    });
+  }
+
   if (req.method === "POST" && url.pathname === "/admin/api/auth/login") {
+    const limit = consumeRateLimit("admin-login", clientIp(req), 10, 15 * 60 * 1000);
+    if (!limit.allowed) return rateLimitResponse(res, limit);
     const body = await readJsonBody(req);
     const result = await loginAdmin(body.access_token, req);
     if (!result) return forbiddenAdmin(res);
-    return jsonResponse(res, 200, { ok: true, data: result });
+    res.setHeader("set-cookie", adminSessionCookie(result.token));
+    return jsonResponse(res, 200, {
+      ok: true,
+      data: {
+        admin: result.admin,
+        migrationRequired: result.migrationRequired,
+      },
+    });
   }
 
   if (req.method === "POST" && url.pathname === "/admin/api/access-requests") {
+    const limit = consumeRateLimit("admin-access-request", clientIp(req), 5, 60 * 60 * 1000);
+    if (!limit.allowed) return rateLimitResponse(res, limit);
     const body = await readJsonBody(req);
     const name = String(body.name || "").trim();
     const email = String(body.email || "").trim().toLowerCase();
@@ -1190,6 +1234,7 @@ async function handleAdminApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/admin/api/auth/logout") {
     await logoutAdmin(actor);
+    res.setHeader("set-cookie", adminSessionCookie("", { clear: true }));
     return jsonResponse(res, 200, { ok: true, data: { loggedOut: true } });
   }
 
@@ -1443,7 +1488,15 @@ async function handleAdminApi(req, res, url) {
     if (!body.bucket || !body.path) {
       return jsonResponse(res, 400, { ok: false, error: "bucket and path are required." });
     }
-    const signedUrl = await createStorageSignedUrl(body.bucket, body.path, 600);
+    const bucket = String(body.bucket);
+    const objectPath = String(body.path);
+    if (!ALLOWED_PRIVATE_STORAGE_BUCKETS.has(bucket) || objectPath.includes("..")) {
+      return jsonResponse(res, 400, {
+        ok: false,
+        error: "That private file location is not available to this admin tool.",
+      });
+    }
+    const signedUrl = await createStorageSignedUrl(bucket, objectPath, 600);
     return jsonResponse(res, 200, { ok: true, data: { signedUrl } });
   }
 
