@@ -706,7 +706,7 @@ export const LEGAL_DOCS: LegalDoc[] = [
       {
         heading: "Official WhatsApp Channel",
         paragraphs: [
-          "Akara operates through its official WhatsApp Business number: [Official WhatsApp Number]. Messages from any other number claiming to be Akara should be reported to support.",
+          "Akara operates through its official WhatsApp Business number: +250 734 269 158. Messages from any other number claiming to be Akara should be reported to support.",
         ],
       },
       {

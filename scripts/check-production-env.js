@@ -29,6 +29,7 @@ const productionRequired = [
   "WHATSAPP_PHONE_NUMBER_ID",
   "META_APP_SECRET",
   "AKARA_PUBLIC_URL",
+  "AKARA_WHATSAPP_NUMBER",
 ];
 
 const missing = required.filter((name) => !String(process.env[name] || "").trim());
@@ -52,6 +53,18 @@ if (
 ) {
   console.error("[startup] AKARA_ADMIN_TOKEN must contain at least 32 characters in production.");
   process.exit(1);
+}
+
+if (process.env.NODE_ENV === "production") {
+  const whatsappNumber = String(process.env.AKARA_WHATSAPP_NUMBER || "").trim();
+  if (!/^\d{8,15}$/.test(whatsappNumber)) {
+    console.error("[startup] AKARA_WHATSAPP_NUMBER must contain 8 to 15 digits only.");
+    process.exit(1);
+  }
+  if (whatsappNumber === "15556733907") {
+    console.error("[startup] AKARA_WHATSAPP_NUMBER still uses the retired Meta test number.");
+    process.exit(1);
+  }
 }
 
 if (String(process.env.AKARA_STELLAR_INTEGRITY_ENABLED || "").toLowerCase() === "true") {

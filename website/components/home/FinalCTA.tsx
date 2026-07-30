@@ -1,11 +1,12 @@
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/motion/Reveal";
-import { WaitlistForm } from "@/components/waitlist/WaitlistForm";
+import { WhatsappLogo } from "@phosphor-icons/react/dist/ssr";
+import { SITE } from "@/lib/site";
 
 export function FinalCTA() {
   return (
     <section
-      id="waitlist"
+      id="get-started"
       className="scroll-mt-28 border-t border-hairline py-20 sm:py-28"
     >
       <Container>
@@ -17,17 +18,24 @@ export function FinalCTA() {
             />
             <div className="relative flex flex-col items-center">
               <p className="mb-5 text-xs font-black uppercase tracking-[0.2em] text-brand">
-                Private launch
+                Now live
               </p>
               <h2 className="max-w-2xl text-balance text-4xl font-black leading-[1.03] tracking-tight text-white sm:text-5xl">
-                Be first to swap with Akara.
+                Your next exchange can start here.
               </h2>
               <p className="mb-8 mt-5 max-w-xl text-pretty text-base leading-relaxed text-white/55 sm:text-lg">
-                Our public WhatsApp number is almost ready. Leave your email,
-                phone number, or both, and we will let you know when access
-                opens.
+                Message Akara on WhatsApp to browse offers, create a listing,
+                and coordinate a verified exchange.
               </p>
-              <WaitlistForm source="homepage_final_cta" tone="dark" />
+              <a
+                href={SITE.whatsappHref}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-brand px-7 py-3.5 text-base font-semibold text-black transition-all duration-300 hover:-translate-y-0.5 hover:bg-white"
+              >
+                Start on WhatsApp
+                <WhatsappLogo size={19} weight="fill" aria-hidden="true" />
+              </a>
             </div>
           </div>
         </Reveal>

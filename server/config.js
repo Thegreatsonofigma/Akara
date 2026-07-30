@@ -78,7 +78,7 @@ const config = {
   sendMode: process.env.AKARA_SEND_MODE || "whatsapp",
   whatsappVerifyToken: optionalEnv("WHATSAPP_VERIFY_TOKEN", "dev_verify_token"),
   whatsappAccessToken: optionalEnv("WHATSAPP_ACCESS_TOKEN"),
-  whatsappGraphVersion: process.env.WHATSAPP_GRAPH_VERSION || "v20.0",
+  whatsappGraphVersion: process.env.WHATSAPP_GRAPH_VERSION || "v26.0",
   whatsappPhoneNumberId: optionalEnv("WHATSAPP_PHONE_NUMBER_ID"),
   whatsappFlowMode: optionalEnv("WHATSAPP_FLOW_MODE"),
   metaAppSecret: optionalEnv("META_APP_SECRET"),
@@ -87,7 +87,7 @@ const config = {
     process.env.NODE_ENV === "production"
   ),
   typingIndicatorEnabled: booleanEnv("AKARA_TYPING_INDICATOR", true),
-  akaraWhatsappNumber: optionalEnv("AKARA_WHATSAPP_NUMBER", "15556733907"),
+  akaraWhatsappNumber: optionalEnv("AKARA_WHATSAPP_NUMBER", "250734269158"),
   adminHost: optionalEnv("AKARA_ADMIN_HOST", "admin.tryakara.com"),
   akaraSecurityMode: optionalEnv("AKARA_SECURITY_MODE", "web").toLowerCase(),
   akaraSecurityFlowId: optionalEnv("AKARA_SECURITY_FLOW_ID"),

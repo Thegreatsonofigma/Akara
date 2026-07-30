@@ -5,9 +5,9 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import { ArrowRight, List, X } from "@phosphor-icons/react";
-import { WaitlistDialog } from "@/components/waitlist/WaitlistDialog";
+import { List, WhatsappLogo, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
+import { SITE } from "@/lib/site";
 
 const NAV_LINKS = [
   { label: "How it works", href: "/#how-it-works" },
@@ -70,13 +70,15 @@ export function Navbar() {
           </ul>
 
           <div className="flex items-center gap-2">
-            <WaitlistDialog
-              source="navbar_desktop"
+            <a
+              href={SITE.whatsappHref}
+              target="_blank"
+              rel="noreferrer"
               className="hidden items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-black transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(157,255,30,0.35)] md:inline-flex"
             >
-              Join waitlist
-              <ArrowRight size={17} aria-hidden="true" />
-            </WaitlistDialog>
+              Start on WhatsApp
+              <WhatsappLogo size={17} weight="fill" aria-hidden="true" />
+            </a>
 
             <button
               type="button"
@@ -120,13 +122,16 @@ export function Navbar() {
                   </li>
                 ))}
                 <li className="mt-1">
-                  <WaitlistDialog
-                    source="navbar_mobile"
+                  <a
+                    href={SITE.whatsappHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => setOpen(false)}
                     className="flex w-full items-center justify-center gap-2 rounded-full bg-brand px-5 py-3 text-base font-semibold text-black"
                   >
-                    Join waitlist
-                    <ArrowRight size={18} aria-hidden="true" />
-                  </WaitlistDialog>
+                    Start on WhatsApp
+                    <WhatsappLogo size={18} weight="fill" aria-hidden="true" />
+                  </a>
                 </li>
               </ul>
             </motion.div>

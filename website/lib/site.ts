@@ -46,9 +46,11 @@ export const SITE = {
   supportEmail: "support@tryakara.com",
   fallbackEmail: "tryakara@gmail.com",
   complaintsEmail: "complaints@tryakara.com",
-  waitlistHref: "/#waitlist",
-  whatsappLabel: "[Official WhatsApp Number]",
-  whatsappHref: "https://wa.me/",
+  waitlistHref: "/#get-started",
+  whatsappNumber: "250734269158",
+  whatsappLabel: "+250 734 269 158",
+  whatsappHref:
+    "https://wa.me/250734269158?text=Hi%20Akara%2C%20I%20want%20to%20start%20an%20exchange.",
 } as const;
 
 export const BUSINESS = {

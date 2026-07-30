@@ -1,8 +1,8 @@
-import { ArrowDown, ArrowRight } from "@phosphor-icons/react/dist/ssr";
+import { ArrowDown, WhatsappLogo } from "@phosphor-icons/react/dist/ssr";
 import { HeroVisual } from "@/components/product/HeroVisual";
 import { HeroHeadline } from "@/components/home/HeroHeadline";
 import { Reveal } from "@/components/motion/Reveal";
-import { WaitlistDialog } from "@/components/waitlist/WaitlistDialog";
+import { SITE } from "@/lib/site";
 
 const HERO_BADGES = [
   "No custody",
@@ -41,13 +41,15 @@ export function Hero() {
 
           <Reveal y={20} delay={0.24}>
             <div className="mt-9 flex w-full max-w-sm flex-col items-stretch gap-3.5 sm:w-auto sm:max-w-none sm:flex-row sm:items-center sm:gap-4">
-              <WaitlistDialog
-                source="homepage_hero"
+              <a
+                href={SITE.whatsappHref}
+                target="_blank"
+                rel="noreferrer"
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-brand px-7 py-3.5 text-base font-semibold text-black transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_12px_48px_rgba(157,255,30,0.4)]"
               >
-                Join the waitlist
-                <ArrowRight size={18} aria-hidden="true" />
-              </WaitlistDialog>
+                Start on WhatsApp
+                <WhatsappLogo size={18} weight="fill" aria-hidden="true" />
+              </a>
               <a
                 href="#how-it-works"
                 className="inline-flex items-center justify-center gap-2 rounded-full border border-white/20 bg-white/[0.02] px-7 py-3.5 text-base font-semibold text-white transition-colors hover:border-brand/50 hover:text-brand"
