@@ -1,6 +1,7 @@
 const state = {
   view: "overview",
-  token: localStorage.getItem("akaraAdminToken") || "local-admin",
+  token: sessionStorage.getItem("akaraAdminToken") || localStorage.getItem("akaraAdminToken") || "",
+  authenticated: false,
   data: {},
   sheet: null,
 };
@@ -9,6 +10,7 @@ let pendingRequests = 0;
 
 const titles = {
   overview: ["Overview", "Monitor activity, risk and exchange operations."],
+  reports: ["Reports", "Understand growth, exchange outcomes, liquidity and trust signals."],
   users: ["Users", "Identity, trust and payout account controls."],
   verifications: ["Verifications", "Review identity evidence and OCR decisions."],
   listings: ["Offers", "Monitor marketplace liquidity and listing health."],
@@ -132,26 +134,93 @@ function setLoading(loading) {
 }
 
 async function api(path, options = {}) {
+  const { authToken = state.token, suppressAuthPrompt = false, ...fetchOptions } = options;
   pendingRequests += 1;
   if (pendingRequests === 1) setLoading(true);
   try {
     const response = await fetch(path, {
-      ...options,
+      ...fetchOptions,
       headers: {
         "content-type": "application/json",
-        "x-akara-admin-token": state.token,
-        ...(options.headers || {}),
+        "x-akara-admin-token": authToken,
+        ...(fetchOptions.headers || {}),
       },
     });
-    const body = await response.json();
+    const body = await response.json().catch(() => ({ ok: false, error: "The admin server returned an unreadable response." }));
     if (!response.ok || !body.ok) {
-      throw new Error(body.error || "Request failed");
+      const error = new Error(body.error || "Request failed");
+      error.status = response.status;
+      if (response.status === 401 && !suppressAuthPrompt) {
+        handleAuthFailure(error.message);
+      }
+      throw error;
     }
     return body.data;
   } finally {
     pendingRequests = Math.max(0, pendingRequests - 1);
     if (pendingRequests === 0) setLoading(false);
   }
+}
+
+function setConnectionState(connected) {
+  state.authenticated = connected;
+  document.body.classList.toggle("auth-required", !connected);
+  const button = $("#access-status");
+  button.classList.toggle("is-disconnected", !connected);
+  button.querySelector("span:not(.status-dot)").textContent = connected ? "Connected" : "Access required";
+}
+
+function openAccessPrompt(message = "") {
+  const popover = $("#access-popover");
+  const error = $("#access-error");
+  popover.hidden = false;
+  error.textContent = message;
+  error.hidden = !message;
+  window.setTimeout(() => $("#admin-token").focus(), 20);
+}
+
+function closeAccessPrompt() {
+  if (!state.authenticated) return;
+  $("#access-popover").hidden = true;
+  $("#access-error").hidden = true;
+}
+
+function handleAuthFailure(message = "Your admin token is missing or no longer valid.") {
+  setConnectionState(false);
+  if (state.token === "local-admin") {
+    state.token = "";
+    sessionStorage.removeItem("akaraAdminToken");
+    localStorage.removeItem("akaraAdminToken");
+    $("#admin-token").value = "";
+  }
+  openAccessPrompt(
+    message === "Admin token is missing or invalid."
+      ? "This token does not match AKARA_ADMIN_TOKEN in Railway. Check the value and try again."
+      : message
+  );
+}
+
+async function authenticateAdmin(token, remember = false) {
+  const candidate = String(token || "").trim();
+  if (!candidate) {
+    throw new Error("Paste the AKARA_ADMIN_TOKEN value from Railway Variables.");
+  }
+
+  await api("/admin/api/session", {
+    authToken: candidate,
+    suppressAuthPrompt: true,
+  });
+
+  state.token = candidate;
+  sessionStorage.setItem("akaraAdminToken", candidate);
+  if (remember) {
+    localStorage.setItem("akaraAdminToken", candidate);
+  } else {
+    localStorage.removeItem("akaraAdminToken");
+  }
+  setConnectionState(true);
+  $("#access-error").hidden = true;
+  $("#access-popover").hidden = true;
 }
 
 function money(amount, currency) {
@@ -482,6 +551,182 @@ function shortLabel(label) {
 
 function emptyChart() {
   return `<div class="chart-empty">No data yet</div>`;
+}
+
+const reportSeries = {
+  users: { label: "New users", color: "#4f8cff" },
+  offers: { label: "Offers", color: "#9dff1e" },
+  trades: { label: "Trades", color: "#36c5d9" },
+  completed: { label: "Completed", color: "#ff526f" },
+};
+
+function formatCompactNumber(value, maximumFractionDigits = 1) {
+  const number = Number(value || 0);
+  return new Intl.NumberFormat("en", {
+    notation: Math.abs(number) >= 10000 ? "compact" : "standard",
+    maximumFractionDigits,
+  }).format(number);
+}
+
+function formatRate(value) {
+  return `${Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
+}
+
+function reportPercent(part, whole) {
+  if (!Number(whole)) return 0;
+  return Math.round((Number(part || 0) / Number(whole)) * 1000) / 10;
+}
+
+function formatDuration(minutes) {
+  const value = Number(minutes || 0);
+  if (!value) return "-";
+  if (value < 60) return `${Math.round(value)}m`;
+  return `${Math.floor(value / 60)}h ${Math.round(value % 60)}m`;
+}
+
+function renderMultiLineChart(selector, rows) {
+  const container = $(selector);
+  if (!rows.length) {
+    container.innerHTML = emptyChart();
+    return;
+  }
+
+  const width = 760;
+  const height = 264;
+  const padding = { top: 20, right: 18, bottom: 38, left: 42 };
+  const keys = Object.keys(reportSeries);
+  const allValues = rows.flatMap((row) => keys.map((key) => Number(row[key] || 0)));
+  const max = Math.max(1, ...allValues);
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const yFor = (value) => padding.top + innerHeight - (Number(value || 0) / max) * innerHeight;
+  const xFor = (index) => padding.left + (rows.length === 1 ? 0 : (index / (rows.length - 1)) * innerWidth);
+
+  const paths = keys.map((key) => {
+    const points = rows.map((row, index) => `${xFor(index)},${yFor(row[key])}`).join(" ");
+    return `<polyline points="${points}" fill="none" stroke="${reportSeries[key].color}" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline>`;
+  }).join("");
+
+  const dots = keys.map((key) => rows.map((row, index) => `
+    <circle cx="${xFor(index)}" cy="${yFor(row[key])}" r="8" fill="transparent">
+      <title>${escapeHtml(row.label)} · ${reportSeries[key].label}: ${Number(row[key] || 0)}</title>
+    </circle>
+  `).join("")).join("");
+
+  container.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Thirty day admin activity">
+      ${[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+        const y = padding.top + innerHeight * ratio;
+        const label = Math.round(max * (1 - ratio));
+        return `
+          <line class="chart-grid" x1="${padding.left}" y1="${y}" x2="${padding.left + innerWidth}" y2="${y}" />
+          <text class="chart-label" x="${padding.left - 8}" y="${y + 3}" text-anchor="end">${label}</text>
+        `;
+      }).join("")}
+      ${paths}
+      ${dots}
+      ${rows.map((row, index) => {
+        const show = index === 0 || index === rows.length - 1 || index % 5 === 0;
+        return show ? `<text class="chart-label" x="${xFor(index)}" y="${height - 10}" text-anchor="middle">${escapeHtml(row.label)}</text>` : "";
+      }).join("")}
+    </svg>
+  `;
+}
+
+function renderRankedBars(selector, counts, options = {}) {
+  const container = $(selector);
+  const allEntries = sortedEntries(counts).filter(([, value]) => value > 0);
+  const entries = allEntries.slice(0, options.limit || 6);
+  if (!entries.length) {
+    container.innerHTML = emptyChart();
+    return;
+  }
+  const total = allEntries.reduce((sum, [, value]) => sum + value, 0);
+  const palette = ["#4f8cff", "#9dff1e", "#36c5d9", "#ff526f", "#f0c75e", "#8f7cff"];
+  container.innerHTML = entries.map(([label, value], index) => {
+    const share = reportPercent(value, total);
+    const displayLabel = statusLabels[label] || String(label).replaceAll("_", " ");
+    return `
+      <div class="ranked-row">
+        <div class="ranked-meta"><span>${escapeHtml(displayLabel)}</span><strong>${formatCompactNumber(value)} <small>${formatRate(share)}</small></strong></div>
+        <span class="ranked-track"><span style="--w:${Math.max(3, share)}%;--c:${palette[index % palette.length]}"></span></span>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderCurrencyVolumes(selector, rows, note = "completed value") {
+  const container = $(selector);
+  if (!rows.length) {
+    container.innerHTML = emptyChart();
+    return;
+  }
+  container.innerHTML = rows.map((row, index) => `
+    <div class="currency-volume-row">
+      <span class="currency-mark" style="--c:${["#9dff1e", "#4f8cff", "#ff526f", "#36c5d9", "#f0c75e"][index % 5]}">${escapeHtml(row.currency)}</span>
+      <div><strong>${escapeHtml(Number(row.amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 }))}</strong><span>${escapeHtml(note)} in ${escapeHtml(row.currency)}</span></div>
+    </div>
+  `).join("");
+}
+
+function renderReportKpis(data) {
+  const items = [
+    ["Users", data.totals.users, "ph-users-three", `${formatRate(data.rates.verification)} verified`],
+    ["Live offers", data.totals.activeListings, "ph-swap", `${data.totals.listings} all time`],
+    ["Completed trades", data.totals.completedTrades, "ph-check-circle", `${formatRate(data.rates.completion)} completion`],
+    ["Open disputes", data.totals.openDisputes, "ph-warning-diamond", `${formatRate(data.rates.dispute)} of trades`],
+    ["KYC queue", data.totals.pendingKyc, "ph-identification-card", `${data.totals.verifiedUsers} users verified`],
+    ["Receipt match", formatRate(data.rates.receiptMatch), "ph-receipt", `${data.totals.receiptProofs} uploads`],
+    ["Payout methods", data.totals.payoutProfiles, "ph-bank", "saved bank and MoMo"],
+    ["Avg. completion", formatDuration(data.rates.averageCompletionMinutes), "ph-timer", "completed exchanges"],
+  ];
+
+  $("#report-kpis").innerHTML = items.map(([label, value, icon, note]) => `
+    <article class="report-kpi">
+      <span class="report-kpi-icon"><i class="ph ${icon}"></i></span>
+      <div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></div>
+    </article>
+  `).join("");
+}
+
+function renderReports(data) {
+  renderReportKpis(data);
+  $("#report-generated-at").textContent = date(data.generatedAt);
+  $("#report-activity-legend").innerHTML = Object.entries(reportSeries).map(([, series]) => `
+    <span><i style="--legend:${series.color}"></i>${escapeHtml(series.label)}</span>
+  `).join("");
+  renderMultiLineChart("#report-activity-chart", data.activity || []);
+  renderRankedBars("#report-trade-status", data.distributions?.tradeStatus || {});
+  renderRankedBars("#report-offer-status", data.distributions?.offerStatus || {});
+  renderRankedBars("#report-verification-status", data.distributions?.verificationStatus || {});
+  renderRankedBars("#report-ocr-status", data.distributions?.receiptOcrStatus || {});
+  renderRankedBars("#report-dispute-status", data.distributions?.disputeStatus || {}, { limit: 4 });
+  renderRankedBars("#report-user-risk", data.distributions?.userRisk || {}, { limit: 4 });
+  renderRankedBars("#report-payout-methods", data.distributions?.payoutMethods || {}, { limit: 4 });
+  renderRankedBars("#report-payout-currencies", data.distributions?.payoutCurrencies || {}, { limit: 5 });
+  renderCurrencyVolumes("#report-currency-volume", data.currencyVolume || []);
+  renderCurrencyVolumes("#report-fee-volume", data.feeVolume || [], "recorded service fees");
+  renderRankedBars("#report-user-countries", data.distributions?.countries || {}, { limit: 6 });
+  renderRankedBars("#report-support-status", data.distributions?.supportStatus || {}, { limit: 5 });
+
+  renderTable("report-corridors-table", [
+    { label: "Corridor", render: (row) => `<strong>${escapeHtml(row.corridor.replace("->", " → "))}</strong>` },
+    { label: "Live offers", render: (row) => escapeHtml(row.liveListings) },
+    { label: "All offers", render: (row) => escapeHtml(row.listings) },
+    { label: "Trades", render: (row) => escapeHtml(row.trades) },
+    { label: "Completed", render: (row) => escapeHtml(row.completed) },
+    {
+      label: "Completion",
+      render: (row) => `<span class="completion-cell"><span><i style="--w:${Math.max(2, row.completionRate)}%"></i></span><strong>${escapeHtml(formatRate(row.completionRate))}</strong></span>`,
+    },
+  ], (data.corridors || []).slice(0, 12));
+
+  $("#report-insights").innerHTML = (data.insights || []).map((insight, index) => `
+    <article>
+      <span>${index + 1}</span>
+      <p>${escapeHtml(insight)}</p>
+    </article>
+  `).join("") || `<div class="chart-empty">More activity is needed before Akara can surface reliable insights.</div>`;
 }
 
 function listRows(rows, mapRow) {
@@ -1296,6 +1541,13 @@ async function loadView(view = state.view) {
     return;
   }
 
+  if (view === "reports") {
+    const data = await api("/admin/api/reports");
+    state.data.reports = data;
+    renderReports(data);
+    return;
+  }
+
   if (view === "compliance") {
     const [dashboard, requests, breaches, processors, tasks] = await Promise.all([
       api("/admin/api/compliance"),
@@ -1323,6 +1575,10 @@ async function loadView(view = state.view) {
 
 function setView(view) {
   closeSheet();
+  if (!state.authenticated) {
+    openAccessPrompt("Connect with your admin token before opening this workspace.");
+    return;
+  }
   state.view = view;
   document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("is-active", item.dataset.view === view));
   document.querySelectorAll(".view").forEach((item) => item.classList.toggle("is-active", item.id === view));
@@ -1528,12 +1784,31 @@ async function applyComplianceUpdate(button) {
 
 function bindEvents() {
   $("#admin-token").value = state.token;
-  $("#save-token").addEventListener("click", () => {
-    state.token = $("#admin-token").value.trim();
-    localStorage.setItem("akaraAdminToken", state.token);
-    $("#access-popover").hidden = true;
-    toast("Admin connection saved.");
-    loadView(state.view).catch((error) => showNotice(error.message, true));
+  $("#remember-token").checked = Boolean(localStorage.getItem("akaraAdminToken"));
+  $("#save-token").addEventListener("click", async () => {
+    const button = $("#save-token");
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = `<i class="ph ph-circle-notch ph-spin"></i> Checking access`;
+    $("#access-error").hidden = true;
+    try {
+      await authenticateAdmin($("#admin-token").value, $("#remember-token").checked);
+      toast("Secure admin connection established.");
+      await loadView(state.view);
+    } catch (error) {
+      setConnectionState(false);
+      openAccessPrompt(
+        error.status === 401
+          ? "This token does not match AKARA_ADMIN_TOKEN in Railway. Check the value and try again."
+          : error.message
+      );
+    } finally {
+      button.disabled = false;
+      button.innerHTML = original;
+    }
+  });
+  $("#admin-token").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") $("#save-token").click();
   });
 
   $("#refresh").addEventListener("click", () => {
@@ -1566,12 +1841,16 @@ function bindEvents() {
   $("#nav-backdrop").addEventListener("click", closeNavigation);
 
   const toggleAccess = () => {
+    if (!state.authenticated) {
+      openAccessPrompt("Enter the admin token configured in Railway to open Akara Operations.");
+      return;
+    }
     $("#access-popover").hidden = !$("#access-popover").hidden;
     if (!$("#access-popover").hidden) window.setTimeout(() => $("#admin-token").focus(), 20);
   };
   $("#open-access").addEventListener("click", toggleAccess);
   $("#access-status").addEventListener("click", toggleAccess);
-  $("#close-access").addEventListener("click", () => { $("#access-popover").hidden = true; });
+  $("#close-access").addEventListener("click", closeAccessPrompt);
 
   const focusWorkspaceSearch = () => {
     const activeView = document.querySelector(".view.is-active");
@@ -1669,7 +1948,7 @@ function bindEvents() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       if (state.sheet) closeSheet();
-      $("#access-popover").hidden = true;
+      closeAccessPrompt();
       closeNavigation();
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -1685,5 +1964,24 @@ function bindEvents() {
   });
 }
 
+async function initializeAdmin() {
+  setConnectionState(false);
+  if (!state.token || state.token === "local-admin") {
+    state.token = "";
+    sessionStorage.removeItem("akaraAdminToken");
+    localStorage.removeItem("akaraAdminToken");
+    $("#admin-token").value = "";
+    openAccessPrompt("Enter the admin token configured in Railway to open Akara Operations.");
+    return;
+  }
+
+  try {
+    await authenticateAdmin(state.token, Boolean(localStorage.getItem("akaraAdminToken")));
+    await loadView();
+  } catch (error) {
+    handleAuthFailure(error.message);
+  }
+}
+
 bindEvents();
-loadView().catch((error) => showNotice(error.message, true));
+initializeAdmin().catch((error) => handleAuthFailure(error.message));

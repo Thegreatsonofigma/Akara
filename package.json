@@ -6,9 +6,10 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node server/test/run-tests.js && node server/test/verification-test.js && node server/test/integrity-test.js && node server/test/webhook-security-test.js",
+    "test": "node server/test/run-tests.js && node server/test/verification-test.js && node server/test/integrity-test.js && node server/test/webhook-security-test.js && node server/test/admin-reports-test.js",
     "test:verification": "node server/test/verification-test.js",
     "test:integrity": "node server/test/integrity-test.js",
+    "test:admin": "node server/test/admin-reports-test.js",
     "stellar:backfill": "node scripts/backfill-stellar-integrity.js",
     "check": "node --check server/index.js && node --check server/app.js && node --check server/website.js && node --check server/lib/listing-card.js && node --check server/lib/matching-engine.js && node --check server/lib/integrity-crypto.js && node --check server/lib/stellar.js && node --check server/db/integrity.js && node --check server/db/market.js && node --check server/db/quotes.js && node --check server/db/credentials.js && node --check server/db/liquidity.js && node --check server/flows/listing.js && node --check server/flows/search.js"
   },

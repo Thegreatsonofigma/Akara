@@ -69,6 +69,64 @@ function countBy(items, fieldOrGetter) {
   }, {});
 }
 
+function buildRecentDays(totalDays = 30) {
+  return Array.from({ length: totalDays }, (_, index) => {
+    const date = new Date();
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCDate(date.getUTCDate() - (totalDays - 1 - index));
+    return {
+      key: date.toISOString().slice(0, 10),
+      label: date.toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" }),
+    };
+  });
+}
+
+async function listAllAdminRows(resource, select, options = {}) {
+  const pageSize = 1000;
+  const maxRows = options.maxRows || 10000;
+  const rows = [];
+
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const query = [
+      `${resource}?select=${select}`,
+      options.filter || "",
+      options.order ? `order=${options.order}` : "",
+      `limit=${pageSize}`,
+      `offset=${offset}`,
+    ].filter(Boolean).join("&");
+    const batch = await supabaseRequest(query);
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+
+  return rows;
+}
+
+async function listAllAdminRowsWithFallback(resource, select, fallbackSelect, options = {}) {
+  try {
+    return await listAllAdminRows(resource, select, options);
+  } catch (error) {
+    if (!fallbackSelect) throw error;
+    return listAllAdminRows(resource, fallbackSelect, options);
+  }
+}
+
+function percent(part, whole) {
+  if (!whole) return 0;
+  return Math.round((Number(part || 0) / Number(whole)) * 1000) / 10;
+}
+
+function average(values) {
+  const valid = values.map(Number).filter(Number.isFinite);
+  if (!valid.length) return 0;
+  return Math.round((valid.reduce((sum, value) => sum + value, 0) / valid.length) * 10) / 10;
+}
+
+function addCurrencyAmount(target, currency, amount) {
+  if (!currency || !Number.isFinite(Number(amount))) return;
+  target[currency] = (target[currency] || 0) + Number(amount);
+}
+
 const VERIFICATION_USER_SELECT =
   "users!verification_requests_user_id_fkey(id,whatsapp_phone,display_name,legal_name,nationality,residence_country,city,verification_status)";
 
@@ -477,6 +535,223 @@ async function getAdminOverview() {
   };
 }
 
+async function getAdminReports() {
+  const [
+    users,
+    paymentProfiles,
+    listings,
+    deals,
+    disputes,
+    verifications,
+    proofs,
+    fees,
+    supportEvents,
+  ] = await Promise.all([
+    listAllAdminRows(
+      "users",
+      "id,nationality,residence_country,verification_status,risk_status,dispute_hold,created_at"
+    ),
+    listAllAdminRows("payment_profiles", "id,currency,method,bank_name,momo_network,created_at"),
+    listAllAdminRows(
+      "listings",
+      "id,status,have_currency,want_currency,have_amount,want_amount,listing_type,created_at"
+    ),
+    listAllAdminRows(
+      "deals",
+      "id,status,have_currency,want_currency,have_amount,want_amount,created_at,completed_at,cancelled_at"
+    ),
+    listAllAdminRows("disputes", "id,deal_id,category,status,created_at,resolved_at"),
+    listAllAdminRowsWithFallback(
+      "verification_requests",
+      "id,status,id_type,id_country,document_ocr_status,document_name_match,document_country_match,document_type_match,created_at,reviewed_at",
+      "id,status,id_type,id_country,created_at,reviewed_at"
+    ),
+    listAllAdminRowsWithFallback(
+      "deal_proofs",
+      "id,deal_id,ocr_status,ocr_matched,ocr_currency,ocr_expected_currency,created_at",
+      "id,deal_id,created_at"
+    ),
+    listAllAdminRows("fees", "id,currency,amount,status,created_at"),
+    listAllAdminRows(
+      "audit_events",
+      "id,event_payload,created_at",
+      { filter: "entity_type=eq.support_request" }
+    ),
+  ]);
+
+  const completedDeals = deals.filter((deal) => ["completed_pending_fee", "closed"].includes(deal.status));
+  const cancelledDeals = deals.filter((deal) => ["cancelled", "expired"].includes(deal.status));
+  const activeListings = listings.filter((listing) => listing.status === "active");
+  const verifiedUsers = users.filter((user) => ["verified_auto", "verified_manual"].includes(user.verification_status));
+  const openDisputes = disputes.filter((dispute) =>
+    ["open", "waiting_for_user", "under_review"].includes(dispute.status)
+  );
+  const pendingKyc = verifications.filter((request) =>
+    ["pending_input", "pending_review"].includes(request.status)
+  );
+  const matchedProofs = proofs.filter((proof) => proof.ocr_matched || proof.ocr_status === "matched");
+  const reviewedProofs = proofs.filter((proof) => ["matched", "mismatch"].includes(proof.ocr_status));
+  const flaggedUsers = users.filter((user) =>
+    user.dispute_hold || ["watch", "limited", "suspended"].includes(user.risk_status)
+  );
+  const completionMinutes = completedDeals
+    .filter((deal) => deal.completed_at && deal.created_at)
+    .map((deal) => (new Date(deal.completed_at) - new Date(deal.created_at)) / 60000)
+    .filter((value) => value >= 0);
+
+  const corridorMap = new Map();
+  const ensureCorridor = (haveCurrency, wantCurrency) => {
+    const key = `${haveCurrency || "?"}->${wantCurrency || "?"}`;
+    if (!corridorMap.has(key)) {
+      corridorMap.set(key, {
+        corridor: key,
+        listings: 0,
+        liveListings: 0,
+        trades: 0,
+        completed: 0,
+        cancelled: 0,
+      });
+    }
+    return corridorMap.get(key);
+  };
+
+  listings.forEach((listing) => {
+    const corridor = ensureCorridor(listing.have_currency, listing.want_currency);
+    corridor.listings += 1;
+    if (listing.status === "active") corridor.liveListings += 1;
+  });
+  deals.forEach((deal) => {
+    const corridor = ensureCorridor(deal.have_currency, deal.want_currency);
+    corridor.trades += 1;
+    if (["completed_pending_fee", "closed"].includes(deal.status)) corridor.completed += 1;
+    if (["cancelled", "expired"].includes(deal.status)) corridor.cancelled += 1;
+  });
+
+  const corridors = [...corridorMap.values()]
+    .map((corridor) => ({
+      ...corridor,
+      completionRate: percent(corridor.completed, corridor.trades),
+    }))
+    .sort((left, right) =>
+      right.completed - left.completed
+      || right.trades - left.trades
+      || right.liveListings - left.liveListings
+    );
+
+  const currencyVolume = {};
+  completedDeals.forEach((deal) => {
+    addCurrencyAmount(currencyVolume, deal.have_currency, deal.have_amount);
+    addCurrencyAmount(currencyVolume, deal.want_currency, deal.want_amount);
+  });
+
+  const feeVolume = {};
+  fees.forEach((fee) => addCurrencyAmount(feeVolume, fee.currency, fee.amount));
+
+  const days = buildRecentDays(30);
+  const activity = days.map((day) => ({
+    label: day.label,
+    users: countCreatedOn(users, day.key),
+    offers: countCreatedOn(listings, day.key),
+    trades: countCreatedOn(deals, day.key),
+    completed: completedDeals.filter((deal) =>
+      String(deal.completed_at || deal.created_at || "").slice(0, 10) === day.key
+    ).length,
+  }));
+
+  const supportRequests = supportEvents.map((event) => ({
+    ...event,
+    ...(event.event_payload || {}),
+  }));
+  const countryDistribution = countBy(users, (user) => user.residence_country || user.nationality || "unknown");
+  const payoutMethods = countBy(paymentProfiles, "method");
+  const payoutCurrencies = countBy(paymentProfiles, "currency");
+  const disputeCategories = countBy(disputes, "category");
+  const disputeStatus = countBy(disputes, "status");
+  const verificationStatus = countBy(verifications, "status");
+  const userRisk = countBy(users, "risk_status");
+  const receiptOcrStatus = countBy(proofs, "ocr_status");
+  const supportStatus = countBy(supportRequests, "status");
+  const offerStatus = countBy(listings, "status");
+  const tradeStatus = countBy(deals, "status");
+
+  const topCorridor = corridors[0] || null;
+  const lowestCorridor = corridors
+    .filter((corridor) => corridor.trades >= 2)
+    .sort((left, right) => left.completionRate - right.completionRate)[0] || null;
+  const insights = [
+    topCorridor
+      ? `${topCorridor.corridor.replace("->", " to ")} is the busiest corridor with ${topCorridor.trades} trade${topCorridor.trades === 1 ? "" : "s"} and ${topCorridor.completionRate}% completion.`
+      : "No corridor has recorded trade activity yet.",
+    pendingKyc.length
+      ? `${pendingKyc.length} verification request${pendingKyc.length === 1 ? " is" : "s are"} waiting for review or user input.`
+      : "The verification queue is clear.",
+    openDisputes.length
+      ? `${openDisputes.length} dispute${openDisputes.length === 1 ? " is" : "s are"} open; both participants remain restricted from new trades until resolution.`
+      : "There are no open disputes.",
+    reviewedProofs.length
+      ? `${percent(matchedProofs.length, reviewedProofs.length)}% of OCR-reviewed receipts matched their expected payment details.`
+      : "Receipt OCR has not reviewed enough evidence to calculate a match rate.",
+    lowestCorridor && lowestCorridor !== topCorridor
+      ? `${lowestCorridor.corridor.replace("->", " to ")} has the lowest completion rate among active corridors at ${lowestCorridor.completionRate}%.`
+      : null,
+  ].filter(Boolean);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    coverage: {
+      users: users.length,
+      listings: listings.length,
+      deals: deals.length,
+      proofs: proofs.length,
+      capped: [users, listings, deals, proofs].some((items) => items.length >= 10000),
+    },
+    totals: {
+      users: users.length,
+      verifiedUsers: verifiedUsers.length,
+      activeListings: activeListings.length,
+      listings: listings.length,
+      trades: deals.length,
+      completedTrades: completedDeals.length,
+      cancelledTrades: cancelledDeals.length,
+      openDisputes: openDisputes.length,
+      pendingKyc: pendingKyc.length,
+      payoutProfiles: paymentProfiles.length,
+      receiptProofs: proofs.length,
+      flaggedUsers: flaggedUsers.length,
+      supportRequests: supportRequests.length,
+    },
+    rates: {
+      verification: percent(verifiedUsers.length, users.length),
+      completion: percent(completedDeals.length, deals.length),
+      dispute: percent(disputes.length, deals.length),
+      receiptMatch: percent(matchedProofs.length, reviewedProofs.length),
+      averageCompletionMinutes: average(completionMinutes),
+    },
+    activity,
+    distributions: {
+      offerStatus,
+      tradeStatus,
+      verificationStatus,
+      userRisk,
+      disputeStatus,
+      disputeCategories,
+      payoutMethods,
+      payoutCurrencies,
+      receiptOcrStatus,
+      supportStatus,
+      countries: countryDistribution,
+    },
+    corridors,
+    currencyVolume: Object.entries(currencyVolume)
+      .map(([currency, amount]) => ({ currency, amount: Math.round(amount * 100) / 100 }))
+      .sort((left, right) => right.amount - left.amount),
+    feeVolume: Object.entries(feeVolume)
+      .map(([currency, amount]) => ({ currency, amount: Math.round(amount * 100) / 100 }))
+      .sort((left, right) => right.amount - left.amount),
+    insights,
+  };
+}
+
 function pickAllowed(body, allowed) {
   return Object.fromEntries(Object.entries(body || {}).filter(([key, value]) => allowed.includes(key) && value !== undefined));
 }
@@ -570,8 +845,19 @@ async function getIntegrityDashboard() {
 async function handleAdminApi(req, res, url) {
   if (!requireAdmin(req)) return forbiddenAdmin(res);
 
+  if (req.method === "GET" && url.pathname === "/admin/api/session") {
+    return jsonResponse(res, 200, {
+      ok: true,
+      data: { authenticated: true, checkedAt: new Date().toISOString() },
+    });
+  }
+
   if (req.method === "GET" && url.pathname === "/admin/api/overview") {
     return jsonResponse(res, 200, { ok: true, data: await getAdminOverview() });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/reports") {
+    return jsonResponse(res, 200, { ok: true, data: await getAdminReports() });
   }
 
   if (req.method === "GET" && url.pathname === "/admin/api/compliance") {
