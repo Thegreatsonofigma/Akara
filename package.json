@@ -16,6 +16,8 @@
     "test:admin": "node server/test/admin-reports-test.js && node server/test/admin-access-test.js",
     "security:check": "node scripts/security-check.js",
     "security:audit": "npm run security:check && npm audit --omit=dev --audit-level=high && npm --prefix website audit --omit=dev --audit-level=high",
+    "prelaunch:audit": "node scripts/prelaunch-cleanup.js",
+    "prelaunch:purge-storage": "node scripts/prelaunch-cleanup.js --purge-storage",
     "stellar:backfill": "node scripts/backfill-stellar-integrity.js",
     "stellar:readiness": "node scripts/check-stellar-readiness.js",
     "check": "node --check server/index.js && node --check server/app.js && node --check server/admin.js && node --check server/website.js && node --check server/lib/admin-auth.js && node --check server/lib/listing-card.js && node --check server/lib/matching-engine.js && node --check server/lib/integrity-crypto.js && node --check server/lib/stellar.js && node --check server/db/integrity.js && node --check server/db/market.js && node --check server/db/quotes.js && node --check server/db/credentials.js && node --check server/db/liquidity.js && node --check server/flows/listing.js && node --check server/flows/search.js && node --check scripts/check-stellar-readiness.js && node --check admin/app.js"
