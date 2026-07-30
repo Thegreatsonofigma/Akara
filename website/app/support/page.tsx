@@ -82,7 +82,15 @@ export default function SupportPage() {
             <SupportCard icon={WhatsappLogo} title="WhatsApp" delay={0}>
               <p>
                 Message the official Akara WhatsApp Business number:{" "}
-                <span className="text-white">{SITE.whatsappLabel}</span>. Type{" "}
+                <a
+                  className="text-white underline decoration-brand underline-offset-4"
+                  href={SITE.whatsappHref}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {SITE.whatsappLabel}
+                </a>
+                . Type{" "}
                 <span className="font-numbers tracking-wider text-brand">
                   menu
                 </span>{" "}

@@ -61,6 +61,7 @@ function safeFileCode(code) {
 
 function listingCardVersion(listing) {
   const parts = [
+    "listing-card-v3-code-footer",
     listing?.have_currency,
     listing?.want_currency,
     listing?.have_amount,
@@ -483,7 +484,7 @@ function listingCardSvg(listing) {
   const code = displayReference(listing.listing_code, "listing");
   const haveAmount = numberText(listing.have_amount);
   const wantAmount = numberText(listing.want_amount);
-  const openCode = `OPEN ${code}`;
+  const openCode = code;
   const base = assetDataUri("listing-card-base.png") || assetDataUri("listing-card-base.webp");
 
   return `<?xml version="1.0" encoding="UTF-8"?>

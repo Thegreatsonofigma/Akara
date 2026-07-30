@@ -8,7 +8,7 @@ const {
   rateLimitResponse,
 } = require("./lib/rate-limit");
 const { supabaseRequest, filterValue, createStorageSignedUrl } = require("./lib/supabase");
-const { sendWhatsAppText } = require("./lib/whatsapp");
+const { sendWhatsAppText, sendWhatsAppList } = require("./lib/whatsapp");
 const { sendVerificationSuccessCard, sendUpgradeSuccessCard, sendExchangeCompletionCard } = require("./lib/listing-card");
 const { getUserById, updateUser } = require("./db/users");
 const { exchangeCompleteMessage, getDealById, syncCompletedDealsCount } = require("./db/deals");
@@ -18,7 +18,7 @@ const {
   verifyIntegrityRecord,
 } = require("./db/integrity");
 const { markLiquidityRouteDealCompleted } = require("./db/liquidity");
-const { mainMenu } = require("./messages/copy");
+const { mainMenu, mainMenuListPayload } = require("./messages/copy");
 const { title } = require("./lib/format");
 const { displayReference } = require("./db/listings");
 const {
@@ -1627,9 +1627,15 @@ async function handleAdminApi(req, res, url) {
       await resumeApprovedUserAction(user).catch((error) => {
         console.error(`[admin] approval resume failed for ${user.whatsapp_phone}: ${error.message}`);
       });
-      await sendWhatsAppText(user.whatsapp_phone, mainMenu()).catch((error) => {
+      const menuBody = mainMenu(user);
+      try {
+        await sendWhatsAppList(user.whatsapp_phone, mainMenuListPayload(menuBody));
+      } catch (error) {
         console.error(`[admin] verification menu failed for ${user.whatsapp_phone}: ${error.message}`);
-      });
+        await sendWhatsAppText(user.whatsapp_phone, menuBody).catch((fallbackError) => {
+          console.error(`[admin] verification menu fallback failed for ${user.whatsapp_phone}: ${fallbackError.message}`);
+        });
+      }
     } else {
       sendWhatsAppText(
         user.whatsapp_phone,

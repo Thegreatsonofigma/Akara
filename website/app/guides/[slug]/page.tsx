@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Container } from "@/components/ui/Container";
-import { WaitlistDialog } from "@/components/waitlist/WaitlistDialog";
 import { getSeoGuide, SEO_GUIDES } from "@/lib/seo-guides";
 import { SEO_CORRIDORS, SITE } from "@/lib/site";
 
@@ -192,17 +191,19 @@ export default async function GuidePage({ params }: GuidePageProps) {
             <aside className="space-y-5">
               <div className="rounded-[28px] border border-brand/30 bg-brand p-6 text-black">
                 <p className="text-sm font-black uppercase tracking-[0.22em]">
-                  Private launch
+                  Now live
                 </p>
                 <p className="mt-4 text-2xl font-black leading-tight">
-                  Join the list for first access to Akara on WhatsApp.
+                  Start your exchange with Akara on WhatsApp.
                 </p>
-                <WaitlistDialog
-                  source="guide_sidebar"
+                <a
+                  href={SITE.whatsappHref}
+                  target="_blank"
+                  rel="noreferrer"
                   className="mt-6 inline-flex rounded-full bg-black px-5 py-3 text-sm font-black text-white"
                 >
-                  Join waitlist
-                </WaitlistDialog>
+                  Start on WhatsApp
+                </a>
               </div>
 
               <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-6">

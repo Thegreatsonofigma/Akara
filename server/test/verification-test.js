@@ -337,7 +337,7 @@ async function run() {
 
   reply = await send(U1, "save payout");
   check("payout saved", reply.includes("Payout detail saved"), reply);
-  check("saved payout asks another or submit", reply.includes("another") && reply.includes("submit"), reply);
+  check("saved payout asks another or submit", reply.toLowerCase().includes("another") && reply.toLowerCase().includes("submit"), reply);
   check("payout-name match alone does not auto-verify", userRow(U1).verification_status !== "verified_auto", userRow(U1).verification_status);
 
   reply = await send(U1, "edit payout");

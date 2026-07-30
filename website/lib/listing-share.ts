@@ -54,7 +54,7 @@ export function akaraWhatsAppUrl(code: string) {
   const phone = String(
     process.env.NEXT_PUBLIC_AKARA_WHATSAPP_NUMBER
     || process.env.AKARA_WHATSAPP_NUMBER
-    || "15556733907"
+    || "250734269158"
   ).replace(/\D/g, "");
   return `https://wa.me/${phone}?text=${encodeURIComponent(`open ${code}`)}`;
 }

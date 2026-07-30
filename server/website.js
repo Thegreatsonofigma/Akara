@@ -19,7 +19,8 @@ const site = {
   fallbackEmail: "tryakara@gmail.com",
   complaintsEmail: "complaints@tryakara.com",
   url: "https://tryakara.com",
-  whatsappUrl: "https://wa.me/15556733907?text=Hi%20Akara",
+  whatsappUrl:
+    "https://wa.me/250734269158?text=Hi%20Akara%2C%20I%20want%20to%20start%20an%20exchange.",
   law: "Nigeria, with applicable local laws in supported user countries where required",
 };
 
@@ -197,7 +198,7 @@ const legalPages = [
     title: "WhatsApp Opt-In and Messaging Policy",
     intro: "Akara is a WhatsApp-first platform. This policy explains how users opt in to receive Akara messages.",
     sections: [
-      ["Official WhatsApp Channel", "Use Akara’s approved WhatsApp Business number once final. Until then, use the official number shown on tryakara.com."],
+      ["Official WhatsApp Channel", "Use Akara’s approved WhatsApp Business number: +250 734 269 158. Messages from any other number claiming to be Akara should be reported to support."],
       ["How Users Opt In", "Users opt in by starting a chat, clicking an Akara link, completing a WhatsApp Flow, or replying AGREE."],
       ["Messages Users May Receive", "Users may receive verification, trade updates, listing notifications, receipt prompts, reminders, confirmations, dispute updates, account alerts, safety warnings, support, and policy updates."],
       ["Marketing Opt-Out", "Users may opt out of marketing but still receive trade, security, dispute, account, and support messages."],
