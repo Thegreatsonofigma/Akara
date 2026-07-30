@@ -6,27 +6,24 @@ Akara uses a native WhatsApp Flow for passcode setup and sensitive-action approv
 
 Create one WhatsApp Flow in the Meta dashboard for the Akara WhatsApp app.
 
-Required screens:
+Required screen:
 
-- `SETUP_PIN`
-- `AUTHORIZE_PIN`
+- `SECURITY_PIN`
 
 Required submitted field names:
 
 - `passcode`
-- `confirm` on `SETUP_PIN` only
+- `confirm` in setup mode only
 
 The submitted response must include WhatsApp's `flow_token`. Akara also sends `challenge_token` in the Flow data payload, so you can pass that through as a backup field if the builder requires it. Akara uses that token to find the pending action, validate the passcode, then resume the exact payout edit, delete, or other protected request.
 
 ## Flow JSON
 
 Replace Meta's default `Hello World` JSON with
-`docs/akara-security-flow.json`. The production definition includes both
-`SETUP_PIN` and `AUTHORIZE_PIN`; Akara chooses the correct entry screen when it
-sends the Flow. The routing model links both screens because Meta requires
-every screen in one Flow definition to belong to a single connected graph.
-Both screens remain terminal, so completing passcode setup never opens the
-authorization screen.
+`docs/akara-security-flow.json`. The production definition uses one terminal
+`SECURITY_PIN` screen. Akara sends a `setup` or `authorize` mode and the screen
+shows the matching copy and fields. Keeping both operations on one terminal
+screen avoids Meta rejecting the Flow as a disconnected screen graph.
 
 ## User Experience
 

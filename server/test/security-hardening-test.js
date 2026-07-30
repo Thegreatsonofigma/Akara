@@ -6,6 +6,8 @@ process.env.AKARA_SEND_MODE = "log";
 process.env.AKARA_ADMIN_TOKEN = "test-admin-token-that-is-at-least-32-characters";
 
 const { Readable } = require("node:stream");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
   applySecurityHeaders,
   parseJsonBody,
@@ -75,6 +77,13 @@ async function run() {
   check("new passcodes require six digits", validNewPasscode("123456"));
   check("short new passcodes are rejected", !validNewPasscode("12345"));
   check("legacy passcodes remain usable during migration", validAuthorizationPasscode("1234"));
+
+  const securityFlow = JSON.parse(fs.readFileSync(
+    path.join(__dirname, "../../docs/akara-security-flow.json"),
+    "utf8"
+  ));
+  check("security flow has one connected terminal screen", securityFlow.screens.length === 1);
+  check("security flow entry screen matches the server contract", securityFlow.screens[0]?.id === "SECURITY_PIN");
 
   const subject = `test-${Date.now()}`;
   check("first limited request is accepted", consumeRateLimit("test", subject, 1, 1000).allowed);
