@@ -23,7 +23,10 @@ The submitted response must include WhatsApp's `flow_token`. Akara also sends `c
 Replace Meta's default `Hello World` JSON with
 `docs/akara-security-flow.json`. The production definition includes both
 `SETUP_PIN` and `AUTHORIZE_PIN`; Akara chooses the correct entry screen when it
-sends the Flow.
+sends the Flow. The routing model links both screens because Meta requires
+every screen in one Flow definition to belong to a single connected graph.
+Both screens remain terminal, so completing passcode setup never opens the
+authorization screen.
 
 ## User Experience
 
