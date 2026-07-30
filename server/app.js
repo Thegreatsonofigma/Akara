@@ -561,6 +561,15 @@ const server = http.createServer(async (req, res) => {
       return serveFile(res, adminFilePath("app.js"), "text/javascript; charset=utf-8");
     }
 
+    const adminAssetMatch = url.pathname.match(/^\/admin\/assets\/(akara-logo-mark\.webp|fonts\/Campton(?:Book|SemiBold|Bold|Black)\.otf)$/);
+    if (req.method === "GET" && adminAssetMatch) {
+      const fileName = adminAssetMatch[1];
+      const contentType = fileName.endsWith(".webp")
+        ? "image/webp"
+        : "font/otf";
+      return serveFile(res, adminFilePath(`assets/${fileName}`), contentType);
+    }
+
     if (url.pathname.startsWith("/admin/api/")) {
       return await handleAdminApi(req, res, url);
     }

@@ -2,6 +2,7 @@ const state = {
   view: "overview",
   token: sessionStorage.getItem("akaraAdminToken") || localStorage.getItem("akaraAdminToken") || "",
   authenticated: false,
+  admin: null,
   data: {},
   sheet: null,
 };
@@ -19,7 +20,24 @@ const titles = {
   support: ["Support", "Respond to customer requests and escalations."],
   compliance: ["Compliance", "Operate NDPC privacy and accountability controls."],
   integrity: ["Integrity", "Verify privacy-safe records anchored to Stellar."],
+  admins: ["Admins & access", "Invite operators, assign roles and control access."],
 };
+
+const viewPermissions = {
+  overview: "dashboard.view",
+  reports: "reports.view",
+  users: "users.view",
+  verifications: "verifications.view",
+  listings: "listings.view",
+  deals: "trades.view",
+  disputes: "disputes.view",
+  support: "support.view",
+  compliance: "compliance.view",
+  integrity: "integrity.view",
+  admins: "admins.view",
+};
+
+const supportedCurrencies = ["NGN", "RWF", "GHS", "KES", "XAF"];
 
 const statusTone = {
   active: "good",
@@ -81,6 +99,14 @@ const statusLabels = {
   medium: "Medium",
   high: "High",
   critical: "Critical",
+  banned: "Banned",
+  clear: "Clear",
+  super_admin: "Super admin",
+  operations: "Operations",
+  compliance: "Compliance",
+  support: "Support",
+  analyst: "Analyst",
+  custom: "Custom",
   suspected: "Suspected",
   investigating: "Investigating",
   contained: "Contained",
@@ -170,13 +196,66 @@ function setConnectionState(connected) {
   button.querySelector("span:not(.status-dot)").textContent = connected ? "Connected" : "Access required";
 }
 
+function hasAdminPermission(permission) {
+  if (!permission) return true;
+  return Boolean(state.admin?.permissions?.includes(permission));
+}
+
+function initials(name) {
+  return String(name || "Akara Admin")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function renderAdminSession() {
+  const admin = state.admin;
+  const login = $("#access-login");
+  const session = $("#access-session");
+  login.hidden = Boolean(admin);
+  session.hidden = !admin;
+  $("#access-request-form").hidden = true;
+
+  document.querySelectorAll("[data-permission]").forEach((element) => {
+    element.hidden = !hasAdminPermission(element.dataset.permission);
+  });
+  document.querySelectorAll(".nav-item[data-view]").forEach((element) => {
+    element.hidden = !hasAdminPermission(viewPermissions[element.dataset.view]);
+  });
+
+  if (!admin) {
+    $("#operator-avatar").textContent = "A";
+    $("#operator-name").textContent = "Secure access";
+    $("#operator-role").textContent = "Sign in required";
+    return;
+  }
+
+  const avatar = initials(admin.name);
+  $("#operator-avatar").textContent = avatar;
+  $("#operator-name").textContent = admin.name;
+  $("#operator-role").textContent = admin.role.replaceAll("_", " ");
+  $("#session-avatar").textContent = avatar;
+  $("#session-name").textContent = admin.name;
+  $("#session-email").textContent = admin.email || "Akara administrator";
+  $("#session-role").textContent = admin.role.replaceAll("_", " ");
+  $("#session-code").textContent = admin.code || "-";
+  $("#session-login-at").textContent = date(admin.loginAt);
+  $("#session-expires-at").textContent = admin.sessionExpiresAt ? date(admin.sessionExpiresAt) : "Bootstrap session";
+  $("#session-permission-count").textContent = `${admin.permissions?.length || 0} permissions`;
+}
+
 function openAccessPrompt(message = "") {
   const popover = $("#access-popover");
   const error = $("#access-error");
   popover.hidden = false;
   error.textContent = message;
   error.hidden = !message;
-  window.setTimeout(() => $("#admin-token").focus(), 20);
+  window.setTimeout(() => {
+    if (!state.admin) $("#admin-token").focus();
+  }, 20);
 }
 
 function closeAccessPrompt() {
@@ -187,40 +266,53 @@ function closeAccessPrompt() {
 
 function handleAuthFailure(message = "Your admin token is missing or no longer valid.") {
   setConnectionState(false);
-  if (state.token === "local-admin") {
-    state.token = "";
-    sessionStorage.removeItem("akaraAdminToken");
-    localStorage.removeItem("akaraAdminToken");
-    $("#admin-token").value = "";
-  }
-  openAccessPrompt(
-    message === "Admin token is missing or invalid."
-      ? "This token does not match AKARA_ADMIN_TOKEN in Railway. Check the value and try again."
-      : message
-  );
+  state.admin = null;
+  state.token = "";
+  sessionStorage.removeItem("akaraAdminToken");
+  localStorage.removeItem("akaraAdminToken");
+  $("#admin-token").value = "";
+  renderAdminSession();
+  openAccessPrompt(message);
 }
 
 async function authenticateAdmin(token, remember = false) {
   const candidate = String(token || "").trim();
   if (!candidate) {
-    throw new Error("Paste the AKARA_ADMIN_TOKEN value from Railway Variables.");
+    throw new Error("Enter the access token issued to your administrator account.");
   }
 
-  await api("/admin/api/session", {
-    authToken: candidate,
+  const result = await api("/admin/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ access_token: candidate }),
+    authToken: "",
     suppressAuthPrompt: true,
   });
 
-  state.token = candidate;
-  sessionStorage.setItem("akaraAdminToken", candidate);
+  state.token = result.token;
+  state.admin = result.admin;
+  sessionStorage.setItem("akaraAdminToken", result.token);
   if (remember) {
-    localStorage.setItem("akaraAdminToken", candidate);
+    localStorage.setItem("akaraAdminToken", result.token);
   } else {
     localStorage.removeItem("akaraAdminToken");
   }
   setConnectionState(true);
+  renderAdminSession();
   $("#access-error").hidden = true;
   $("#access-popover").hidden = true;
+  return result;
+}
+
+async function resumeAdminSession(token) {
+  const session = await api("/admin/api/session", {
+    authToken: token,
+    suppressAuthPrompt: true,
+  });
+  state.token = token;
+  state.admin = session.admin;
+  setConnectionState(true);
+  renderAdminSession();
+  return session;
 }
 
 function money(amount, currency) {
@@ -752,7 +844,12 @@ function renderUsers(rows) {
       render: (row) => `<strong>${escapeHtml(row.legal_name || row.display_name || "Unnamed user")}</strong><div class="row-meta">${escapeHtml(row.whatsapp_phone)}</div>`,
     },
     { label: "Verification", render: (row) => chip(row.verification_status) },
-    { label: "Risk", render: (row) => chip(row.risk_status) },
+    {
+      label: "Risk",
+      render: (row) => row.admin_banned
+        ? chip("banned")
+        : chip(row.risk_status),
+    },
     { label: "Completed", render: (row) => escapeHtml(row.completed_deals_count || 0) },
     { label: "Disputes", render: (row) => escapeHtml(row.dispute_count) },
     { label: "Payouts", render: (row) => escapeHtml((row.payment_profiles || []).length) },
@@ -762,6 +859,49 @@ function renderUsers(rows) {
       render: () => `<button class="mini-button" data-open-row type="button">Review <i class="ph ph-arrow-right"></i></button>`,
     },
   ], rows, "user");
+}
+
+function renderAdmins(data) {
+  renderNavBadge(
+    "#nav-access-badge",
+    (data.accessRequests || []).filter((request) => request.status === "pending").length
+  );
+  $("#admin-access-summary").innerHTML = [
+    ["Administrators", (data.admins || []).length],
+    ["Active", (data.admins || []).filter((admin) => admin.status === "active").length],
+    ["Invited", (data.admins || []).filter((admin) => admin.status === "invited").length],
+    ["Access requests", (data.accessRequests || []).filter((request) => request.status === "pending").length],
+  ].map(([label, value]) => `
+    <div class="summary-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>
+  `).join("");
+
+  attachTable("admins-table", [
+    {
+      label: "Administrator",
+      render: (admin) => `<strong>${escapeHtml(admin.name)}</strong><div class="row-meta">${escapeHtml(admin.email || "No email")}</div>`,
+    },
+    { label: "Admin ID", render: (admin) => `<code>${escapeHtml(admin.admin_code)}</code>` },
+    { label: "Role", render: (admin) => chip(admin.role) },
+    { label: "Status", render: (admin) => chip(admin.status) },
+    { label: "Last login", render: (admin) => escapeHtml(date(admin.last_login_at)) },
+    { label: "Last active", render: (admin) => escapeHtml(date(admin.last_seen_at)) },
+    { label: "", render: () => `<button class="mini-button" data-open-row type="button">Manage <i class="ph ph-arrow-right"></i></button>` },
+  ], data.admins || [], "admin");
+
+  attachTable("access-requests-table", [
+    {
+      label: "Requester",
+      render: (request) => `<strong>${escapeHtml(request.name)}</strong><div class="row-meta">${escapeHtml(request.email)}</div>`,
+    },
+    { label: "Request", render: (request) => `<code>${escapeHtml(request.request_code)}</code>` },
+    { label: "Reason", render: (request) => escapeHtml(request.reason || "-") },
+    { label: "Status", render: (request) => chip(request.status) },
+    { label: "Requested", render: (request) => escapeHtml(date(request.created_at)) },
+    { label: "", render: () => `<button class="mini-button" data-open-row type="button">Review <i class="ph ph-arrow-right"></i></button>` },
+  ], data.accessRequests || [], "access-request");
+
+  $("#invite-admin").hidden = !hasAdminPermission("admins.manage") || !data.schemaReady;
+  if (data.warning) showNotice(data.warning, true);
 }
 
 function payoutSummary(profiles) {
@@ -1091,26 +1231,50 @@ function setSheetHeader({ icon, kicker, title: titleText, subtitle }) {
   $("#sheet-subtitle").textContent = subtitle || "";
 }
 
-function renderUserSheet(row) {
+function renderCurrencyVolume(volume = {}) {
+  const entries = Object.entries(volume);
+  if (!entries.length) return `<p class="row-meta">No completed exchange volume yet.</p>`;
+  return `<div class="volume-grid">${entries.map(([currency, amount]) => `
+    <div><span>${escapeHtml(currency)}</span><strong>${escapeHtml(Number(amount).toLocaleString())}</strong></div>
+  `).join("")}</div>`;
+}
+
+function renderUserSheet(details) {
+  const row = details.user || details;
+  const summary = details.summary || {};
   setSheetHeader({
     icon: "ph-user",
     kicker: "User profile",
     title: row.legal_name || row.display_name || "Unnamed user",
     subtitle: row.whatsapp_phone,
   });
-  const payouts = row.payment_profiles || [];
+  const payouts = details.payouts || row.payment_profiles || [];
+  const restrictedCurrencies = row.swap_restricted_currencies || [];
   $("#sheet-body").innerHTML = [
     sheetSection("Account overview", detailRows([
       ["Verification", chip(row.verification_status)],
       ["Risk level", chip(row.risk_status)],
+      ["Admin restriction", row.admin_banned ? chip("banned") : chip("clear")],
       ["Verification score", escapeHtml(row.verification_score ?? "-")],
-      ["Completed trades", escapeHtml(row.completed_deals_count || 0)],
+      ["First trade", escapeHtml(date(summary.firstTradeAt))],
+      ["Last completion", escapeHtml(date(summary.lastCompletedAt))],
+      ["All trades", escapeHtml(summary.totalTrades ?? "-")],
+      ["Completed trades", escapeHtml(summary.completedTrades ?? row.completed_deals_count ?? 0)],
+      ["Completion rate", escapeHtml(`${summary.completionRate || 0}%`)],
+      ["Receipt match rate", escapeHtml(`${summary.receiptMatchRate || 0}%`)],
+      ["Live offers", escapeHtml(summary.liveListings ?? "-")],
       ["Cancelled trades", escapeHtml(row.total_cancelled_deals || 0)],
-      ["Open disputes", escapeHtml(row.dispute_count || 0)],
+      ["Open disputes", escapeHtml(summary.openDisputes ?? row.dispute_count ?? 0)],
       ["Dispute hold", row.dispute_hold ? chip("under_review") : chip("normal")],
       ["Hold until", escapeHtml(date(row.hold_until))],
       ["Joined", escapeHtml(date(row.created_at))],
     ])),
+    sheetSection("Completed exchange volume", `
+      <div class="volume-columns">
+        <div><span class="panel-kicker">Sent</span>${renderCurrencyVolume(summary.sentVolume)}</div>
+        <div><span class="panel-kicker">Received</span>${renderCurrencyVolume(summary.receivedVolume)}</div>
+      </div>
+    `),
     sheetSection("Payout accounts", payouts.length
       ? payouts.map((profile) => detailRows([
         ["Currency", escapeHtml(profile.currency)],
@@ -1120,10 +1284,37 @@ function renderUserSheet(row) {
         ["Added", escapeHtml(date(profile.created_at))],
       ])).join("")
       : `<p class="row-meta">No payout accounts have been saved.</p>`),
+    sheetSection("Trade and offer records", `
+      <div class="record-counts">
+        <div><span>Offers</span><strong>${escapeHtml(details.listings?.length || 0)}</strong></div>
+        <div><span>Trades</span><strong>${escapeHtml(details.deals?.length || 0)}</strong></div>
+        <div><span>Receipts</span><strong>${escapeHtml(details.proofs?.length || 0)}</strong></div>
+        <div><span>Disputes</span><strong>${escapeHtml(details.disputes?.length || 0)}</strong></div>
+        <div><span>KYC reviews</span><strong>${escapeHtml(details.verifications?.length || 0)}</strong></div>
+        <div><span>Penalties</span><strong>${escapeHtml(details.penalties?.length || 0)}</strong></div>
+      </div>
+      <div class="user-timeline">
+        ${(details.timeline || []).slice(0, 20).map((item) => `
+          <div>
+            <i class="ph ${item.kind === "trade" ? "ph-arrows-left-right" : item.kind === "dispute" ? "ph-warning-diamond" : item.kind === "verification" ? "ph-identification-card" : "ph-clock-counter-clockwise"}"></i>
+            <span><strong>${escapeHtml(item.label || item.kind)}</strong><small>${escapeHtml(item.kind)} · ${escapeHtml(date(item.at))}</small></span>
+            ${chip(item.status)}
+          </div>
+        `).join("") || `<p class="row-meta">No recorded activity yet.</p>`}
+      </div>
+    `),
     sheetSection("Account controls", `
       <div class="sheet-form" data-user-controls="${escapeHtml(row.id)}">
         <label><span>Verification status</span>${select("verification_status", row.id, row.verification_status, ["unverified", "pending_input", "pending_review", "verified_auto", "verified_manual", "rejected", "suspended"], "user-sheet")}</label>
         <label><span>Risk status</span>${select("risk_status", row.id, row.risk_status, ["normal", "watch", "limited", "suspended"], "user-sheet")}</label>
+        <label class="toggle-field"><input data-field="admin_banned" type="checkbox" ${row.admin_banned ? "checked" : ""} /><span>Ban this account from every new exchange</span></label>
+        <label><span>Restriction reason</span><textarea data-field="admin_ban_reason" placeholder="Required when banning an account">${escapeHtml(row.admin_ban_reason || "")}</textarea></label>
+        <fieldset class="currency-restrictions">
+          <legend>Blocked swap currencies</legend>
+          ${supportedCurrencies.map((currency) => `
+            <label><input type="checkbox" data-restricted-currency value="${currency}" ${restrictedCurrencies.includes(currency) ? "checked" : ""} /><span>${currency}</span></label>
+          `).join("")}
+        </fieldset>
       </div>
     `),
   ].join("");
@@ -1132,6 +1323,99 @@ function renderUserSheet(row) {
     <button class="danger-button" type="button" data-user-suspend="${escapeHtml(row.id)}"><i class="ph ph-user-minus"></i> Suspend user</button>
     <button class="primary-button" type="button" data-user-apply="${escapeHtml(row.id)}"><i class="ph ph-check"></i> Save changes</button>
   `;
+}
+
+function permissionGroups(permissions = []) {
+  return [...new Set(permissions.map((permission) => permission.split(".")[0]))]
+    .map((group) => `<span class="permission-pill">${escapeHtml(group)}</span>`)
+    .join("");
+}
+
+function renderAdminSheet(row) {
+  const directory = state.data.admins || {};
+  setSheetHeader({
+    icon: "ph-user-gear",
+    kicker: "Administrator",
+    title: row.name,
+    subtitle: `${row.admin_code} · ${row.email || "No email"}`,
+  });
+  $("#sheet-body").innerHTML = [
+    sheetSection("Access profile", detailRows([
+      ["Admin ID", `<code>${escapeHtml(row.admin_code)}</code>`],
+      ["Role", chip(row.role)],
+      ["Status", chip(row.status)],
+      ["Invited", escapeHtml(date(row.invited_at))],
+      ["Activated", escapeHtml(date(row.activated_at))],
+      ["Last login", escapeHtml(date(row.last_login_at))],
+      ["Last active", escapeHtml(date(row.last_seen_at))],
+    ])),
+    sheetSection("Effective access", `<div class="permission-cloud">${permissionGroups(
+      row.role === "custom"
+        ? row.permissions
+        : (directory.rolePermissions?.[row.role] || [])
+    )}</div>`),
+    hasAdminPermission("admins.manage") ? sheetSection("Permission controls", `
+      <div class="sheet-form" data-admin-controls="${escapeHtml(row.id)}">
+        <label><span>Display name</span><input data-field="name" value="${escapeHtml(row.name)}" /></label>
+        <label><span>Role</span><select data-field="role">${Object.keys(directory.rolePermissions || {}).map((role) => `<option value="${role}" ${role === row.role ? "selected" : ""}>${escapeHtml(role.replaceAll("_", " "))}</option>`).join("")}</select></label>
+        <label><span>Account status</span><select data-field="status">${["invited", "active", "suspended", "revoked"].map((status) => `<option value="${status}" ${status === row.status ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}</select></label>
+        <fieldset class="permission-matrix">
+          <legend>Additional permissions</legend>
+          ${(directory.allPermissions || []).map((permission) => `
+            <label>
+              <input type="checkbox" data-admin-permission value="${escapeHtml(permission)}" ${(row.permissions || []).includes(permission) ? "checked" : ""} />
+              <span>${escapeHtml(permission.replace(".", " · "))}</span>
+            </label>
+          `).join("")}
+        </fieldset>
+      </div>
+    `) : "",
+  ].join("");
+  $("#sheet-footer").hidden = !hasAdminPermission("admins.manage");
+  $("#sheet-footer").innerHTML = hasAdminPermission("admins.manage")
+    ? `<button class="primary-button" type="button" data-admin-apply="${escapeHtml(row.id)}"><i class="ph ph-check"></i> Save access</button>`
+    : "";
+}
+
+function renderAccessRequestSheet(row) {
+  setSheetHeader({
+    icon: "ph-key",
+    kicker: "Access request",
+    title: row.name,
+    subtitle: `${row.request_code} · ${row.email}`,
+  });
+  $("#sheet-body").innerHTML = [
+    sheetSection("Request", detailRows([
+      ["Status", chip(row.status)],
+      ["Reason", escapeHtml(row.reason || "-")],
+      ["Requested", escapeHtml(date(row.created_at))],
+      ["Reviewed", escapeHtml(date(row.reviewed_at))],
+    ])),
+  ].join("");
+  const canReview = hasAdminPermission("admins.manage") && row.status === "pending";
+  $("#sheet-footer").hidden = !canReview;
+  $("#sheet-footer").innerHTML = canReview
+    ? `<button class="danger-button" type="button" data-access-decision="rejected" data-id="${escapeHtml(row.id)}">Reject</button><button class="primary-button" type="button" data-access-decision="approved" data-id="${escapeHtml(row.id)}">Approve</button>`
+    : "";
+}
+
+function renderInviteAdminSheet() {
+  const directory = state.data.admins || {};
+  setSheetHeader({
+    icon: "ph-user-plus",
+    kicker: "Admin invitation",
+    title: "Invite a new administrator",
+    subtitle: "Issue role-based access without sharing your own credentials.",
+  });
+  $("#sheet-body").innerHTML = sheetSection("Administrator details", `
+    <div class="sheet-form" id="invite-admin-form">
+      <label><span>Name</span><input data-field="name" placeholder="Full name" /></label>
+      <label><span>Work email</span><input data-field="email" type="email" placeholder="admin@tryakara.com" /></label>
+      <label><span>Role</span><select data-field="role">${Object.keys(directory.rolePermissions || {}).filter((role) => role !== "super_admin").map((role) => `<option value="${role}">${escapeHtml(role.replaceAll("_", " "))}</option>`).join("")}</select></label>
+    </div>
+  `);
+  $("#sheet-footer").hidden = false;
+  $("#sheet-footer").innerHTML = `<button class="primary-button" type="button" data-admin-invite><i class="ph ph-paper-plane-tilt"></i> Create invitation</button>`;
 }
 
 function renderVerificationSheet(row) {
@@ -1447,10 +1731,22 @@ function renderComplianceTaskSheet(row) {
   $("#sheet-footer").innerHTML = `<button class="primary-button" type="button" data-compliance-apply="task"><i class="ph ph-check"></i> Save task</button>`;
 }
 
-function openSheet(type, row) {
+async function openSheet(type, row) {
   if (!row) return;
   state.sheet = { type, row };
-  if (type === "user") renderUserSheet(row);
+  if (type === "user") {
+    setSheetHeader({
+      icon: "ph-user",
+      kicker: "User intelligence",
+      title: row.legal_name || row.display_name || "Loading user",
+      subtitle: "Retrieving the complete Akara record",
+    });
+    $("#sheet-body").innerHTML = `<div class="sheet-loading"><i class="ph ph-circle-notch ph-spin"></i><span>Loading user history and exchange intelligence</span></div>`;
+    $("#sheet-footer").hidden = true;
+  }
+  if (type === "admin") renderAdminSheet(row);
+  if (type === "access-request") renderAccessRequestSheet(row);
+  if (type === "admin-invite") renderInviteAdminSheet();
   if (type === "verification") renderVerificationSheet(row);
   if (type === "listing") renderListingSheet(row);
   if (type === "deal") renderDealSheet(row);
@@ -1465,6 +1761,17 @@ function openSheet(type, row) {
   $("#detail-sheet").setAttribute("aria-hidden", "false");
   document.body.classList.add("sheet-open");
   window.setTimeout(() => $("#close-sheet").focus(), 30);
+  if (type === "user") {
+    try {
+      const details = await api(`/admin/api/users/${row.id}/details`);
+      if (state.sheet?.type === "user" && state.sheet?.row?.id === row.id) {
+        state.sheet.details = details;
+        renderUserSheet(details);
+      }
+    } catch (error) {
+      $("#sheet-body").innerHTML = `<div class="empty-state compact"><i class="ph ph-warning-circle"></i><strong>User record unavailable</strong><p>${escapeHtml(error.message)}</p></div>`;
+    }
+  }
 }
 
 function closeSheet() {
@@ -1534,6 +1841,9 @@ function renderCompliance(data) {
 
 async function loadView(view = state.view) {
   hideNotice();
+  if (!hasAdminPermission(viewPermissions[view])) {
+    throw new Error("Your admin role does not allow this workspace.");
+  }
   if (view === "overview") {
     const data = await api("/admin/api/overview");
     state.data.overview = data;
@@ -1562,6 +1872,13 @@ async function loadView(view = state.view) {
     return;
   }
 
+  if (view === "admins") {
+    const data = await api("/admin/api/admins");
+    state.data.admins = data;
+    renderAdmins(data);
+    return;
+  }
+
   const data = await api(`/admin/api/${view}`);
   state.data[view] = data;
   if (view === "users") renderUsers(data);
@@ -1576,7 +1893,11 @@ async function loadView(view = state.view) {
 function setView(view) {
   closeSheet();
   if (!state.authenticated) {
-    openAccessPrompt("Connect with your admin token before opening this workspace.");
+    openAccessPrompt("Sign in with an active Akara administrator account to open this workspace.");
+    return;
+  }
+  if (!hasAdminPermission(viewPermissions[view])) {
+    toast("Your role does not include access to this workspace.", true);
     return;
   }
   state.view = view;
@@ -1734,11 +2055,26 @@ async function applyUserUpdate(button) {
   const container = document.querySelector(`[data-user-controls="${CSS.escape(id)}"]`);
   const verificationStatus = container.querySelector("[data-field='verification_status']").value;
   const riskStatus = container.querySelector("[data-field='risk_status']").value;
+  const adminBanned = container.querySelector("[data-field='admin_banned']").checked;
+  const adminBanReason = container.querySelector("[data-field='admin_ban_reason']").value.trim();
+  const restrictedCurrencies = [...container.querySelectorAll("[data-restricted-currency]:checked")]
+    .map((field) => field.value);
+  if (adminBanned && !adminBanReason) {
+    throw new Error("Add a concise reason before banning this account.");
+  }
   await api(`/admin/api/users/${id}/status`, {
     method: "PATCH",
     body: JSON.stringify({
       verification_status: verificationStatus,
       risk_status: riskStatus,
+    }),
+  });
+  await api(`/admin/api/users/${id}/restrictions`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      admin_banned: adminBanned,
+      admin_ban_reason: adminBanReason || null,
+      swap_restricted_currencies: restrictedCurrencies,
     }),
   });
   toast("User controls updated.");
@@ -1757,6 +2093,94 @@ async function applyListingUpdate(button) {
   toast("Offer status updated.");
   closeSheet();
   await loadView(state.view);
+}
+
+async function inviteAdmin() {
+  const form = $("#invite-admin-form");
+  const payload = Object.fromEntries(
+    [...form.querySelectorAll("[data-field]")].map((field) => [field.dataset.field, field.value.trim()])
+  );
+  const result = await api("/admin/api/admins/invite", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  $("#sheet-body").innerHTML = [
+    sheetSection("Invitation created", `
+      <div class="credential-reveal">
+        <i class="ph ph-shield-check"></i>
+        <strong>${escapeHtml(result.admin.name)} can now sign in</strong>
+        <p>${escapeHtml(result.note)}</p>
+        <label><span>One-time access token</span><div class="copy-field"><code id="invitation-token">${escapeHtml(result.invitationToken)}</code><button type="button" data-copy-invitation aria-label="Copy invitation token"><i class="ph ph-copy"></i></button></div></label>
+      </div>
+    `),
+  ].join("");
+  $("#sheet-footer").hidden = false;
+  $("#sheet-footer").innerHTML = `<button class="primary-button" type="button" data-close-invitation>Done</button>`;
+  await loadView("admins");
+}
+
+async function applyAdminUpdate(button) {
+  const id = button.dataset.adminApply;
+  const form = document.querySelector(`[data-admin-controls="${CSS.escape(id)}"]`);
+  const payload = Object.fromEntries(
+    [...form.querySelectorAll("[data-field]")].map((field) => [field.dataset.field, field.value.trim()])
+  );
+  payload.permissions = [...form.querySelectorAll("[data-admin-permission]:checked")]
+    .map((field) => field.value);
+  await api(`/admin/api/admins/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  toast("Administrator access updated.");
+  closeSheet();
+  await loadView("admins");
+}
+
+async function reviewAccessRequest(button) {
+  await api(`/admin/api/access-requests/${button.dataset.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: button.dataset.accessDecision }),
+  });
+  toast(`Access request ${button.dataset.accessDecision}.`);
+  closeSheet();
+  await loadView("admins");
+}
+
+async function logoutCurrentAdmin() {
+  try {
+    await api("/admin/api/auth/logout", { method: "POST", suppressAuthPrompt: true });
+  } finally {
+    handleAuthFailure("You have logged out. Sign in again to continue.");
+  }
+}
+
+async function submitAccessRequest(event) {
+  event.preventDefault();
+  const error = $("#access-request-error");
+  error.hidden = true;
+  try {
+    const result = await api("/admin/api/access-requests", {
+      method: "POST",
+      authToken: "",
+      suppressAuthPrompt: true,
+      body: JSON.stringify({
+        name: $("#access-request-name").value.trim(),
+        email: $("#access-request-email").value.trim(),
+        reason: $("#access-request-reason").value.trim(),
+      }),
+    });
+    $("#access-request-form").innerHTML = `
+      <div class="request-success">
+        <i class="ph ph-check-circle"></i>
+        <strong>Request sent</strong>
+        <p>A super admin can now review <code>${escapeHtml(result.requestCode || "your request")}</code>. You will need an invitation token before you can sign in.</p>
+        <button class="secondary-button full-button" type="button" data-return-to-login>Return to sign in</button>
+      </div>
+    `;
+  } catch (requestError) {
+    error.textContent = requestError.message;
+    error.hidden = false;
+  }
 }
 
 async function applyComplianceUpdate(button) {
@@ -1792,16 +2216,12 @@ function bindEvents() {
     button.innerHTML = `<i class="ph ph-circle-notch ph-spin"></i> Checking access`;
     $("#access-error").hidden = true;
     try {
-      await authenticateAdmin($("#admin-token").value, $("#remember-token").checked);
-      toast("Secure admin connection established.");
+      const result = await authenticateAdmin($("#admin-token").value, $("#remember-token").checked);
+      toast(`Welcome, ${result.admin.name}.`);
       await loadView(state.view);
     } catch (error) {
       setConnectionState(false);
-      openAccessPrompt(
-        error.status === 401
-          ? "This token does not match AKARA_ADMIN_TOKEN in Railway. Check the value and try again."
-          : error.message
-      );
+      openAccessPrompt(error.status === 401 ? "This access token is invalid, expired, or revoked." : error.message);
     } finally {
       button.disabled = false;
       button.innerHTML = original;
@@ -1842,11 +2262,11 @@ function bindEvents() {
 
   const toggleAccess = () => {
     if (!state.authenticated) {
-      openAccessPrompt("Enter the admin token configured in Railway to open Akara Operations.");
+      openAccessPrompt("Sign in with your Akara administrator access token.");
       return;
     }
     $("#access-popover").hidden = !$("#access-popover").hidden;
-    if (!$("#access-popover").hidden) window.setTimeout(() => $("#admin-token").focus(), 20);
+    if (!$("#access-popover").hidden) renderAdminSession();
   };
   $("#open-access").addEventListener("click", toggleAccess);
   $("#access-status").addEventListener("click", toggleAccess);
@@ -1878,7 +2298,7 @@ function bindEvents() {
     if (row && !event.target.closest("button, a, select, textarea, input")) {
       const table = row.closest("table");
       const rows = JSON.parse(table.dataset.rows || "[]");
-      openSheet(row.dataset.rowType, rows[Number(row.dataset.rowIndex)]);
+      openSheet(row.dataset.rowType, rows[Number(row.dataset.rowIndex)]).catch((error) => toast(error.message, true));
       return;
     }
 
@@ -1887,7 +2307,7 @@ function bindEvents() {
       const tableRow = openRowButton.closest("tr[data-row-type]");
       const table = tableRow.closest("table");
       const rows = JSON.parse(table.dataset.rows || "[]");
-      openSheet(tableRow.dataset.rowType, rows[Number(tableRow.dataset.rowIndex)]);
+      openSheet(tableRow.dataset.rowType, rows[Number(tableRow.dataset.rowIndex)]).catch((error) => toast(error.message, true));
       return;
     }
 
@@ -1942,6 +2362,42 @@ function bindEvents() {
     const complianceButton = event.target.closest("button[data-compliance-apply]");
     if (complianceButton) {
       applyComplianceUpdate(complianceButton).catch((error) => toast(error.message, true));
+      return;
+    }
+
+    const adminApplyButton = event.target.closest("button[data-admin-apply]");
+    if (adminApplyButton) {
+      applyAdminUpdate(adminApplyButton).catch((error) => toast(error.message, true));
+      return;
+    }
+
+    const adminInviteButton = event.target.closest("button[data-admin-invite]");
+    if (adminInviteButton) {
+      inviteAdmin().catch((error) => toast(error.message, true));
+      return;
+    }
+
+    const accessDecision = event.target.closest("button[data-access-decision]");
+    if (accessDecision) {
+      reviewAccessRequest(accessDecision).catch((error) => toast(error.message, true));
+      return;
+    }
+
+    const copyInvitation = event.target.closest("button[data-copy-invitation]");
+    if (copyInvitation) {
+      navigator.clipboard.writeText($("#invitation-token").textContent)
+        .then(() => toast("Invitation token copied."))
+        .catch(() => toast("Could not copy the token.", true));
+      return;
+    }
+
+    if (event.target.closest("[data-close-invitation]")) {
+      closeSheet();
+      return;
+    }
+
+    if (event.target.closest("[data-return-to-login]")) {
+      window.location.reload();
     }
   });
 
@@ -1959,9 +2415,25 @@ function bindEvents() {
       const row = event.target;
       const table = row.closest("table");
       const rows = JSON.parse(table.dataset.rows || "[]");
-      openSheet(row.dataset.rowType, rows[Number(row.dataset.rowIndex)]);
+      openSheet(row.dataset.rowType, rows[Number(row.dataset.rowIndex)]).catch((error) => toast(error.message, true));
     }
   });
+
+  $("#invite-admin").addEventListener("click", () => {
+    openSheet("admin-invite", {}).catch((error) => toast(error.message, true));
+  });
+  $("#logout-admin").addEventListener("click", () => {
+    logoutCurrentAdmin().catch((error) => toast(error.message, true));
+  });
+  $("#show-access-request").addEventListener("click", () => {
+    $("#access-login").hidden = true;
+    $("#access-request-form").hidden = false;
+  });
+  $("#cancel-access-request").addEventListener("click", () => {
+    $("#access-request-form").hidden = true;
+    $("#access-login").hidden = false;
+  });
+  $("#access-request-form").addEventListener("submit", submitAccessRequest);
 }
 
 async function initializeAdmin() {
@@ -1971,12 +2443,20 @@ async function initializeAdmin() {
     sessionStorage.removeItem("akaraAdminToken");
     localStorage.removeItem("akaraAdminToken");
     $("#admin-token").value = "";
-    openAccessPrompt("Enter the admin token configured in Railway to open Akara Operations.");
+    renderAdminSession();
+    openAccessPrompt("Sign in with your Akara administrator access token.");
     return;
   }
 
   try {
-    await authenticateAdmin(state.token, Boolean(localStorage.getItem("akaraAdminToken")));
+    await resumeAdminSession(state.token);
+    if (!hasAdminPermission(viewPermissions[state.view])) {
+      state.view = Object.keys(viewPermissions).find((view) => hasAdminPermission(viewPermissions[view])) || "overview";
+      document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("is-active", item.dataset.view === state.view));
+      document.querySelectorAll(".view").forEach((item) => item.classList.toggle("is-active", item.id === state.view));
+      $("#view-title").textContent = titles[state.view][0];
+      $("#view-subtitle").textContent = titles[state.view][1];
+    }
     await loadView();
   } catch (error) {
     handleAuthFailure(error.message);

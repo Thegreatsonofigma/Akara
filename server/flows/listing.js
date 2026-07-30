@@ -18,7 +18,15 @@ const {
   isListingPublishIntent,
   isReminderIntent,
 } = require("../nlp/intents");
-const { getUserById, updateUser, isVerified, isOnHold, tierLimitBlockForAmount, tierLimitBlockForListing } = require("../db/users");
+const {
+  getUserById,
+  updateUser,
+  isVerified,
+  isOnHold,
+  tierLimitBlockForAmount,
+  tierLimitBlockForListing,
+  swapRestrictionBlockForPair,
+} = require("../db/users");
 const { upsertSession, clearSession } = require("../db/sessions");
 const { getDefaultPaymentProfile, getPaymentProfiles, formatPaymentProfile, paymentExpectationLine } = require("../db/payments");
 const { sendListingCard } = require("../lib/listing-card");
@@ -786,6 +794,8 @@ async function createListingRecord(user, context) {
 }
 
 async function publishListing(user, context) {
+  const restrictionBlock = swapRestrictionBlockForPair(user, context.have_currency, context.want_currency);
+  if (restrictionBlock) return restrictionBlock;
   const tierBlock = tierLimitBlockForListing(user, context);
   if (tierBlock) return holdListingForTierReview(user, context, tierBlock);
 
@@ -880,6 +890,20 @@ async function publishBulkListings(user, listings) {
 
   for (let index = 0; index < unique.length; index += 1) {
     const listing = unique[index];
+    const restrictionBlock = swapRestrictionBlockForPair(
+      user,
+      listing.have_currency,
+      listing.want_currency
+    );
+    if (restrictionBlock) {
+      return [
+        title(`Listing ${index + 1} cannot be published`),
+        "",
+        restrictionBlock,
+        "",
+        "Nothing in this batch was published.",
+      ].join("\n");
+    }
     const tierBlock = tierLimitBlockForListing(user, listing);
     if (tierBlock) {
       return [
@@ -1007,7 +1031,7 @@ async function matchingUsersById(listings) {
   if (!ids.length) return {};
   const users = await supabaseRequest(
     [
-      "users?select=id,whatsapp_phone,verification_status,risk_status,dispute_hold,hold_until,completed_deals_count,total_cancelled_deals,dispute_count",
+      "users?select=id,whatsapp_phone,verification_status,risk_status,dispute_hold,hold_until,admin_banned,swap_restricted_currencies,completed_deals_count,total_cancelled_deals,dispute_count",
       `id=in.(${ids.map(filterValue).join(",")})`,
       `limit=${ids.length}`,
     ].join("&")
@@ -1020,6 +1044,7 @@ function matchingOwnerIsEligible(owner) {
     owner
     && isVerified(owner)
     && !isOnHold(owner)
+    && !owner.admin_banned
     && !["limited", "suspended"].includes(owner.risk_status)
   );
 }
@@ -1136,6 +1161,11 @@ async function findReciprocalPlan(user, listing, kind, options = {}) {
       && !busyListings.has(candidate.id)
       && !busyListings.userIds?.has(candidate.owner_user_id)
       && matchingOwnerIsEligible(usersById[candidate.owner_user_id])
+      && !swapRestrictionBlockForPair(
+        usersById[candidate.owner_user_id],
+        candidate.have_currency,
+        candidate.want_currency
+      )
     ))
     .map((candidate) => (
       kind === "clearing"
@@ -1755,6 +1785,7 @@ async function requeueCancelledAutoMatch(deal, actorUserId = null, reason = "tra
 }
 
 async function tryAutoMatchListing(user, listing, options = {}) {
+  if (swapRestrictionBlockForPair(user, listing.have_currency, listing.want_currency)) return null;
   if (!options.skipBatchWindow) await matchingWindowDelay();
   const plan = await findReciprocalPlan(user, listing, "clearing", options);
   if (!plan) return null;
@@ -2420,6 +2451,20 @@ async function openListingTrade(user, listing, options = {}) {
 }
 
 async function reserveListing(user, listing, options = {}) {
+  const userRestriction = swapRestrictionBlockForPair(
+    user,
+    listing.want_currency,
+    listing.have_currency
+  );
+  if (userRestriction) return userRestriction;
+  const listingOwner = await getUserById(listing.owner_user_id);
+  const ownerRestriction = swapRestrictionBlockForPair(
+    listingOwner,
+    listing.have_currency,
+    listing.want_currency
+  );
+  if (ownerRestriction) return "This offer is temporarily unavailable. Choose another live offer.";
+
   if (!options.force && listing.listing_type === "negotiable") {
     if (!isVerified(user)) return "Please verify first so your trade partner knows you are real. Use the Start verification button in Akara to continue.";
     if (listing.owner_user_id === user.id) return "This is your own offer. Share the link with someone else to start an Akara Trade.";

@@ -96,9 +96,36 @@ function tierLimitBlockForListing(user, context) {
 
 function isOnHold(user) {
   return Boolean(
-    user.dispute_hold
+    user.admin_banned
+    || user.dispute_hold
     || (user.hold_until && new Date(user.hold_until).getTime() > Date.now())
   );
+}
+
+function restrictedSwapCurrencies(user) {
+  return Array.isArray(user?.swap_restricted_currencies)
+    ? user.swap_restricted_currencies.map((currency) => String(currency).toUpperCase())
+    : [];
+}
+
+function swapRestrictionBlockForPair(user, haveCurrency, wantCurrency) {
+  if (user?.admin_banned) {
+    return [
+      "Your Akara account is currently restricted.",
+      "",
+      user.admin_ban_reason || "Contact Akara support for help with the restriction.",
+    ].join("\n");
+  }
+  const restricted = restrictedSwapCurrencies(user);
+  const blocked = [haveCurrency, wantCurrency]
+    .map((currency) => String(currency || "").toUpperCase())
+    .filter((currency) => restricted.includes(currency));
+  if (!blocked.length) return "";
+  return [
+    `Swaps involving ${[...new Set(blocked)].join(" or ")} are currently restricted on your account.`,
+    "",
+    "You can use other supported currencies or contact Akara support for a review.",
+  ].join("\n");
 }
 
 function firstName(user) {
@@ -115,5 +142,7 @@ module.exports = {
   tierLimitBlockForAmount,
   tierLimitBlockForListing,
   isOnHold,
+  restrictedSwapCurrencies,
+  swapRestrictionBlockForPair,
   firstName,
 };
