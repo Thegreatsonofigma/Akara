@@ -1,11 +1,13 @@
 {
   "version": "7.3",
+  "routing_model": {
+    "KYC_DETAILS": ["KYC_REVIEW"],
+    "KYC_REVIEW": []
+  },
   "screens": [
     {
       "id": "KYC_DETAILS",
       "title": "Verify on Akara",
-      "terminal": true,
-      "success": true,
       "data": {
         "mode": {
           "type": "string",
@@ -38,7 +40,7 @@
                 "required": true
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "nationality",
                 "label": "Nationality",
                 "required": true,
@@ -53,7 +55,7 @@
                 ]
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "residence_country",
                 "label": "Country of residence",
                 "required": true,
@@ -74,7 +76,7 @@
                 "required": true
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "id_type",
                 "label": "ID type",
                 "required": true,
@@ -86,7 +88,7 @@
                 ]
               },
               {
-                "type": "Dropdown",
+                "type": "RadioButtonsGroup",
                 "name": "id_country",
                 "label": "ID issuing country",
                 "required": true,
@@ -108,12 +110,14 @@
               },
               {
                 "type": "Footer",
-                "label": "Submit details",
+                "label": "Review details",
                 "on-click-action": {
-                  "name": "complete",
+                  "name": "navigate",
+                  "next": {
+                    "type": "screen",
+                    "name": "KYC_REVIEW"
+                  },
                   "payload": {
-                    "mode": "${data.mode}",
-                    "verification_token": "${data.verification_token}",
                     "legal_name": "${form.legal_name}",
                     "nationality": "${form.nationality}",
                     "residence_country": "${form.residence_country}",
@@ -125,6 +129,76 @@
                 }
               }
             ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "KYC_REVIEW",
+      "title": "Review Your Details",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "legal_name": {
+          "type": "string",
+          "__example__": "Promise Uchenna Steven"
+        },
+        "nationality": {
+          "type": "string",
+          "__example__": "NG"
+        },
+        "residence_country": {
+          "type": "string",
+          "__example__": "RW"
+        },
+        "city": {
+          "type": "string",
+          "__example__": "Kigali"
+        },
+        "id_type": {
+          "type": "string",
+          "__example__": "passport"
+        },
+        "id_country": {
+          "type": "string",
+          "__example__": "NG"
+        },
+        "id_number": {
+          "type": "string",
+          "__example__": "A12345678"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Check before submitting"
+          },
+          {
+            "type": "TextBody",
+            "text": "Name: ${data.legal_name}\nNationality: ${data.nationality}\nResidence: ${data.residence_country}\nCity: ${data.city}\nID: ${data.id_type}\nIssued by: ${data.id_country}\nID number: ${data.id_number}"
+          },
+          {
+            "type": "TextBody",
+            "text": "Use the back arrow to correct anything. Submit only when these details match your identification document."
+          },
+          {
+            "type": "Footer",
+            "label": "Submit verification",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "mode": "verification",
+                "legal_name": "${data.legal_name}",
+                "nationality": "${data.nationality}",
+                "residence_country": "${data.residence_country}",
+                "city": "${data.city}",
+                "id_type": "${data.id_type}",
+                "id_country": "${data.id_country}",
+                "id_number": "${data.id_number}"
+              }
+            }
           }
         ]
       }
