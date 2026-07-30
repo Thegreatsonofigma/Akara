@@ -20,213 +20,10 @@ The submitted response must include WhatsApp's `flow_token`. Akara also sends `c
 
 ## Flow JSON
 
-Replace Meta's default `Hello World` JSON with this:
-
-```json
-// {
-//   "version": "7.3",
-//   "screens": [
-//     {
-//       "id": "SETUP_PIN",
-//       "title": "Setup Akara Code",
-//       "terminal": true,
-//       "success": true,
-//       "data": {
-//         "mode": {
-//           "type": "string",
-//           "__example__": "setup"
-//         },
-//         "challenge_token": {
-//           "type": "string",
-//           "__example__": "sample-token"
-//         },
-//         "action_label": {
-//           "type": "string",
-//           "__example__": "Edit payout detail"
-//         }
-//       },
-//       "layout": {
-//         "type": "SingleColumnLayout",
-//         "children": [
-//           {
-//             "type": "Form",
-//             "name": "setup_pin_form",
-//             "children": [
-//               {
-//                 "type": "TextHeading",
-//                 "text": "Setup your Akara code"
-//               },
-//               {
-//                 "type": "TextBody",
-//                 "text": "Create a private 4 to 6 digit code for payout edits and other sensitive actions."
-//               },
-//               {
-//                 "type": "TextInput",
-//                 "name": "passcode",
-//                 "label": "Create code",
-//                 "input-type": "number",
-//                 "required": true
-//               },
-//               {
-//                 "type": "TextInput",
-//                 "name": "confirm",
-//                 "label": "Confirm code",
-//                 "input-type": "number",
-//                 "required": true
-//               },
-//               {
-//                 "type": "Footer",
-//                 "label": "Save code",
-//                 "on-click-action": {
-//                   "name": "complete",
-//                   "payload": {
-//                     "mode": "${data.mode}",
-//                     "challenge_token": "${data.challenge_token}",
-//                     "action_label": "${data.action_label}",
-//                     "passcode": "${form.passcode}",
-//                     "confirm": "${form.confirm}"
-//                   }
-//                 }
-//               }
-//             ]
-//           }
-//         ]
-//       }
-//     },
-//     {
-//       "id": "AUTHORIZE_PIN",
-//       "title": "Authorize Action",
-//       "terminal": true,
-//       "success": true,
-//       "data": {
-//         "mode": {
-//           "type": "string",
-//           "__example__": "authorize"
-//         },
-//         "challenge_token": {
-//           "type": "string",
-//           "__example__": "sample-token"
-//         },
-//         "action_label": {
-//           "type": "string",
-//           "__example__": "Edit payout detail"
-//         }
-//       },
-//       "layout": {
-//         "type": "SingleColumnLayout",
-//         "children": [
-//           {
-//             "type": "Form",
-//             "name": "authorize_pin_form",
-//             "children": [
-//               {
-//                 "type": "TextHeading",
-//                 "text": "Authorize this action"
-//               },
-//               {
-//                 "type": "TextBody",
-//                 "text": "${data.action_label}"
-//               },
-//               {
-//                 "type": "TextInput",
-//                 "name": "passcode",
-//                 "label": "Akara code",
-//                 "input-type": "number",
-//                 "required": true
-//               },
-//               {
-//                 "type": "Footer",
-//                 "label": "Authorize",
-//                 "on-click-action": {
-//                   "name": "complete",
-//                   "payload": {
-//                     "mode": "${data.mode}",
-//                     "challenge_token": "${data.challenge_token}",
-//                     "action_label": "${data.action_label}",
-//                     "passcode": "${form.passcode}"
-//                   }
-//                 }
-//               }
-//             ]
-//           }
-//         ]
-//       }
-//     }
-//   ]
-// }
-{
-  "version": "7.3",
-  "screens": [
-    {
-      "id": "SETUP_PIN",
-      "title": "Secure Your Account",
-      "terminal": true,
-      "success": true,
-      "data": {
-        "mode": {
-          "type": "string",
-          "__example__": "setup"
-        },
-        "challenge_token": {
-          "type": "string",
-          "__example__": "sample-token"
-        },
-        "action_label": {
-          "type": "string",
-          "__example__": "Edit payout detail"
-        }
-      },
-      "layout": {
-        "type": "SingleColumnLayout",
-        "children": [
-          {
-            "type": "Form",
-            "name": "setup_pin_form",
-            "children": [
-              {
-                "type": "TextHeading",
-                "text": "Set up your passcode"
-              },
-              {
-                "type": "TextBody",
-                "text": "Set a private 6-digit code for sensitive actions like payout changes and deal confirmations."
-              },
-              {
-                "type": "TextInput",
-                "name": "passcode",
-                "label": "Create passcode",
-                "input-type": "number",
-                "required": true
-              },
-              {
-                "type": "TextInput",
-                "name": "confirm",
-                "label": "Confirm passcode",
-                "input-type": "number",
-                "required": true
-              },
-              {
-                "type": "Footer",
-                "label": "Confirm & save",
-                "on-click-action": {
-                  "name": "complete",
-                  "payload": {
-                    "mode": "${data.mode}",
-                    "challenge_token": "${data.challenge_token}",
-                    "action_label": "${data.action_label}",
-                    "passcode": "${form.passcode}",
-                    "confirm": "${form.confirm}"
-                  }
-                }
-              }
-            ]
-          }
-        ]
-      }
-    }
-  ]
-}
-```
+Replace Meta's default `Hello World` JSON with
+`docs/akara-security-flow.json`. The production definition includes both
+`SETUP_PIN` and `AUTHORIZE_PIN`; Akara chooses the correct entry screen when it
+sends the Flow.
 
 ## User Experience
 
@@ -235,7 +32,7 @@ Setup:
 1. User tries a sensitive action for the first time.
 2. Akara sends a WhatsApp Flow button.
 3. The user taps it and sees the native bottom sheet.
-4. The user enters and confirms a 4 to 6 digit Akara code.
+4. The user enters and confirms a 6 digit Akara code.
 5. Akara saves the hashed code and resumes the action.
 
 Authorization:
@@ -260,3 +57,8 @@ node server/index.js
 ```
 
 If `AKARA_SECURITY_FLOW_ID` is missing, Akara falls back to the secure web-link flow for local development.
+
+New passcodes must contain exactly six digits. Akara temporarily accepts
+existing four- or five-digit codes during authorization so current users are
+not locked out; those legacy users should be migrated to six digits through a
+controlled reset.

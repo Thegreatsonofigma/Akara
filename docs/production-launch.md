@@ -81,14 +81,35 @@ Redeploy after changing either ID.
 
 ## 5. Meta Production Readiness
 
-- Use the registered Akara Cloud API phone number and permanent system-user token.
-- Complete all Required Actions and business verification requested by Meta.
-- Add the production business profile, support email, privacy policy, terms,
-  and data-deletion information.
-- Add a payment method for business-initiated conversations.
-- Create approved utility templates for match alerts, reminders, KYC outcomes,
-  disputes, and time-sensitive trade updates outside the customer-service window.
-- Switch the Meta app to Live only after the production smoke test passes.
+After Meta marks Akara Fintech Solutions as **Verified**:
+
+1. In **Meta for Developers > Akara > App settings > Basic**, complete the
+   app contact email, icon, category, app domain, privacy-policy URL, terms URL,
+   and user-data deletion URL:
+   - `https://tryakara.com/legal/privacy-policy`
+   - `https://tryakara.com/legal/terms-of-service`
+   - `https://tryakara.com/legal/data-deletion-policy`
+2. In **WhatsApp > Production setup**, confirm the Akara Cloud API number is
+   registered, connected, and protected by its six-digit registration PIN.
+3. In **WhatsApp Manager**, complete the production business profile and add a
+   payment method for business-initiated conversations.
+4. Confirm the Akara app is subscribed to the production WABA and the
+   `messages` webhook field. The callback must remain
+   `https://api.tryakara.com/webhook`.
+5. Use a permanent system-user token assigned to both the Akara app and
+   production WABA, with `whatsapp_business_messaging` and
+   `whatsapp_business_management`.
+6. Publish the KYC and security Flows, replace the Railway Flow IDs with the
+   published IDs, set `WHATSAPP_FLOW_MODE=published`, and redeploy Railway.
+7. Create and obtain approval for utility templates covering match alerts,
+   reminders, KYC outcomes, disputes, and time-sensitive trade updates outside
+   the customer-service window.
+8. Complete every item Meta shows under **Required actions** or **Publish**,
+   run the production smoke test below, then switch the Meta app to **Live**.
+
+Akara operates its own WABA. Do not request Tech Provider or partner-level
+permissions unless Akara later needs to onboard and manage WhatsApp accounts
+belonging to other businesses.
 
 ## 6. Smoke Test
 
@@ -107,3 +128,34 @@ Use two verified test users and synthetic documents/receipts:
 
 Keep ngrok available only for local development. Meta production callbacks must
 use `https://api.tryakara.com/webhook`.
+
+## 7. Stellar Integrity Activation
+
+Stellar is an invisible integrity rail, not a user payment rail. Users still
+send and receive local currency through their own bank or mobile-money
+accounts. No user wallet, crypto transfer, or XLM balance is required.
+
+Activate it on the live Railway service in two stages:
+
+1. Apply migrations 008 and 009, then re-run migration 016 so the Stellar
+   tables and trigger functions receive the production grants and hardening.
+2. Create and fund a dedicated Stellar testnet account.
+3. Add the `AKARA_STELLAR_*` and `AKARA_INTEGRITY_HMAC_SECRET` variables shown
+   in `.env.example` to Railway. Keep `AKARA_STELLAR_NETWORK=testnet` and
+   `AKARA_STELLAR_MAINNET_ACK=false`.
+4. Set `AKARA_STELLAR_INTEGRITY_ENABLED=true` and redeploy.
+5. In the Railway service shell, run:
+
+```bash
+npm run stellar:readiness
+```
+
+6. Complete controlled exchanges and verify the resulting records in
+   Admin > Integrity.
+7. Run `npm run stellar:backfill` only after new test records verify.
+8. Keep testnet running for at least seven days before following the
+   public-network cutover in `docs/stellar-integrity.md`.
+
+Akara now fails startup when Stellar is enabled with a weak HMAC secret,
+invalid network, insecure Horizon URL, missing or mismatched signer, missing
+production public-key pin, or an unacknowledged public-network configuration.

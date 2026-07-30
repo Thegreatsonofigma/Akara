@@ -67,10 +67,14 @@ a digest rather than its content.
 ## Setup
 
 1. Apply `supabase/migrations/008_stellar_integrity_reputation.sql`.
-2. Create a dedicated Stellar testnet account.
-3. Fund it with test XLM.
-4. Generate an independent HMAC secret with at least 32 random bytes.
-5. Add the following private environment variables:
+2. Apply `supabase/migrations/009_stellar_market_quotes_credentials_routes.sql`.
+3. Re-run `supabase/migrations/016_production_security_hardening.sql` after
+   migrations 008 and 009. It removes public grants and hardens the newly
+   installed trigger functions.
+4. Create a dedicated Stellar testnet account.
+5. Fund it with test XLM.
+6. Generate an independent HMAC secret with at least 32 random bytes.
+7. Add the following private environment variables:
 
 ```env
 AKARA_STELLAR_INTEGRITY_ENABLED=true
@@ -89,23 +93,65 @@ For production, keep the signing key in the hosting provider's encrypted
 secret store. A managed KMS or signing service is preferred before material
 scale. Do not place it in frontend or Vercel `NEXT_PUBLIC_` variables.
 
+Akara refuses to start when Stellar anchoring is enabled but the HMAC secret,
+network, HTTPS Horizon endpoint, signer, production public-key pin, or
+mainnet acknowledgement is invalid.
+
+## Production Readiness Check
+
+Run this from the Railway service after setting the private variables:
+
+```bash
+npm run stellar:readiness
+```
+
+The command is read-only. It validates the configuration, loads the dedicated
+account from Horizon, and checks the current base fee against Akara's fee
+ceiling. It does not create, sign, or submit a transaction and never prints
+the secret key or HMAC secret.
+
 ## Activation Order
 
 1. Run all tests with anchoring disabled.
 2. Apply migration 008.
-3. Enable testnet.
-4. Complete two controlled test exchanges.
-5. Open Admin > Integrity.
-6. Confirm the records show `Anchored`.
-7. Select `Verify` and confirm the Merkle proof and Stellar transaction.
-8. Backfill existing completed exchanges:
+3. Apply migration 009.
+4. Re-run migration 016.
+5. Enable testnet.
+6. Run `npm run stellar:readiness` in Railway and require `"ok": true`.
+7. Complete two controlled test exchanges.
+8. Open Admin > Integrity.
+9. Confirm the records show `Anchored`.
+10. Select `Verify` and confirm the Merkle proof and Stellar transaction.
+11. Backfill existing completed exchanges:
 
 ```bash
 npm run stellar:backfill
 ```
 
-9. Review testnet records for at least seven days.
-10. Complete a security review before changing the network to `public`.
+12. Review testnet records for at least seven days.
+13. Complete a privacy, incident-response, and signing-key review before
+    changing the network to `public`.
+
+## Public-Network Cutover
+
+Production hosting does not require immediate public-network anchoring. Akara
+can run live for users while its integrity layer anchors to Stellar testnet.
+Move to the public network only after the testnet acceptance period:
+
+1. Create a new dedicated public-network keypair. Never reuse the testnet
+   keypair.
+2. Store the secret only in Railway's encrypted Variables or a managed signer.
+3. Fund the account with only the minimum reserve and a controlled fee buffer.
+4. Set `AKARA_STELLAR_NETWORK=public`.
+5. Set `AKARA_STELLAR_HORIZON_URL=https://horizon.stellar.org`.
+6. Replace `AKARA_STELLAR_SECRET_KEY` and `AKARA_STELLAR_PUBLIC_KEY` together.
+7. Set `AKARA_STELLAR_MAINNET_ACK=true`.
+8. Run `npm run stellar:readiness` and require `"network": "public"`.
+9. Redeploy, complete one synthetic exchange, and verify its anchor from
+   Admin > Integrity before allowing historical backfill.
+
+Changing networks does not move user funds. The Stellar account exists only
+to publish privacy-safe integrity commitments.
 
 ## Reputation Snapshot
 

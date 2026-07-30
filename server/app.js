@@ -3,6 +3,7 @@ const crypto = require("node:crypto");
 const { URL } = require("node:url");
 const { config, setRuntimePublicUrl } = require("./config");
 const {
+  applySecurityHeaders,
   jsonResponse,
   textResponse,
   readRawBody,
@@ -10,6 +11,7 @@ const {
   readJsonBody,
   serveFile,
 } = require("./lib/http");
+const { consumeRateLimit } = require("./lib/rate-limit");
 const {
   extractMessages,
   sendWhatsAppText,
@@ -32,6 +34,7 @@ const { supabaseRequest, filterValue } = require("./lib/supabase");
 const { mainMenuListPayload, mainMenu, greetingMenuBody } = require("./messages/copy");
 const { handleWebsiteRoute } = require("./website");
 const { anchorPendingRecords, integrityRecordingEnabled } = require("./db/integrity");
+const { validateStellarIntegrityConfiguration } = require("./lib/stellar");
 
 const activeInboundMessageIds = new Set();
 const DEFAULT_IDLE_MENU_AFTER_MS = 5 * 60 * 1000;
@@ -343,6 +346,16 @@ async function handleWebhookPost(req, res) {
     let processingCompleted = false;
     try {
       console.log(`[webhook] incoming ${incoming.type} message from ${incoming.from}`);
+      const senderLimit = consumeRateLimit(
+        "whatsapp-sender",
+        incoming.from,
+        120,
+        60 * 1000
+      );
+      if (!senderLimit.allowed) {
+        console.warn(`[webhook] sender rate limited: ${incoming.from}`);
+        continue;
+      }
 
       if (incoming.messageId && activeInboundMessageIds.has(incoming.messageId)) {
         console.log(`[webhook] duplicate message already processing: ${incoming.messageId}`);
@@ -497,6 +510,7 @@ function adminRedirectUrl(req, url) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    applySecurityHeaders(req, res);
     rememberPublicUrl(req);
     const url = new URL(req.url, `http://${req.headers.host}`);
     const onAdminHost = isAdminHost(req);
@@ -590,6 +604,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 function startServer() {
+  validateStellarIntegrityConfiguration();
   server.listen(config.port, config.host, () => {
     console.log(`Akara webhook server listening on http://${config.host}:${config.port}`);
     console.log(`Akara send mode: ${config.sendMode}`);

@@ -48,6 +48,8 @@ const ROLE_PERMISSIONS = {
   custom: [],
 };
 
+const ADMIN_SESSION_COOKIE = "akara_admin_session";
+
 function tokenHash(token) {
   return crypto.createHash("sha256").update(String(token || "")).digest("hex");
 }
@@ -106,8 +108,37 @@ async function adminById(id) {
   return rows[0] || null;
 }
 
+function cookieValue(req, name) {
+  const cookies = String(req.headers?.cookie || "").split(";");
+  for (const cookie of cookies) {
+    const separator = cookie.indexOf("=");
+    if (separator === -1) continue;
+    if (cookie.slice(0, separator).trim() !== name) continue;
+    return decodeURIComponent(cookie.slice(separator + 1).trim());
+  }
+  return "";
+}
+
+function adminSessionCookie(token, options = {}) {
+  const secure = process.env.NODE_ENV === "production" ? "Secure" : "";
+  const maxAge = options.clear ? 0 : 12 * 60 * 60;
+  const value = options.clear ? "" : encodeURIComponent(String(token || ""));
+  return [
+    `${ADMIN_SESSION_COOKIE}=${value}`,
+    "Path=/admin",
+    `Max-Age=${maxAge}`,
+    "HttpOnly",
+    "SameSite=Strict",
+    secure,
+  ].filter(Boolean).join("; ");
+}
+
 async function authenticateAdminRequest(req) {
-  const token = String(req.headers["x-akara-admin-token"] || "").trim();
+  const token = String(
+    req.headers["x-akara-admin-token"]
+    || cookieValue(req, ADMIN_SESSION_COOKIE)
+    || ""
+  ).trim();
   if (!token) return null;
 
   if (secureEqual(token, config.adminToken)) {
@@ -261,6 +292,7 @@ async function recordAdminAudit(actor, eventName, entityType, entityId, payload 
 }
 
 module.exports = {
+  ADMIN_SESSION_COOKIE,
   ALL_PERMISSIONS,
   ROLE_PERMISSIONS,
   authenticateAdminRequest,
@@ -272,4 +304,5 @@ module.exports = {
   publicAdmin,
   recordAdminAudit,
   tokenHash,
+  adminSessionCookie,
 };

@@ -55,10 +55,70 @@ function anchoringKeypair() {
   return keypair;
 }
 
+function validateStellarIntegrityConfiguration(options = {}) {
+  if (!stellarIntegrityEnabled()) {
+    return {
+      enabled: false,
+      network: config.stellarNetwork,
+    };
+  }
+
+  if (Buffer.byteLength(config.integrityHmacSecret || "", "utf8") < 32) {
+    throw new Error("AKARA_INTEGRITY_HMAC_SECRET must contain at least 32 bytes.");
+  }
+
+  const selected = networkConfig();
+  const keypair = anchoringKeypair();
+  const production = options.production ?? process.env.NODE_ENV === "production";
+  if (production && !config.stellarPublicKey) {
+    throw new Error(
+      "AKARA_STELLAR_PUBLIC_KEY is required in production to pin the dedicated anchoring account."
+    );
+  }
+
+  return {
+    enabled: true,
+    network: selected.network,
+    horizonUrl: selected.horizonUrl,
+    publicKey: keypair.publicKey(),
+    maxFeeStroops: config.stellarMaxFeeStroops,
+  };
+}
+
 function createServer(horizonUrl) {
   return new StellarSdk.Horizon.Server(horizonUrl, {
     allowHttp: horizonUrl.startsWith("http://"),
   });
+}
+
+async function checkStellarReadiness() {
+  const readiness = validateStellarIntegrityConfiguration();
+  if (!readiness.enabled) {
+    throw new Error("AKARA_STELLAR_INTEGRITY_ENABLED must be true to run the readiness check.");
+  }
+
+  const server = createServer(readiness.horizonUrl);
+  const [account, baseFee] = await Promise.all([
+    server.loadAccount(readiness.publicKey),
+    server.fetchBaseFee(),
+  ]);
+  const fee = Number(baseFee);
+  if (!Number.isFinite(fee) || fee <= 0 || fee > readiness.maxFeeStroops) {
+    throw new Error(`Stellar base fee ${baseFee} exceeds Akara's configured safety limit.`);
+  }
+
+  const nativeBalance = account.balances.find((balance) => balance.asset_type === "native");
+  return {
+    ok: true,
+    enabled: true,
+    network: readiness.network,
+    horizonUrl: readiness.horizonUrl,
+    publicKey: readiness.publicKey,
+    accountLoaded: true,
+    nativeBalance: nativeBalance?.balance || null,
+    currentBaseFeeStroops: fee,
+    maxFeeStroops: readiness.maxFeeStroops,
+  };
 }
 
 async function prepareIntegrityTransaction(rootHex) {
@@ -155,6 +215,8 @@ async function verifyIntegrityTransaction(
 module.exports = {
   stellarIntegrityEnabled,
   networkConfig,
+  validateStellarIntegrityConfiguration,
+  checkStellarReadiness,
   prepareIntegrityTransaction,
   submitPreparedIntegrityTransaction,
   verifyIntegrityTransaction,

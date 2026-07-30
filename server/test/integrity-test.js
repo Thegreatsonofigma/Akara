@@ -26,6 +26,11 @@ function stubModule(relativePath, exports) {
 stubModule("lib/supabase.js", fakeSupabase);
 stubModule("lib/stellar.js", {
   stellarIntegrityEnabled: () => true,
+  validateStellarIntegrityConfiguration: () => ({
+    enabled: true,
+    network: "testnet",
+    publicKey: "GTESTANCHORACCOUNT",
+  }),
   prepareIntegrityTransaction: async (root) => ({
     network: "testnet",
     sourceAccount: "GTESTANCHORACCOUNT",

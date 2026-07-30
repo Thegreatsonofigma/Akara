@@ -5,6 +5,38 @@ export const runtime = "nodejs";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^\+?[1-9]\d{6,14}$/;
 const CONSENT_VERSION = "waitlist-2026-07";
+const RATE_LIMIT = 8;
+const RATE_WINDOW_MS = 15 * 60 * 1000;
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function requestIp(request: NextRequest) {
+  return (request.headers.get("x-forwarded-for") || "")
+    .split(",")[0]
+    .trim() || "unknown";
+}
+
+function isRateLimited(request: NextRequest) {
+  const now = Date.now();
+  const key = requestIp(request);
+  let bucket = rateBuckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    bucket = { count: 0, resetAt: now + RATE_WINDOW_MS };
+    rateBuckets.set(key, bucket);
+  }
+  bucket.count += 1;
+  return bucket.count > RATE_LIMIT;
+}
+
+function safeLandingPath(request: NextRequest) {
+  const referer = request.headers.get("referer");
+  if (!referer) return null;
+  try {
+    const url = new URL(referer);
+    return url.origin === request.nextUrl.origin ? url.pathname.slice(0, 200) : null;
+  } catch {
+    return null;
+  }
+}
 
 function normalizePhone(value: string) {
   const trimmed = value.trim();
@@ -18,6 +50,20 @@ function json(message: string, status: number, extra = {}) {
 }
 
 export async function POST(request: NextRequest) {
+  const origin = request.headers.get("origin");
+  if (origin && origin !== request.nextUrl.origin) {
+    return json("This request did not come from Akara.", 403);
+  }
+
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (contentLength > 16 * 1024) {
+    return json("That request is too large.", 413);
+  }
+
+  if (isRateLimited(request)) {
+    return json("Too many attempts. Please wait a few minutes and try again.", 429);
+  }
+
   let body: Record<string, unknown>;
 
   try {
@@ -78,7 +124,7 @@ export async function POST(request: NextRequest) {
       consent_version: CONSENT_VERSION,
       consented_at: new Date().toISOString(),
       metadata: {
-        landing_path: request.headers.get("referer") || null,
+        landing_path: safeLandingPath(request),
       },
     }),
     cache: "no-store",

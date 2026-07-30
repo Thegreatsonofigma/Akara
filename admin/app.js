@@ -1,6 +1,5 @@
 const state = {
   view: "overview",
-  token: sessionStorage.getItem("akaraAdminToken") || localStorage.getItem("akaraAdminToken") || "",
   authenticated: false,
   admin: null,
   data: {},
@@ -160,15 +159,15 @@ function setLoading(loading) {
 }
 
 async function api(path, options = {}) {
-  const { authToken = state.token, suppressAuthPrompt = false, ...fetchOptions } = options;
+  const { suppressAuthPrompt = false, ...fetchOptions } = options;
   pendingRequests += 1;
   if (pendingRequests === 1) setLoading(true);
   try {
     const response = await fetch(path, {
       ...fetchOptions,
+      credentials: "same-origin",
       headers: {
         "content-type": "application/json",
-        "x-akara-admin-token": authToken,
         ...(fetchOptions.headers || {}),
       },
     });
@@ -267,15 +266,12 @@ function closeAccessPrompt() {
 function handleAuthFailure(message = "Your admin token is missing or no longer valid.") {
   setConnectionState(false);
   state.admin = null;
-  state.token = "";
-  sessionStorage.removeItem("akaraAdminToken");
-  localStorage.removeItem("akaraAdminToken");
   $("#admin-token").value = "";
   renderAdminSession();
   openAccessPrompt(message);
 }
 
-async function authenticateAdmin(token, remember = false) {
+async function authenticateAdmin(token) {
   const candidate = String(token || "").trim();
   if (!candidate) {
     throw new Error("Enter the access token issued to your administrator account.");
@@ -284,18 +280,10 @@ async function authenticateAdmin(token, remember = false) {
   const result = await api("/admin/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ access_token: candidate }),
-    authToken: "",
     suppressAuthPrompt: true,
   });
 
-  state.token = result.token;
   state.admin = result.admin;
-  sessionStorage.setItem("akaraAdminToken", result.token);
-  if (remember) {
-    localStorage.setItem("akaraAdminToken", result.token);
-  } else {
-    localStorage.removeItem("akaraAdminToken");
-  }
   setConnectionState(true);
   renderAdminSession();
   $("#access-error").hidden = true;
@@ -303,12 +291,10 @@ async function authenticateAdmin(token, remember = false) {
   return result;
 }
 
-async function resumeAdminSession(token) {
+async function resumeAdminSession() {
   const session = await api("/admin/api/session", {
-    authToken: token,
     suppressAuthPrompt: true,
   });
-  state.token = token;
   state.admin = session.admin;
   setConnectionState(true);
   renderAdminSession();
@@ -2161,7 +2147,6 @@ async function submitAccessRequest(event) {
   try {
     const result = await api("/admin/api/access-requests", {
       method: "POST",
-      authToken: "",
       suppressAuthPrompt: true,
       body: JSON.stringify({
         name: $("#access-request-name").value.trim(),
@@ -2207,8 +2192,7 @@ async function applyComplianceUpdate(button) {
 }
 
 function bindEvents() {
-  $("#admin-token").value = state.token;
-  $("#remember-token").checked = Boolean(localStorage.getItem("akaraAdminToken"));
+  $("#admin-token").value = "";
   $("#save-token").addEventListener("click", async () => {
     const button = $("#save-token");
     const original = button.innerHTML;
@@ -2216,7 +2200,7 @@ function bindEvents() {
     button.innerHTML = `<i class="ph ph-circle-notch ph-spin"></i> Checking access`;
     $("#access-error").hidden = true;
     try {
-      const result = await authenticateAdmin($("#admin-token").value, $("#remember-token").checked);
+      const result = await authenticateAdmin($("#admin-token").value);
       toast(`Welcome, ${result.admin.name}.`);
       await loadView(state.view);
     } catch (error) {
@@ -2438,18 +2422,8 @@ function bindEvents() {
 
 async function initializeAdmin() {
   setConnectionState(false);
-  if (!state.token || state.token === "local-admin") {
-    state.token = "";
-    sessionStorage.removeItem("akaraAdminToken");
-    localStorage.removeItem("akaraAdminToken");
-    $("#admin-token").value = "";
-    renderAdminSession();
-    openAccessPrompt("Sign in with your Akara administrator access token.");
-    return;
-  }
-
   try {
-    await resumeAdminSession(state.token);
+    await resumeAdminSession();
     if (!hasAdminPermission(viewPermissions[state.view])) {
       state.view = Object.keys(viewPermissions).find((view) => hasAdminPermission(viewPermissions[view])) || "overview";
       document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("is-active", item.dataset.view === state.view));

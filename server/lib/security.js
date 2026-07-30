@@ -8,7 +8,8 @@ const { upsertSession } = require("../db/sessions");
 const { paymentEditMenuPrompt } = require("../flows/payment-profile");
 
 const TOKEN_BYTES = 24;
-const PASSCODE_MIN = 4;
+const LEGACY_PASSCODE_MIN = 4;
+const NEW_PASSCODE_LENGTH = 6;
 const PASSCODE_MAX = 6;
 const MAX_ATTEMPTS = 5;
 const CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -41,10 +42,15 @@ function verifyPasscode(passcode, storedHash = "") {
   return crypto.timingSafeEqual(actual, expectedBuffer);
 }
 
-function validPasscode(passcode) {
+function validAuthorizationPasscode(passcode) {
   const value = String(passcode || "").trim();
-  const pattern = new RegExp(`^\\d{${PASSCODE_MIN},${PASSCODE_MAX}}$`);
+  const pattern = new RegExp(`^\\d{${LEGACY_PASSCODE_MIN},${PASSCODE_MAX}}$`);
   return pattern.test(value);
+}
+
+function validNewPasscode(passcode) {
+  return new RegExp(`^\\d{${NEW_PASSCODE_LENGTH}}$`)
+    .test(String(passcode || "").trim());
 }
 
 function challengeUrl(type, token) {
@@ -335,12 +341,15 @@ async function handleSecurityFlowResponse(incoming, currentUser) {
   const passcode = passcodeFromFlowResponse(incoming.flowResponse);
   const confirm = confirmFromFlowResponse(incoming.flowResponse);
 
-  if (!validPasscode(passcode) || (setup && passcode !== confirm)) {
+  const valid = setup
+    ? validNewPasscode(passcode)
+    : validAuthorizationPasscode(passcode);
+  if (!valid || (setup && passcode !== confirm)) {
     return [
       title(setup ? "Code not saved" : "Security check"),
       caption(setup
-        ? "Use matching 4 to 6 digit codes."
-        : "Enter your 4 to 6 digit Akara code."),
+        ? "Use matching 6 digit codes."
+        : "Enter your Akara code."),
       "",
       "Please try the action again.",
     ].join("\n");
@@ -437,13 +446,14 @@ function htmlPage({ heading, eyebrow = "Akara security", body = "", form = "", e
 
 function formHtml({ mode }) {
   const setup = mode === "setup";
+  const minLength = setup ? NEW_PASSCODE_LENGTH : LEGACY_PASSCODE_MIN;
   return `<form method="post">
   <label for="passcode">${setup ? "Create code" : "Akara code"}</label>
-  <input id="passcode" name="passcode" inputmode="numeric" autocomplete="one-time-code" minlength="${PASSCODE_MIN}" maxlength="${PASSCODE_MAX}" required>
+  <input id="passcode" name="passcode" inputmode="numeric" autocomplete="one-time-code" minlength="${minLength}" maxlength="${PASSCODE_MAX}" required>
   ${setup ? `<label for="confirm">Confirm code</label>
-  <input id="confirm" name="confirm" inputmode="numeric" autocomplete="one-time-code" minlength="${PASSCODE_MIN}" maxlength="${PASSCODE_MAX}" required>` : ""}
+  <input id="confirm" name="confirm" inputmode="numeric" autocomplete="one-time-code" minlength="${NEW_PASSCODE_LENGTH}" maxlength="${PASSCODE_MAX}" required>` : ""}
   <button type="submit">${setup ? "Save code" : "Approve action"}</button>
-  <p class="hint">Use ${PASSCODE_MIN} to ${PASSCODE_MAX} digits. Do not share this code with anyone.</p>
+  <p class="hint">${setup ? "Use exactly 6 digits." : "Enter your existing Akara code."} Do not share it with anyone.</p>
 </form>`;
 }
 
@@ -496,13 +506,16 @@ async function handleSecurityRoute(req, res, url) {
   const passcode = String(form.get("passcode") || "").trim();
   const confirm = String(form.get("confirm") || "").trim();
 
-  if (!validPasscode(passcode) || (mode === "setup" && passcode !== confirm)) {
+  const valid = mode === "setup"
+    ? validNewPasscode(passcode)
+    : validAuthorizationPasscode(passcode);
+  if (!valid || (mode === "setup" && passcode !== confirm)) {
     writeHtml(res, 400, htmlPage({
       heading,
       body,
       error: mode === "setup"
-        ? "Use matching 4 to 6 digit codes."
-        : "Enter your 4 to 6 digit Akara code.",
+        ? "Use matching 6 digit codes."
+        : "Enter your Akara code.",
       form: formHtml({ mode }),
     }));
     return true;
@@ -558,5 +571,7 @@ module.exports = {
   handleSecurityFlowResponse,
   hashPasscode,
   verifyPasscode,
+  validAuthorizationPasscode,
+  validNewPasscode,
   securityEnabled,
 };

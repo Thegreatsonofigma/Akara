@@ -10,6 +10,7 @@ const {
 } = require("../lib/integrity-crypto");
 const {
   stellarIntegrityEnabled,
+  validateStellarIntegrityConfiguration,
   prepareIntegrityTransaction,
   submitPreparedIntegrityTransaction,
   verifyIntegrityTransaction,
@@ -19,11 +20,7 @@ const { isCompletedDeal } = require("./deals");
 let anchorRun = null;
 
 function integrityRecordingEnabled() {
-  if (!stellarIntegrityEnabled()) return false;
-  if (Buffer.byteLength(config.integrityHmacSecret || "", "utf8") < 32) {
-    throw new Error("AKARA_INTEGRITY_HMAC_SECRET must contain at least 32 bytes.");
-  }
-  return true;
+  return validateStellarIntegrityConfiguration().enabled;
 }
 
 function normalizedAmount(value) {

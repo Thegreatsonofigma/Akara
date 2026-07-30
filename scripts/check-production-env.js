@@ -54,4 +54,11 @@ if (
   process.exit(1);
 }
 
+if (String(process.env.AKARA_STELLAR_INTEGRITY_ENABLED || "").toLowerCase() === "true") {
+  const {
+    validateStellarIntegrityConfiguration,
+  } = require("../server/lib/stellar");
+  validateStellarIntegrityConfiguration();
+}
+
 console.log(`[startup] Environment preflight passed for ${process.env.NODE_ENV || "development"}.`);
