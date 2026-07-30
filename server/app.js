@@ -34,6 +34,7 @@ const { supabaseRequest, filterValue } = require("./lib/supabase");
 const { mainMenuListPayload, mainMenu, greetingMenuBody } = require("./messages/copy");
 const { handleWebsiteRoute } = require("./website");
 const { anchorPendingRecords, integrityRecordingEnabled } = require("./db/integrity");
+const { validateStellarIntegrityConfiguration } = require("./lib/stellar");
 
 const activeInboundMessageIds = new Set();
 const DEFAULT_IDLE_MENU_AFTER_MS = 5 * 60 * 1000;
@@ -603,6 +604,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 function startServer() {
+  validateStellarIntegrityConfiguration();
   server.listen(config.port, config.host, () => {
     console.log(`Akara webhook server listening on http://${config.host}:${config.port}`);
     console.log(`Akara send mode: ${config.sendMode}`);

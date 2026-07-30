@@ -128,3 +128,34 @@ Use two verified test users and synthetic documents/receipts:
 
 Keep ngrok available only for local development. Meta production callbacks must
 use `https://api.tryakara.com/webhook`.
+
+## 7. Stellar Integrity Activation
+
+Stellar is an invisible integrity rail, not a user payment rail. Users still
+send and receive local currency through their own bank or mobile-money
+accounts. No user wallet, crypto transfer, or XLM balance is required.
+
+Activate it on the live Railway service in two stages:
+
+1. Apply migrations 008 and 009, then re-run migration 016 so the Stellar
+   tables and trigger functions receive the production grants and hardening.
+2. Create and fund a dedicated Stellar testnet account.
+3. Add the `AKARA_STELLAR_*` and `AKARA_INTEGRITY_HMAC_SECRET` variables shown
+   in `.env.example` to Railway. Keep `AKARA_STELLAR_NETWORK=testnet` and
+   `AKARA_STELLAR_MAINNET_ACK=false`.
+4. Set `AKARA_STELLAR_INTEGRITY_ENABLED=true` and redeploy.
+5. In the Railway service shell, run:
+
+```bash
+npm run stellar:readiness
+```
+
+6. Complete controlled exchanges and verify the resulting records in
+   Admin > Integrity.
+7. Run `npm run stellar:backfill` only after new test records verify.
+8. Keep testnet running for at least seven days before following the
+   public-network cutover in `docs/stellar-integrity.md`.
+
+Akara now fails startup when Stellar is enabled with a weak HMAC secret,
+invalid network, insecure Horizon URL, missing or mismatched signer, missing
+production public-key pin, or an unacknowledged public-network configuration.
