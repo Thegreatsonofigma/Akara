@@ -26,6 +26,8 @@ AKARA_PUBLIC_URL=https://api.tryakara.com
 AKARA_SHARE_URL=https://api.tryakara.com
 AKARA_ADMIN_HOST=admin.tryakara.com
 AKARA_REQUIRE_WEBHOOK_SIGNATURE=true
+AKARA_VERIFICATION_MODE=manual
+AKARA_SECURITY_MODE=web
 ```
 
 Copy every required secret from the private local `.env` into Railway
@@ -68,11 +70,20 @@ in production.
 
 ## 4. WhatsApp Flows
 
-Create and test the security and KYC verification Flows from the JSON and
-instructions in `docs/`. Publish each Flow only after its preview is correct,
-then set:
+Meta Flows are an upgrade, not a production launch dependency. Until Meta has
+published them, keep the complete manual verification journey and secure web
+passcode challenge active:
 
 ```env
+AKARA_VERIFICATION_MODE=manual
+AKARA_SECURITY_MODE=web
+```
+
+After Meta publishes both Flows, set:
+
+```env
+AKARA_VERIFICATION_MODE=flow
+AKARA_SECURITY_MODE=flow
 AKARA_SECURITY_FLOW_ID=<published security Flow ID>
 AKARA_VERIFICATION_FLOW_ID=<published verification Flow ID>
 ```
@@ -99,8 +110,10 @@ After Meta marks Akara Fintech Solutions as **Verified**:
 5. Use a permanent system-user token assigned to both the Akara app and
    production WABA, with `whatsapp_business_messaging` and
    `whatsapp_business_management`.
-6. Publish the KYC and security Flows, replace the Railway Flow IDs with the
-   published IDs, set `WHATSAPP_FLOW_MODE=published`, and redeploy Railway.
+6. Use manual verification and web security for launch. After Meta publishes
+   the KYC and security Flows, replace the Railway Flow IDs, switch both
+   `AKARA_*_MODE` values to `flow`, set `WHATSAPP_FLOW_MODE=published`, and
+   redeploy Railway.
 7. Create and obtain approval for utility templates covering match alerts,
    reminders, KYC outcomes, disputes, and time-sensitive trade updates outside
    the customer-service window.
@@ -115,7 +128,7 @@ belonging to other businesses.
 
 Use two verified test users and synthetic documents/receipts:
 
-1. Start KYC and complete the verification Flow.
+1. Start KYC and complete the active manual or published-Flow journey.
 2. Add payout details and confirm name validation.
 3. Publish reciprocal negotiable listings.
 4. Confirm the background matcher alerts both users without a new inbound chat.

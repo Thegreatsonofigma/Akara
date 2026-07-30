@@ -2,6 +2,11 @@
 
 Akara uses a native WhatsApp Flow for passcode setup and sensitive-action approval. This keeps the user inside WhatsApp and opens the same bottom-sheet tray style used by providers like Owo.
 
+If Meta has not published the Flow, Akara uses a secure web challenge opened
+from WhatsApp. The passcode is never collected in chat. This fallback is
+production-ready and allows Akara to launch without weakening sensitive-action
+authorization.
+
 ## What to create in Meta
 
 Create one WhatsApp Flow in the Meta dashboard for the Akara WhatsApp app.
@@ -47,6 +52,7 @@ Authorization:
 Add the published Flow ID to `.env`:
 
 ```bash
+AKARA_SECURITY_MODE=flow
 AKARA_SECURITY_FLOW_ID=your_meta_whatsapp_flow_id
 ```
 
@@ -56,7 +62,14 @@ Then restart the webhook server:
 node server/index.js
 ```
 
-If `AKARA_SECURITY_FLOW_ID` is missing, Akara falls back to the secure web-link flow for local development.
+Until Meta publishes the Flow, use:
+
+```bash
+AKARA_SECURITY_MODE=web
+```
+
+Akara then uses the secure web-link challenge even if a draft Flow ID remains
+configured. Switch to `flow` only after publication succeeds.
 
 New passcodes must contain exactly six digits. Akara temporarily accepts
 existing four- or five-digit codes during authorization so current users are

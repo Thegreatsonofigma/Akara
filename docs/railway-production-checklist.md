@@ -22,11 +22,16 @@ AKARA_PUBLIC_URL=https://api.tryakara.com
 AKARA_SHARE_URL=https://tryakara.com
 AKARA_ADMIN_HOST=admin.tryakara.com
 AKARA_WHATSAPP_NUMBER=<business WhatsApp number, digits only>
+AKARA_VERIFICATION_MODE=manual
+AKARA_SECURITY_MODE=web
 ```
 
-Add the published Flow IDs when those Flows are ready:
+The values above are the production-safe launch defaults. Add published Flow
+IDs and switch modes only after Meta has successfully published the Flows:
 
 ```text
+AKARA_VERIFICATION_MODE=flow
+AKARA_SECURITY_MODE=flow
 AKARA_SECURITY_FLOW_ID=<published security Flow ID>
 AKARA_VERIFICATION_FLOW_ID=<published verification Flow ID>
 WHATSAPP_FLOW_MODE=published

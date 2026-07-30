@@ -107,7 +107,7 @@ function authorizationPrompt(url, actionLabel) {
 }
 
 function securityFlowPrompt(type, token, actionLabel) {
-  if (!config.akaraSecurityFlowId) return null;
+  if (config.akaraSecurityMode !== "flow" || !config.akaraSecurityFlowId) return null;
 
   const setup = type === "setup";
   const screenHeading = setup ? "Set up your passcode" : "Authorize this action";
