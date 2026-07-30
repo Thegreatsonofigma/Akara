@@ -82,7 +82,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Akara admin typography: compact values, wide uppercase micro-captions. */
+/* Akara admin typography: compact values and tightly set uppercase micro-captions. */
 h1,
 h2,
 .metric > strong,
@@ -110,7 +110,7 @@ code,
 .panel-kicker,
 th {
   font-size: 8px;
-  letter-spacing: 8px;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -292,7 +292,7 @@ body.is-loading .loading-bar {
   overflow: hidden;
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 8px;
+  letter-spacing: 0;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -448,7 +448,7 @@ body.is-loading .loading-bar {
   color: var(--muted-2);
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 8px;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -594,7 +594,7 @@ kbd {
   overflow: hidden;
   font-size: 8px;
   font-weight: 750;
-  letter-spacing: 8px;
+  letter-spacing: 0;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -971,7 +971,7 @@ th {
   color: var(--muted-2);
   font-size: 9px;
   font-weight: 750;
-  letter-spacing: 8px;
+  letter-spacing: 0;
   text-align: left;
   text-transform: uppercase;
   white-space: nowrap;
