@@ -1,4 +1,5 @@
 const path = require("node:path");
+const crypto = require("node:crypto");
 const { rootDir, config } = require("./config");
 const { jsonResponse, readJsonBody } = require("./lib/http");
 const { supabaseRequest, filterValue, createStorageSignedUrl } = require("./lib/supabase");
@@ -31,18 +32,77 @@ const {
 } = require("./db/compliance");
 const { listSupportRequests, updateSupportRequest } = require("./db/support");
 const { releaseDisputeHolds } = require("./db/dispute-holds");
-
-function requireAdmin(req) {
-  const token = req.headers["x-akara-admin-token"];
-  return Boolean(token && token === config.adminToken);
-}
+const {
+  ALL_PERMISSIONS,
+  ROLE_PERMISSIONS,
+  authenticateAdminRequest,
+  hasPermission,
+  isMissingAdminSchema,
+  loginAdmin,
+  logoutAdmin,
+  recordAdminAudit,
+  tokenHash,
+} = require("./lib/admin-auth");
 
 function forbiddenAdmin(res) {
-  return jsonResponse(res, 401, { ok: false, error: "Admin token is missing or invalid." });
+  return jsonResponse(res, 401, {
+    ok: false,
+    code: "ADMIN_AUTH_REQUIRED",
+    error: "Your admin session is missing, expired, or no longer has access.",
+  });
+}
+
+function forbiddenPermission(res, permission) {
+  return jsonResponse(res, 403, {
+    ok: false,
+    code: "ADMIN_PERMISSION_REQUIRED",
+    permission,
+    error: "Your admin role does not allow this action.",
+  });
 }
 
 function adminFilePath(fileName) {
   return path.join(rootDir, "admin", fileName);
+}
+
+function requiredAdminPermission(req, pathname) {
+  if (pathname === "/admin/api/session" || pathname === "/admin/api/auth/logout") return null;
+  if (pathname.startsWith("/admin/api/admins") || pathname.startsWith("/admin/api/access-requests")) {
+    return req.method === "GET" ? "admins.view" : "admins.manage";
+  }
+  if (pathname === "/admin/api/overview") return "dashboard.view";
+  if (pathname === "/admin/api/reports") return "reports.view";
+  if (pathname.startsWith("/admin/api/users")) {
+    return req.method === "GET" ? "users.view" : "users.manage";
+  }
+  if (pathname.startsWith("/admin/api/verifications") || pathname === "/admin/api/storage-signed-url") {
+    return req.method === "GET" ? "verifications.view" : "verifications.review";
+  }
+  if (pathname.startsWith("/admin/api/listings")) {
+    return req.method === "GET" ? "listings.view" : "listings.manage";
+  }
+  if (pathname.startsWith("/admin/api/deals")) {
+    return req.method === "GET" ? "trades.view" : "trades.manage";
+  }
+  if (pathname.startsWith("/admin/api/disputes")) {
+    return req.method === "GET" ? "disputes.view" : "disputes.resolve";
+  }
+  if (pathname.startsWith("/admin/api/support")) {
+    return req.method === "GET" ? "support.view" : "support.manage";
+  }
+  if (pathname.startsWith("/admin/api/compliance")) {
+    return req.method === "GET" ? "compliance.view" : "compliance.manage";
+  }
+  if (pathname.startsWith("/admin/api/integrity")) return "integrity.view";
+  return "dashboard.view";
+}
+
+function adminCode() {
+  return `AKR-ADM-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+}
+
+function invitationToken() {
+  return `akara_admin_${crypto.randomBytes(24).toString("base64url")}`;
 }
 
 function buildLastSevenDays() {
@@ -67,6 +127,64 @@ function countBy(items, fieldOrGetter) {
     counts[label] = (counts[label] || 0) + 1;
     return counts;
   }, {});
+}
+
+function buildRecentDays(totalDays = 30) {
+  return Array.from({ length: totalDays }, (_, index) => {
+    const date = new Date();
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCDate(date.getUTCDate() - (totalDays - 1 - index));
+    return {
+      key: date.toISOString().slice(0, 10),
+      label: date.toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" }),
+    };
+  });
+}
+
+async function listAllAdminRows(resource, select, options = {}) {
+  const pageSize = 1000;
+  const maxRows = options.maxRows || 10000;
+  const rows = [];
+
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const query = [
+      `${resource}?select=${select}`,
+      options.filter || "",
+      options.order ? `order=${options.order}` : "",
+      `limit=${pageSize}`,
+      `offset=${offset}`,
+    ].filter(Boolean).join("&");
+    const batch = await supabaseRequest(query);
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+
+  return rows;
+}
+
+async function listAllAdminRowsWithFallback(resource, select, fallbackSelect, options = {}) {
+  try {
+    return await listAllAdminRows(resource, select, options);
+  } catch (error) {
+    if (!fallbackSelect) throw error;
+    return listAllAdminRows(resource, fallbackSelect, options);
+  }
+}
+
+function percent(part, whole) {
+  if (!whole) return 0;
+  return Math.round((Number(part || 0) / Number(whole)) * 1000) / 10;
+}
+
+function average(values) {
+  const valid = values.map(Number).filter(Number.isFinite);
+  if (!valid.length) return 0;
+  return Math.round((valid.reduce((sum, value) => sum + value, 0) / valid.length) * 10) / 10;
+}
+
+function addCurrencyAmount(target, currency, amount) {
+  if (!currency || !Number.isFinite(Number(amount))) return;
+  target[currency] = (target[currency] || 0) + Number(amount);
 }
 
 const VERIFICATION_USER_SELECT =
@@ -477,6 +595,223 @@ async function getAdminOverview() {
   };
 }
 
+async function getAdminReports() {
+  const [
+    users,
+    paymentProfiles,
+    listings,
+    deals,
+    disputes,
+    verifications,
+    proofs,
+    fees,
+    supportEvents,
+  ] = await Promise.all([
+    listAllAdminRows(
+      "users",
+      "id,nationality,residence_country,verification_status,risk_status,dispute_hold,created_at"
+    ),
+    listAllAdminRows("payment_profiles", "id,currency,method,bank_name,momo_network,created_at"),
+    listAllAdminRows(
+      "listings",
+      "id,status,have_currency,want_currency,have_amount,want_amount,listing_type,created_at"
+    ),
+    listAllAdminRows(
+      "deals",
+      "id,status,have_currency,want_currency,have_amount,want_amount,created_at,completed_at,cancelled_at"
+    ),
+    listAllAdminRows("disputes", "id,deal_id,category,status,created_at,resolved_at"),
+    listAllAdminRowsWithFallback(
+      "verification_requests",
+      "id,status,id_type,id_country,document_ocr_status,document_name_match,document_country_match,document_type_match,created_at,reviewed_at",
+      "id,status,id_type,id_country,created_at,reviewed_at"
+    ),
+    listAllAdminRowsWithFallback(
+      "deal_proofs",
+      "id,deal_id,ocr_status,ocr_matched,ocr_currency,ocr_expected_currency,created_at",
+      "id,deal_id,created_at"
+    ),
+    listAllAdminRows("fees", "id,currency,amount,status,created_at"),
+    listAllAdminRows(
+      "audit_events",
+      "id,event_payload,created_at",
+      { filter: "entity_type=eq.support_request" }
+    ),
+  ]);
+
+  const completedDeals = deals.filter((deal) => ["completed_pending_fee", "closed"].includes(deal.status));
+  const cancelledDeals = deals.filter((deal) => ["cancelled", "expired"].includes(deal.status));
+  const activeListings = listings.filter((listing) => listing.status === "active");
+  const verifiedUsers = users.filter((user) => ["verified_auto", "verified_manual"].includes(user.verification_status));
+  const openDisputes = disputes.filter((dispute) =>
+    ["open", "waiting_for_user", "under_review"].includes(dispute.status)
+  );
+  const pendingKyc = verifications.filter((request) =>
+    ["pending_input", "pending_review"].includes(request.status)
+  );
+  const matchedProofs = proofs.filter((proof) => proof.ocr_matched || proof.ocr_status === "matched");
+  const reviewedProofs = proofs.filter((proof) => ["matched", "mismatch"].includes(proof.ocr_status));
+  const flaggedUsers = users.filter((user) =>
+    user.dispute_hold || ["watch", "limited", "suspended"].includes(user.risk_status)
+  );
+  const completionMinutes = completedDeals
+    .filter((deal) => deal.completed_at && deal.created_at)
+    .map((deal) => (new Date(deal.completed_at) - new Date(deal.created_at)) / 60000)
+    .filter((value) => value >= 0);
+
+  const corridorMap = new Map();
+  const ensureCorridor = (haveCurrency, wantCurrency) => {
+    const key = `${haveCurrency || "?"}->${wantCurrency || "?"}`;
+    if (!corridorMap.has(key)) {
+      corridorMap.set(key, {
+        corridor: key,
+        listings: 0,
+        liveListings: 0,
+        trades: 0,
+        completed: 0,
+        cancelled: 0,
+      });
+    }
+    return corridorMap.get(key);
+  };
+
+  listings.forEach((listing) => {
+    const corridor = ensureCorridor(listing.have_currency, listing.want_currency);
+    corridor.listings += 1;
+    if (listing.status === "active") corridor.liveListings += 1;
+  });
+  deals.forEach((deal) => {
+    const corridor = ensureCorridor(deal.have_currency, deal.want_currency);
+    corridor.trades += 1;
+    if (["completed_pending_fee", "closed"].includes(deal.status)) corridor.completed += 1;
+    if (["cancelled", "expired"].includes(deal.status)) corridor.cancelled += 1;
+  });
+
+  const corridors = [...corridorMap.values()]
+    .map((corridor) => ({
+      ...corridor,
+      completionRate: percent(corridor.completed, corridor.trades),
+    }))
+    .sort((left, right) =>
+      right.completed - left.completed
+      || right.trades - left.trades
+      || right.liveListings - left.liveListings
+    );
+
+  const currencyVolume = {};
+  completedDeals.forEach((deal) => {
+    addCurrencyAmount(currencyVolume, deal.have_currency, deal.have_amount);
+    addCurrencyAmount(currencyVolume, deal.want_currency, deal.want_amount);
+  });
+
+  const feeVolume = {};
+  fees.forEach((fee) => addCurrencyAmount(feeVolume, fee.currency, fee.amount));
+
+  const days = buildRecentDays(30);
+  const activity = days.map((day) => ({
+    label: day.label,
+    users: countCreatedOn(users, day.key),
+    offers: countCreatedOn(listings, day.key),
+    trades: countCreatedOn(deals, day.key),
+    completed: completedDeals.filter((deal) =>
+      String(deal.completed_at || deal.created_at || "").slice(0, 10) === day.key
+    ).length,
+  }));
+
+  const supportRequests = supportEvents.map((event) => ({
+    ...event,
+    ...(event.event_payload || {}),
+  }));
+  const countryDistribution = countBy(users, (user) => user.residence_country || user.nationality || "unknown");
+  const payoutMethods = countBy(paymentProfiles, "method");
+  const payoutCurrencies = countBy(paymentProfiles, "currency");
+  const disputeCategories = countBy(disputes, "category");
+  const disputeStatus = countBy(disputes, "status");
+  const verificationStatus = countBy(verifications, "status");
+  const userRisk = countBy(users, "risk_status");
+  const receiptOcrStatus = countBy(proofs, "ocr_status");
+  const supportStatus = countBy(supportRequests, "status");
+  const offerStatus = countBy(listings, "status");
+  const tradeStatus = countBy(deals, "status");
+
+  const topCorridor = corridors[0] || null;
+  const lowestCorridor = corridors
+    .filter((corridor) => corridor.trades >= 2)
+    .sort((left, right) => left.completionRate - right.completionRate)[0] || null;
+  const insights = [
+    topCorridor
+      ? `${topCorridor.corridor.replace("->", " to ")} is the busiest corridor with ${topCorridor.trades} trade${topCorridor.trades === 1 ? "" : "s"} and ${topCorridor.completionRate}% completion.`
+      : "No corridor has recorded trade activity yet.",
+    pendingKyc.length
+      ? `${pendingKyc.length} verification request${pendingKyc.length === 1 ? " is" : "s are"} waiting for review or user input.`
+      : "The verification queue is clear.",
+    openDisputes.length
+      ? `${openDisputes.length} dispute${openDisputes.length === 1 ? " is" : "s are"} open; both participants remain restricted from new trades until resolution.`
+      : "There are no open disputes.",
+    reviewedProofs.length
+      ? `${percent(matchedProofs.length, reviewedProofs.length)}% of OCR-reviewed receipts matched their expected payment details.`
+      : "Receipt OCR has not reviewed enough evidence to calculate a match rate.",
+    lowestCorridor && lowestCorridor !== topCorridor
+      ? `${lowestCorridor.corridor.replace("->", " to ")} has the lowest completion rate among active corridors at ${lowestCorridor.completionRate}%.`
+      : null,
+  ].filter(Boolean);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    coverage: {
+      users: users.length,
+      listings: listings.length,
+      deals: deals.length,
+      proofs: proofs.length,
+      capped: [users, listings, deals, proofs].some((items) => items.length >= 10000),
+    },
+    totals: {
+      users: users.length,
+      verifiedUsers: verifiedUsers.length,
+      activeListings: activeListings.length,
+      listings: listings.length,
+      trades: deals.length,
+      completedTrades: completedDeals.length,
+      cancelledTrades: cancelledDeals.length,
+      openDisputes: openDisputes.length,
+      pendingKyc: pendingKyc.length,
+      payoutProfiles: paymentProfiles.length,
+      receiptProofs: proofs.length,
+      flaggedUsers: flaggedUsers.length,
+      supportRequests: supportRequests.length,
+    },
+    rates: {
+      verification: percent(verifiedUsers.length, users.length),
+      completion: percent(completedDeals.length, deals.length),
+      dispute: percent(disputes.length, deals.length),
+      receiptMatch: percent(matchedProofs.length, reviewedProofs.length),
+      averageCompletionMinutes: average(completionMinutes),
+    },
+    activity,
+    distributions: {
+      offerStatus,
+      tradeStatus,
+      verificationStatus,
+      userRisk,
+      disputeStatus,
+      disputeCategories,
+      payoutMethods,
+      payoutCurrencies,
+      receiptOcrStatus,
+      supportStatus,
+      countries: countryDistribution,
+    },
+    corridors,
+    currencyVolume: Object.entries(currencyVolume)
+      .map(([currency, amount]) => ({ currency, amount: Math.round(amount * 100) / 100 }))
+      .sort((left, right) => right.amount - left.amount),
+    feeVolume: Object.entries(feeVolume)
+      .map(([currency, amount]) => ({ currency, amount: Math.round(amount * 100) / 100 }))
+      .sort((left, right) => right.amount - left.amount),
+    insights,
+  };
+}
+
 function pickAllowed(body, allowed) {
   return Object.fromEntries(Object.entries(body || {}).filter(([key, value]) => allowed.includes(key) && value !== undefined));
 }
@@ -567,11 +902,344 @@ async function getIntegrityDashboard() {
   }
 }
 
+async function getAdminDirectory() {
+  try {
+    const [admins, accessRequests] = await Promise.all([
+      supabaseRequest(
+        "admin_users?select=id,admin_code,name,email,role,status,permissions,invited_at,activated_at,last_login_at,last_seen_at,created_at&order=created_at.asc"
+      ),
+      supabaseRequest(
+        "admin_access_requests?select=id,request_code,name,email,reason,status,reviewed_at,created_at&order=created_at.desc&limit=100"
+      ),
+    ]);
+    return {
+      schemaReady: true,
+      admins,
+      accessRequests,
+      rolePermissions: ROLE_PERMISSIONS,
+      allPermissions: ALL_PERMISSIONS,
+    };
+  } catch (error) {
+    if (!isMissingAdminSchema(error)) throw error;
+    return {
+      schemaReady: false,
+      admins: [],
+      accessRequests: [],
+      rolePermissions: ROLE_PERMISSIONS,
+      allPermissions: ALL_PERMISSIONS,
+      warning: "Apply Supabase migration 015 to enable admin invitations, roles, sessions, and access requests.",
+    };
+  }
+}
+
+async function createAdminInvitation(body, actor) {
+  const name = String(body.name || "").trim();
+  const email = String(body.email || "").trim().toLowerCase();
+  const role = Object.hasOwn(ROLE_PERMISSIONS, body.role) ? body.role : "support";
+  if (!name || !email || !email.includes("@")) {
+    const error = new Error("A valid name and email are required.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const token = invitationToken();
+  const rows = await supabaseRequest("admin_users", {
+    method: "POST",
+    body: JSON.stringify({
+      admin_code: adminCode(),
+      name,
+      email,
+      role,
+      status: "invited",
+      permissions: role === "custom"
+        ? (body.permissions || []).filter((permission) => ALL_PERMISSIONS.includes(permission))
+        : [],
+      access_token_hash: tokenHash(token),
+      invited_by: actor.admin.id || null,
+    }),
+  });
+  await recordAdminAudit(actor, "admin.invited", "admin_user", rows[0]?.id, {
+    role,
+    email,
+  });
+  return {
+    admin: rows[0],
+    invitationToken: token,
+    note: "This one-time access token is shown only now. Send it to the invited admin through a secure channel.",
+  };
+}
+
+async function updateAdminRecord(adminId, body, actor) {
+  if (actor.admin.id && actor.admin.id === adminId && body.status && body.status !== "active") {
+    const error = new Error("You cannot suspend or revoke your own active session.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const patch = {};
+  if (body.name) patch.name = String(body.name).trim();
+  if (Object.hasOwn(ROLE_PERMISSIONS, body.role)) patch.role = body.role;
+  if (["invited", "active", "suspended", "revoked"].includes(body.status)) patch.status = body.status;
+  if (Array.isArray(body.permissions)) {
+    patch.permissions = body.permissions.filter((permission) => ALL_PERMISSIONS.includes(permission));
+  }
+  const rows = await supabaseRequest(`admin_users?id=eq.${filterValue(adminId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  if (!rows[0]) {
+    const error = new Error("Admin account not found.");
+    error.statusCode = 404;
+    throw error;
+  }
+  if (patch.status && patch.status !== "active") {
+    await supabaseRequest(`admin_sessions?admin_user_id=eq.${filterValue(adminId)}&revoked_at=is.null`, {
+      method: "PATCH",
+      body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+    });
+  }
+  await recordAdminAudit(actor, "admin.updated", "admin_user", adminId, patch);
+  return rows[0];
+}
+
+function addUserVolume(target, currency, amount) {
+  if (!currency || !Number.isFinite(Number(amount))) return;
+  target[currency] = (target[currency] || 0) + Number(amount);
+}
+
+async function getAdminUserDetails(userId) {
+  const users = await listAllAdminRowsWithFallback(
+    "users",
+    "id,whatsapp_phone,display_name,legal_name,nationality,residence_country,city,verification_status,verification_score,completed_deals_count,cancelled_deals_24h,total_cancelled_deals,dispute_count,risk_status,dispute_hold,hold_until,admin_banned,admin_ban_reason,swap_restricted_currencies,created_at,updated_at",
+    "id,whatsapp_phone,display_name,legal_name,nationality,residence_country,city,verification_status,verification_score,completed_deals_count,cancelled_deals_24h,total_cancelled_deals,dispute_count,risk_status,dispute_hold,hold_until,created_at,updated_at",
+    { filter: `id=eq.${filterValue(userId)}`, maxRows: 1 }
+  );
+  const user = users[0];
+  if (!user) return null;
+  user.admin_banned = Boolean(user.admin_banned);
+  user.admin_ban_reason = user.admin_ban_reason || null;
+  user.swap_restricted_currencies = user.swap_restricted_currencies || [];
+
+  const [payouts, listings, deals, verifications, fees, penalties, userEvents] = await Promise.all([
+    listAllAdminRows(
+      "payment_profiles",
+      "id,currency,method,account_name,bank_name,momo_network,is_default,created_at,updated_at",
+      { filter: `user_id=eq.${filterValue(userId)}` }
+    ),
+    listAllAdminRows(
+      "listings",
+      "id,listing_code,status,have_currency,want_currency,have_amount,want_amount,listing_type,created_at,updated_at",
+      { filter: `owner_user_id=eq.${filterValue(userId)}`, order: "created_at.desc" }
+    ),
+    listAllAdminRows(
+      "deals",
+      "id,deal_code,listing_id,maker_user_id,taker_user_id,status,have_currency,want_currency,have_amount,want_amount,created_at,completed_at,cancelled_at",
+      {
+        filter: `or=(maker_user_id.eq.${filterValue(userId)},taker_user_id.eq.${filterValue(userId)})`,
+        order: "created_at.desc",
+      }
+    ),
+    listAllAdminRowsWithFallback(
+      "verification_requests",
+      "id,status,id_type,id_country,document_ocr_status,document_ocr_name,document_name_match,document_country_match,document_type_match,automated_decision,admin_decision,created_at,reviewed_at",
+      "id,status,id_type,id_country,automated_decision,admin_decision,created_at,reviewed_at",
+      { filter: `user_id=eq.${filterValue(userId)}`, order: "created_at.desc" }
+    ),
+    listAllAdminRows(
+      "fees",
+      "id,deal_id,currency,amount,status,created_at",
+      { filter: `user_id=eq.${filterValue(userId)}`, order: "created_at.desc" }
+    ),
+    listAllAdminRows(
+      "penalties",
+      "id,reason,severity,starts_at,ends_at,admin_notes,created_at",
+      { filter: `user_id=eq.${filterValue(userId)}`, order: "created_at.desc" }
+    ),
+    listAllAdminRows(
+      "audit_events",
+      "id,entity_type,entity_id,event_name,event_payload,created_at",
+      { filter: `actor_user_id=eq.${filterValue(userId)}`, order: "created_at.desc", maxRows: 500 }
+    ),
+  ]);
+
+  const dealIds = deals.map((deal) => deal.id);
+  const dealFilter = dealIds.length
+    ? `deal_id=in.(${dealIds.map(filterValue).join(",")})`
+    : "";
+  const [disputes, proofs] = dealIds.length
+    ? await Promise.all([
+      listAllAdminRows(
+        "disputes",
+        "id,deal_id,opened_by_user_id,category,description,status,resolution,created_at,resolved_at",
+        { filter: dealFilter, order: "created_at.desc" }
+      ),
+      listAllAdminRowsWithFallback(
+        "deal_proofs",
+        "id,deal_id,user_id,proof_type,ocr_status,ocr_amount,ocr_currency,ocr_expected_amount,ocr_expected_currency,ocr_matched,ocr_mismatch_reason,created_at",
+        "id,deal_id,user_id,proof_type,created_at",
+        { filter: dealFilter, order: "created_at.desc" }
+      ),
+    ])
+    : [[], []];
+
+  const completed = deals.filter((deal) => ["completed_pending_fee", "closed"].includes(deal.status));
+  const sentVolume = {};
+  const receivedVolume = {};
+  completed.forEach((deal) => {
+    const isMaker = deal.maker_user_id === userId;
+    addUserVolume(sentVolume, isMaker ? deal.have_currency : deal.want_currency, isMaker ? deal.have_amount : deal.want_amount);
+    addUserVolume(receivedVolume, isMaker ? deal.want_currency : deal.have_currency, isMaker ? deal.want_amount : deal.have_amount);
+  });
+  const firstTrade = [...deals].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0] || null;
+  const completedAt = completed.map((deal) => deal.completed_at || deal.created_at).filter(Boolean);
+  const timeline = [
+    ...deals.map((deal) => ({ kind: "trade", label: deal.deal_code, status: deal.status, at: deal.created_at })),
+    ...listings.map((listing) => ({ kind: "offer", label: listing.listing_code, status: listing.status, at: listing.created_at })),
+    ...verifications.map((request) => ({ kind: "verification", label: request.id_type || "KYC", status: request.status, at: request.created_at })),
+    ...disputes.map((dispute) => ({ kind: "dispute", label: dispute.category, status: dispute.status, at: dispute.created_at })),
+    ...userEvents.map((event) => ({ kind: "activity", label: event.event_name, status: event.entity_type, at: event.created_at })),
+  ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 100);
+
+  return {
+    user,
+    summary: {
+      firstTradeAt: firstTrade?.created_at || null,
+      lastCompletedAt: completedAt.sort().at(-1) || null,
+      totalTrades: deals.length,
+      completedTrades: completed.length,
+      completionRate: percent(completed.length, deals.length),
+      liveListings: listings.filter((listing) => listing.status === "active").length,
+      totalListings: listings.length,
+      openDisputes: disputes.filter((dispute) => ["open", "waiting_for_user", "under_review"].includes(dispute.status)).length,
+      receiptMatchRate: percent(
+        proofs.filter((proof) => proof.ocr_matched || proof.ocr_status === "matched").length,
+        proofs.filter((proof) => ["matched", "mismatch"].includes(proof.ocr_status)).length
+      ),
+      sentVolume,
+      receivedVolume,
+    },
+    payouts,
+    listings,
+    deals,
+    disputes,
+    proofs,
+    verifications,
+    fees,
+    penalties,
+    timeline,
+  };
+}
+
 async function handleAdminApi(req, res, url) {
-  if (!requireAdmin(req)) return forbiddenAdmin(res);
+  if (req.method === "POST" && url.pathname === "/admin/api/auth/login") {
+    const body = await readJsonBody(req);
+    const result = await loginAdmin(body.access_token, req);
+    if (!result) return forbiddenAdmin(res);
+    return jsonResponse(res, 200, { ok: true, data: result });
+  }
+
+  if (req.method === "POST" && url.pathname === "/admin/api/access-requests") {
+    const body = await readJsonBody(req);
+    const name = String(body.name || "").trim();
+    const email = String(body.email || "").trim().toLowerCase();
+    if (!name || !email || !email.includes("@")) {
+      return jsonResponse(res, 400, { ok: false, error: "Enter your name and a valid email." });
+    }
+    let rows;
+    try {
+      rows = await supabaseRequest("admin_access_requests", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          email,
+          reason: String(body.reason || "").trim() || null,
+        }),
+      });
+    } catch (error) {
+      if (!isMissingAdminSchema(error)) throw error;
+      return jsonResponse(res, 503, {
+        ok: false,
+        code: "ADMIN_ACCESS_SCHEMA_REQUIRED",
+        error: "Admin access requests are not ready yet. Apply Supabase migration 015 first.",
+      });
+    }
+    return jsonResponse(res, 201, {
+      ok: true,
+      data: {
+        requestCode: rows[0]?.request_code,
+        status: "pending",
+      },
+    });
+  }
+
+  const actor = await authenticateAdminRequest(req);
+  if (!actor) return forbiddenAdmin(res);
+  const permission = requiredAdminPermission(req, url.pathname);
+  if (permission && !hasPermission(actor, permission)) {
+    return forbiddenPermission(res, permission);
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/session") {
+    return jsonResponse(res, 200, {
+      ok: true,
+      data: {
+        authenticated: true,
+        checkedAt: new Date().toISOString(),
+        admin: actor.public,
+      },
+    });
+  }
+
+  if (req.method === "POST" && url.pathname === "/admin/api/auth/logout") {
+    await logoutAdmin(actor);
+    return jsonResponse(res, 200, { ok: true, data: { loggedOut: true } });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/admins") {
+    return jsonResponse(res, 200, { ok: true, data: await getAdminDirectory() });
+  }
+
+  if (req.method === "POST" && url.pathname === "/admin/api/admins/invite") {
+    const body = await readJsonBody(req);
+    return jsonResponse(res, 201, {
+      ok: true,
+      data: await createAdminInvitation(body, actor),
+    });
+  }
+
+  const adminRecordMatch = url.pathname.match(/^\/admin\/api\/admins\/([^/]+)$/);
+  if (req.method === "PATCH" && adminRecordMatch) {
+    const body = await readJsonBody(req);
+    return jsonResponse(res, 200, {
+      ok: true,
+      data: await updateAdminRecord(adminRecordMatch[1], body, actor),
+    });
+  }
+
+  const accessRequestMatch = url.pathname.match(/^\/admin\/api\/access-requests\/([^/]+)$/);
+  if (req.method === "PATCH" && accessRequestMatch) {
+    const body = await readJsonBody(req);
+    if (!["approved", "rejected"].includes(body.status)) {
+      return jsonResponse(res, 400, { ok: false, error: "Choose approved or rejected." });
+    }
+    const rows = await supabaseRequest(`admin_access_requests?id=eq.${filterValue(accessRequestMatch[1])}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: body.status,
+        reviewed_by: actor.admin.id || null,
+        reviewed_at: new Date().toISOString(),
+      }),
+    });
+    await recordAdminAudit(actor, "access_request.reviewed", "admin_access_request", accessRequestMatch[1], {
+      status: body.status,
+    });
+    return jsonResponse(res, 200, { ok: true, data: rows[0] });
+  }
 
   if (req.method === "GET" && url.pathname === "/admin/api/overview") {
     return jsonResponse(res, 200, { ok: true, data: await getAdminOverview() });
+  }
+
+  if (req.method === "GET" && url.pathname === "/admin/api/reports") {
+    return jsonResponse(res, 200, { ok: true, data: await getAdminReports() });
   }
 
   if (req.method === "GET" && url.pathname === "/admin/api/compliance") {
@@ -756,8 +1424,11 @@ async function handleAdminApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/admin/api/users") {
-    const users = await supabaseRequest(
-      "users?select=id,whatsapp_phone,display_name,legal_name,verification_status,verification_score,completed_deals_count,cancelled_deals_24h,total_cancelled_deals,dispute_count,risk_status,dispute_hold,hold_until,created_at,payment_profiles(id,currency,method,account_name,bank_name,momo_network,created_at)&order=created_at.desc&limit=100"
+    const users = await listAllAdminRowsWithFallback(
+      "users",
+      "id,whatsapp_phone,display_name,legal_name,verification_status,verification_score,completed_deals_count,cancelled_deals_24h,total_cancelled_deals,dispute_count,risk_status,dispute_hold,hold_until,admin_banned,admin_ban_reason,swap_restricted_currencies,created_at,payment_profiles(id,currency,method,account_name,bank_name,momo_network,created_at)",
+      "id,whatsapp_phone,display_name,legal_name,verification_status,verification_score,completed_deals_count,cancelled_deals_24h,total_cancelled_deals,dispute_count,risk_status,dispute_hold,hold_until,created_at,payment_profiles(id,currency,method,account_name,bank_name,momo_network,created_at)",
+      { order: "created_at.desc", maxRows: 100 }
     );
     return jsonResponse(res, 200, { ok: true, data: users });
   }
@@ -797,6 +1468,36 @@ async function handleAdminApi(req, res, url) {
     return jsonResponse(res, 200, { ok: true, data: await attachDealProofs(disputes, (row) => row.deal_id) });
   }
 
+  const userDetailsMatch = url.pathname.match(/^\/admin\/api\/users\/([^/]+)\/details$/);
+  if (req.method === "GET" && userDetailsMatch) {
+    const details = await getAdminUserDetails(userDetailsMatch[1]);
+    if (!details) return jsonResponse(res, 404, { ok: false, error: "User not found." });
+    return jsonResponse(res, 200, { ok: true, data: details });
+  }
+
+  const userRestrictionsMatch = url.pathname.match(/^\/admin\/api\/users\/([^/]+)\/restrictions$/);
+  if (req.method === "PATCH" && userRestrictionsMatch) {
+    const body = await readJsonBody(req);
+    const currencies = Array.isArray(body.swap_restricted_currencies)
+      ? body.swap_restricted_currencies.filter((currency) => ["NGN", "RWF", "GHS", "KES", "XAF"].includes(currency))
+      : [];
+    const patch = {
+      admin_banned: Boolean(body.admin_banned),
+      admin_ban_reason: body.admin_banned ? String(body.admin_ban_reason || "").trim() || null : null,
+      swap_restricted_currencies: currencies,
+    };
+    if (patch.admin_banned && !patch.admin_ban_reason) {
+      return jsonResponse(res, 400, { ok: false, error: "Add a reason before banning this user." });
+    }
+    const rows = await supabaseRequest(`users?id=eq.${filterValue(userRestrictionsMatch[1])}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    if (!rows[0]) return jsonResponse(res, 404, { ok: false, error: "User not found." });
+    await recordAdminAudit(actor, "user.restrictions_updated", "user", userRestrictionsMatch[1], patch);
+    return jsonResponse(res, 200, { ok: true, data: rows[0] });
+  }
+
   const userStatusMatch = url.pathname.match(/^\/admin\/api\/users\/([^/]+)\/status$/);
   if (req.method === "PATCH" && userStatusMatch) {
     const body = await readJsonBody(req);
@@ -806,6 +1507,7 @@ async function handleAdminApi(req, res, url) {
     if (allowedVerification.includes(body.verification_status)) patch.verification_status = body.verification_status;
     if (allowedRisk.includes(body.risk_status)) patch.risk_status = body.risk_status;
     const user = await updateUser(userStatusMatch[1], patch);
+    await recordAdminAudit(actor, "user.status_updated", "user", userStatusMatch[1], patch);
     return jsonResponse(res, 200, { ok: true, data: user });
   }
 
@@ -840,6 +1542,11 @@ async function handleAdminApi(req, res, url) {
     const user = await updateUser(request.user_id, {
       verification_status: status,
       verification_score: approved ? 80 : 0,
+    });
+    await recordAdminAudit(actor, "verification.decision", "verification_request", request.id, {
+      decision,
+      user_id: request.user_id,
+      admin_notes: body.admin_notes || null,
     });
 
     if (approved) {
@@ -891,6 +1598,9 @@ async function handleAdminApi(req, res, url) {
       method: "PATCH",
       body: JSON.stringify({ status: body.status }),
     });
+    await recordAdminAudit(actor, "listing.status_updated", "listing", listingStatusMatch[1], {
+      status: body.status,
+    });
     return jsonResponse(res, 200, { ok: true, data: rows[0] });
   }
 
@@ -914,6 +1624,11 @@ async function handleAdminApi(req, res, url) {
         resolution: body.resolution || null,
         resolved_at: ["resolved", "rejected"].includes(body.status) ? new Date().toISOString() : null,
       }),
+    });
+    await recordAdminAudit(actor, "dispute.status_updated", "dispute", disputeStatusMatch[1], {
+      status: body.status,
+      outcome,
+      resolution: body.resolution || null,
     });
 
     const dispute = await getDisputeWithDeal(disputeStatusMatch[1]);

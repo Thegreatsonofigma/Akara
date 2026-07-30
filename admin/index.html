@@ -17,7 +17,7 @@
       <aside id="sidebar" class="sidebar" aria-label="Akara admin navigation">
         <div class="sidebar-head">
           <a class="brand" href="/admin" aria-label="Akara operations home">
-            <span class="brand-mark"><i class="ph-fill ph-caret-double-up"></i></span>
+            <span class="brand-mark"><img src="/admin/assets/akara-logo-mark.webp" alt="" /></span>
             <span class="brand-copy">
               <strong>Akara</strong>
               <small>Operations</small>
@@ -38,6 +38,9 @@
           <p class="nav-label">Workspace</p>
           <button class="nav-item is-active" data-view="overview" type="button">
             <i class="ph ph-squares-four"></i><span>Overview</span>
+          </button>
+          <button class="nav-item" data-view="reports" type="button">
+            <i class="ph ph-chart-line-up"></i><span>Reports</span>
           </button>
           <button class="nav-item" data-view="users" type="button">
             <i class="ph ph-users-three"></i><span>Users</span><b id="nav-users-badge" class="nav-badge" hidden>0</b>
@@ -65,14 +68,17 @@
           <button class="nav-item" data-view="integrity" type="button">
             <i class="ph ph-fingerprint-simple"></i><span>Integrity</span>
           </button>
+          <button class="nav-item" data-view="admins" data-permission="admins.view" type="button">
+            <i class="ph ph-user-gear"></i><span>Admins & access</span><b id="nav-access-badge" class="nav-badge" hidden>0</b>
+          </button>
         </nav>
 
         <div class="sidebar-footer">
           <button id="open-access" class="operator" type="button">
-            <span class="avatar">S</span>
+            <span id="operator-avatar" class="avatar">A</span>
             <span class="operator-copy">
-              <strong>Steven</strong>
-              <small>Administrator</small>
+              <strong id="operator-name">Secure access</strong>
+              <small id="operator-role">Sign in required</small>
             </span>
             <i class="ph ph-caret-up-down"></i>
           </button>
@@ -185,6 +191,120 @@
             </div>
           </section>
 
+          <section id="reports" class="view">
+            <div class="reports-heading">
+              <div>
+                <p class="section-kicker">Business intelligence</p>
+                <h2>Akara, interpreted.</h2>
+                <p>Clear operational signals across growth, liquidity, trust, KYC and payment evidence.</p>
+              </div>
+              <div class="report-generated">
+                <i class="ph ph-clock-counter-clockwise"></i>
+                <span>Updated <strong id="report-generated-at">now</strong></span>
+              </div>
+            </div>
+
+            <div id="report-kpis" class="report-kpis" aria-label="Key performance indicators"></div>
+
+            <div class="report-grid">
+              <section class="report-panel report-panel-wide">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Last 30 days</span><h2>Activity and completion</h2><p>New users, offers, trades and completed exchanges by day.</p></div>
+                  <div id="report-activity-legend" class="report-legend"></div>
+                </div>
+                <div id="report-activity-chart" class="report-chart-large" aria-label="30 day activity chart"></div>
+              </section>
+
+              <section class="report-panel">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Exchange outcomes</span><h2>Trade health</h2><p>Where every opened exchange currently stands.</p></div>
+                </div>
+                <div id="report-trade-status" class="report-ranked-bars" aria-label="Trade status distribution"></div>
+              </section>
+
+              <section class="report-panel">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Marketplace</span><h2>Offer health</h2><p>Live, completed, paused and closed listings.</p></div>
+                </div>
+                <div id="report-offer-status" class="report-ranked-bars" aria-label="Offer status distribution"></div>
+              </section>
+
+              <section class="report-panel report-panel-wide">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Directional performance</span><h2>Currency corridors</h2><p>Liquidity and outcomes are compared within each exchange direction.</p></div>
+                </div>
+                <div class="table-wrap report-table-wrap">
+                  <table id="report-corridors-table"></table>
+                </div>
+              </section>
+
+              <section class="report-panel">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Completed value</span><h2>Volume by currency</h2><p>Each currency is shown independently; unlike currencies are never added together.</p></div>
+                </div>
+                <div id="report-currency-volume" class="report-volume-bars" aria-label="Completed volume by currency"></div>
+              </section>
+
+              <section class="report-panel">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Identity funnel</span><h2>Verification</h2><p>Approved, pending and unsuccessful KYC requests.</p></div>
+                </div>
+                <div id="report-verification-status" class="report-ranked-bars" aria-label="Verification status distribution"></div>
+              </section>
+
+              <section class="report-panel">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Payment evidence</span><h2>Receipt OCR</h2><p>How uploaded receipts performed against expected payment details.</p></div>
+                </div>
+                <div id="report-ocr-status" class="report-ranked-bars" aria-label="Receipt OCR status distribution"></div>
+              </section>
+
+              <section class="report-panel">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Risk operations</span><h2>Disputes and users</h2><p>Open review work and account risk distribution.</p></div>
+                </div>
+                <div class="split-report">
+                  <div><span class="report-subhead">Disputes</span><div id="report-dispute-status" class="report-ranked-bars compact"></div></div>
+                  <div><span class="report-subhead">User risk</span><div id="report-user-risk" class="report-ranked-bars compact"></div></div>
+                </div>
+              </section>
+
+              <section class="report-panel">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Payout readiness</span><h2>Saved payout methods</h2><p>How verified users expect to receive funds.</p></div>
+                </div>
+                <div class="split-report">
+                  <div><span class="report-subhead">Method</span><div id="report-payout-methods" class="report-ranked-bars compact"></div></div>
+                  <div><span class="report-subhead">Currency</span><div id="report-payout-currencies" class="report-ranked-bars compact"></div></div>
+                </div>
+              </section>
+
+              <section class="report-panel">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Operations</span><h2>Users and support</h2><p>Where users are based and how customer requests are progressing.</p></div>
+                </div>
+                <div class="split-report">
+                  <div><span class="report-subhead">Residence</span><div id="report-user-countries" class="report-ranked-bars compact"></div></div>
+                  <div><span class="report-subhead">Support</span><div id="report-support-status" class="report-ranked-bars compact"></div></div>
+                </div>
+              </section>
+
+              <section class="report-panel">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Revenue records</span><h2>Fee ledger</h2><p>Recorded service fees remain separated by their original currency.</p></div>
+                </div>
+                <div id="report-fee-volume" class="report-volume-bars" aria-label="Recorded fees by currency"></div>
+              </section>
+
+              <section class="report-panel report-panel-wide report-insights-panel">
+                <div class="report-panel-head">
+                  <div><span class="panel-kicker">Plain-language summary</span><h2>What the data says</h2><p>Operational signals worth acting on now.</p></div>
+                </div>
+                <div id="report-insights" class="report-insights"></div>
+              </section>
+            </div>
+          </section>
+
           <section id="users" class="view">
             <div class="workspace-panel">
               <div class="workspace-toolbar">
@@ -292,6 +412,26 @@
               <div class="table-wrap"><table id="trust-liquidity-table"></table></div>
             </div>
           </section>
+
+          <section id="admins" class="view">
+            <div id="admin-access-summary" class="summary-strip"></div>
+            <div class="workspace-panel">
+              <div class="workspace-toolbar">
+                <div><span class="panel-kicker">Access control</span><h2>Admin directory</h2></div>
+                <div class="inline-actions">
+                  <label class="filter-box"><i class="ph ph-magnifying-glass"></i><input class="filter" data-filter="admins-table" placeholder="Search admins" /></label>
+                  <button id="invite-admin" class="primary-button" type="button"><i class="ph ph-user-plus"></i> Invite admin</button>
+                </div>
+              </div>
+              <div class="table-wrap"><table id="admins-table"></table></div>
+            </div>
+            <div class="workspace-panel spaced-panel">
+              <div class="workspace-toolbar compact">
+                <div><span class="panel-kicker">Approval queue</span><h2>Access requests</h2></div>
+              </div>
+              <div class="table-wrap"><table id="access-requests-table"></table></div>
+            </div>
+          </section>
         </div>
       </main>
     </div>
@@ -313,14 +453,45 @@
 
     <div id="access-popover" class="access-popover" hidden>
       <div class="popover-head">
-        <div><span class="panel-kicker">Secure access</span><h3>Admin connection</h3></div>
+        <div><span class="panel-kicker">Secure access</span><h3 id="access-title">Connect to Akara Operations</h3></div>
         <button id="close-access" class="icon-button" type="button" aria-label="Close access settings"><i class="ph ph-x"></i></button>
       </div>
-      <label>
-        <span>Admin token</span>
-        <div class="token-field"><i class="ph ph-key"></i><input id="admin-token" type="password" autocomplete="off" placeholder="Enter admin token" /></div>
-      </label>
-      <button id="save-token" class="primary-button" type="button"><i class="ph ph-check"></i> Save connection</button>
+      <div id="access-login">
+        <p class="access-copy">Use your private Akara admin access token. Successful sign-in creates a time-limited session for this device.</p>
+        <label>
+          <span>Access token</span>
+          <div class="token-field"><i class="ph ph-key"></i><input id="admin-token" type="password" autocomplete="current-password" placeholder="Enter your access token" /></div>
+        </label>
+        <label class="remember-token"><input id="remember-token" type="checkbox" /><span>Remember this session on this device</span></label>
+        <p id="access-error" class="access-error" role="alert" hidden></p>
+        <button id="save-token" class="primary-button" type="button"><i class="ph ph-lock-key-open"></i> Sign in securely</button>
+        <button id="show-access-request" class="text-button access-link" type="button">Request admin access</button>
+      </div>
+      <div id="access-session" hidden>
+        <div class="admin-session-card">
+          <span id="session-avatar" class="avatar">A</span>
+          <div><strong id="session-name">Administrator</strong><small id="session-email">Secure session</small></div>
+          <span id="session-role" class="chip good">Active</span>
+        </div>
+        <dl class="session-details">
+          <div><dt>Admin ID</dt><dd id="session-code">-</dd></div>
+          <div><dt>Signed in</dt><dd id="session-login-at">-</dd></div>
+          <div><dt>Session ends</dt><dd id="session-expires-at">-</dd></div>
+          <div><dt>Access</dt><dd id="session-permission-count">-</dd></div>
+        </dl>
+        <button id="logout-admin" class="danger-button full-button" type="button"><i class="ph ph-sign-out"></i> Log out</button>
+      </div>
+      <form id="access-request-form" class="access-request-form" hidden>
+        <p class="access-copy">Ask a super admin to review your access request.</p>
+        <label><span>Name</span><input id="access-request-name" required placeholder="Your full name" /></label>
+        <label><span>Work email</span><input id="access-request-email" type="email" required placeholder="you@company.com" /></label>
+        <label><span>Why you need access</span><textarea id="access-request-reason" placeholder="Role and responsibilities"></textarea></label>
+        <p id="access-request-error" class="access-error" role="alert" hidden></p>
+        <div class="inline-actions">
+          <button id="cancel-access-request" class="secondary-button" type="button">Back</button>
+          <button class="primary-button" type="submit"><i class="ph ph-paper-plane-tilt"></i> Send request</button>
+        </div>
+      </form>
     </div>
 
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
