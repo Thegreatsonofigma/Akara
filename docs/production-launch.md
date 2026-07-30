@@ -81,14 +81,35 @@ Redeploy after changing either ID.
 
 ## 5. Meta Production Readiness
 
-- Use the registered Akara Cloud API phone number and permanent system-user token.
-- Complete all Required Actions and business verification requested by Meta.
-- Add the production business profile, support email, privacy policy, terms,
-  and data-deletion information.
-- Add a payment method for business-initiated conversations.
-- Create approved utility templates for match alerts, reminders, KYC outcomes,
-  disputes, and time-sensitive trade updates outside the customer-service window.
-- Switch the Meta app to Live only after the production smoke test passes.
+After Meta marks Akara Fintech Solutions as **Verified**:
+
+1. In **Meta for Developers > Akara > App settings > Basic**, complete the
+   app contact email, icon, category, app domain, privacy-policy URL, terms URL,
+   and user-data deletion URL:
+   - `https://tryakara.com/legal/privacy-policy`
+   - `https://tryakara.com/legal/terms-of-service`
+   - `https://tryakara.com/legal/data-deletion-policy`
+2. In **WhatsApp > Production setup**, confirm the Akara Cloud API number is
+   registered, connected, and protected by its six-digit registration PIN.
+3. In **WhatsApp Manager**, complete the production business profile and add a
+   payment method for business-initiated conversations.
+4. Confirm the Akara app is subscribed to the production WABA and the
+   `messages` webhook field. The callback must remain
+   `https://api.tryakara.com/webhook`.
+5. Use a permanent system-user token assigned to both the Akara app and
+   production WABA, with `whatsapp_business_messaging` and
+   `whatsapp_business_management`.
+6. Publish the KYC and security Flows, replace the Railway Flow IDs with the
+   published IDs, set `WHATSAPP_FLOW_MODE=published`, and redeploy Railway.
+7. Create and obtain approval for utility templates covering match alerts,
+   reminders, KYC outcomes, disputes, and time-sensitive trade updates outside
+   the customer-service window.
+8. Complete every item Meta shows under **Required actions** or **Publish**,
+   run the production smoke test below, then switch the Meta app to **Live**.
+
+Akara operates its own WABA. Do not request Tech Provider or partner-level
+permissions unless Akara later needs to onboard and manage WhatsApp accounts
+belonging to other businesses.
 
 ## 6. Smoke Test
 

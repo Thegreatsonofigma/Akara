@@ -21,32 +21,41 @@ alter default privileges in schema public
   revoke execute on functions from public, anon, authenticated;
 
 -- Pin function resolution to trusted schemas to prevent object-shadowing
--- attacks. These functions are currently trigger-only.
-alter function public.set_updated_at()
-  set search_path = public, extensions;
-alter function public.protect_anchored_integrity()
-  set search_path = public, extensions;
-alter function public.protect_confirmed_stellar_batch()
-  set search_path = public, extensions;
-alter function public.protect_reputation_snapshot()
-  set search_path = public, extensions;
-alter function public.protect_locked_quote_terms()
-  set search_path = public, extensions;
-alter function public.protect_market_rate_snapshot()
-  set search_path = public, extensions;
-alter function public.protect_reputation_credential()
-  set search_path = public, extensions;
-alter function public.protect_liquidity_route_terms()
-  set search_path = public, extensions;
-alter function public.enforce_single_open_trade_per_user()
-  set search_path = public, extensions;
+-- attacks. Production environments may be upgraded incrementally, so only
+-- harden functions that are installed instead of aborting the whole migration
+-- when an optional Stellar migration has not been applied yet.
+do $$
+declare
+  function_signature text;
+  installed_function regprocedure;
+begin
+  foreach function_signature in array array[
+    'public.set_updated_at()',
+    'public.protect_anchored_integrity()',
+    'public.protect_confirmed_stellar_batch()',
+    'public.protect_reputation_snapshot()',
+    'public.protect_locked_quote_terms()',
+    'public.protect_market_rate_snapshot()',
+    'public.protect_reputation_credential()',
+    'public.protect_liquidity_route_terms()',
+    'public.enforce_single_open_trade_per_user()'
+  ]
+  loop
+    installed_function := to_regprocedure(function_signature);
 
-grant execute on function public.set_updated_at() to service_role;
-grant execute on function public.protect_anchored_integrity() to service_role;
-grant execute on function public.protect_confirmed_stellar_batch() to service_role;
-grant execute on function public.protect_reputation_snapshot() to service_role;
-grant execute on function public.protect_locked_quote_terms() to service_role;
-grant execute on function public.protect_market_rate_snapshot() to service_role;
-grant execute on function public.protect_reputation_credential() to service_role;
-grant execute on function public.protect_liquidity_route_terms() to service_role;
-grant execute on function public.enforce_single_open_trade_per_user() to service_role;
+    if installed_function is null then
+      raise notice 'Skipping absent function %', function_signature;
+      continue;
+    end if;
+
+    execute format(
+      'alter function %s set search_path = public, extensions',
+      installed_function
+    );
+    execute format(
+      'grant execute on function %s to service_role',
+      installed_function
+    );
+  end loop;
+end
+$$;
