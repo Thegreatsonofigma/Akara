@@ -1930,7 +1930,8 @@ async function updateStatus(selectElement) {
 
 async function applyDisputeUpdate(button) {
   const id = button.dataset.disputeApply;
-  const container = button?.closest(".dispute-actions");
+  // const container = button?.closest(".dispute-actions");
+  const container = document?.querySelector(`.dispute-actions[data-dispute-id="${id}"]`);
   const status = container?.querySelector("select[data-type='dispute-draft']")?.value;
   const dealOutcome = container?.querySelector("select[data-dispute-outcome]")?.value;
   const resolution = container?.querySelector("textarea[data-dispute-resolution]")?.value?.trim();
@@ -1942,7 +1943,6 @@ async function applyDisputeUpdate(button) {
   if (status === "resolved" && dealOutcome === "none") {
     throw new Error("Choose what should happen to the trade before marking this report resolved.");
   }
-
   if (!["resolved", "rejected"].includes(status) && !["none", "keep_reviewing"].includes(dealOutcome)) {
     throw new Error("Move the report to resolved before closing or resuming the trade.");
   }
