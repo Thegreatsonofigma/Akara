@@ -192,7 +192,7 @@ function setConnectionState(connected) {
   document.body.classList.toggle("auth-required", !connected);
   const button = $("#access-status");
   button.classList.toggle("is-disconnected", !connected);
-  button?.querySelector("span:not(.status-dot)")?.textContent = connected ? "Connected" : "Access required";
+  button.querySelector("span:not(.status-dot)").textContent = connected ? "Connected" : "Access required";
 }
 
 function hasAdminPermission(permission) {
