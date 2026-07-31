@@ -123,7 +123,7 @@ const disputeOutcomes = {
 };
 
 function $(selector) {
-  return document.querySelector(selector);
+  return document?.querySelector(selector);
 }
 
 function showNotice(message, isError = false) {
@@ -192,7 +192,7 @@ function setConnectionState(connected) {
   document.body.classList.toggle("auth-required", !connected);
   const button = $("#access-status");
   button.classList.toggle("is-disconnected", !connected);
-  button.querySelector("span:not(.status-dot)").textContent = connected ? "Connected" : "Access required";
+  button?.querySelector("span:not(.status-dot)")?.textContent = connected ? "Connected" : "Access required";
 }
 
 function hasAdminPermission(permission) {
@@ -1930,10 +1930,10 @@ async function updateStatus(selectElement) {
 
 async function applyDisputeUpdate(button) {
   const id = button.dataset.disputeApply;
-  const container = button.closest(".dispute-actions");
-  const status = container.querySelector("select[data-type='dispute-draft']").value;
-  const dealOutcome = container.querySelector("select[data-dispute-outcome]").value;
-  const resolution = container.querySelector("textarea[data-dispute-resolution]").value.trim();
+  const container = button?.closest(".dispute-actions");
+  const status = container?.querySelector("select[data-type='dispute-draft']")?.value;
+  const dealOutcome = container?.querySelector("select[data-dispute-outcome]")?.value;
+  const resolution = container?.querySelector("textarea[data-dispute-resolution]")?.value?.trim();
 
   if (["resolved", "rejected"].includes(status) && !resolution) {
     throw new Error("Add a short resolution note before closing a report.");
@@ -1963,9 +1963,9 @@ async function applyDisputeUpdate(button) {
 
 async function applySupportUpdate(button) {
   const id = button.dataset.supportApply;
-  const container = button.closest(".dispute-actions");
-  const status = container.querySelector("select[data-type='support-draft']").value;
-  const adminNote = container.querySelector("textarea[data-support-note]").value.trim();
+  const container = button?.closest(".dispute-actions");
+  const status = container?.querySelector("select[data-type='support-draft']")?.value;
+  const adminNote = container?.querySelector("textarea[data-support-note]")?.value?.trim();
 
   if (status === "resolved" && !adminNote) {
     throw new Error("Add a short resolution note before resolving this support request.");
@@ -2038,12 +2038,12 @@ async function suspendUser(button) {
 
 async function applyUserUpdate(button) {
   const id = button.dataset.userApply;
-  const container = document.querySelector(`[data-user-controls="${CSS.escape(id)}"]`);
-  const verificationStatus = container.querySelector("[data-field='verification_status']").value;
-  const riskStatus = container.querySelector("[data-field='risk_status']").value;
-  const adminBanned = container.querySelector("[data-field='admin_banned']").checked;
-  const adminBanReason = container.querySelector("[data-field='admin_ban_reason']").value.trim();
-  const restrictedCurrencies = [...container.querySelectorAll("[data-restricted-currency]:checked")]
+  const container = document?.querySelector(`[data-user-controls="${CSS.escape(id)}"]`);
+  const verificationStatus = container?.querySelector("[data-field='verification_status']")?.value;
+  const riskStatus = container?.querySelector("[data-field='risk_status']")?.value;
+  const adminBanned = container?.querySelector("[data-field='admin_banned']")?.checked;
+  const adminBanReason = container?.querySelector("[data-field='admin_ban_reason']")?.value?.trim();
+  const restrictedCurrencies = [...container?.querySelectorAll("[data-restricted-currency]:checked")]
     .map((field) => field.value);
   if (adminBanned && !adminBanReason) {
     throw new Error("Add a concise reason before banning this account.");
@@ -2070,8 +2070,8 @@ async function applyUserUpdate(button) {
 
 async function applyListingUpdate(button) {
   const id = button.dataset.listingApply;
-  const container = document.querySelector(`[data-listing-controls="${CSS.escape(id)}"]`);
-  const status = container.querySelector("[data-field='status']").value;
+  const container = document?.querySelector(`[data-listing-controls="${CSS.escape(id)}"]`);
+  const status = container?.querySelector("[data-field='status']")?.value;
   await api(`/admin/api/listings/${id}/status`, {
     method: "PATCH",
     body: JSON.stringify({ status }),
@@ -2107,7 +2107,7 @@ async function inviteAdmin() {
 
 async function applyAdminUpdate(button) {
   const id = button.dataset.adminApply;
-  const form = document.querySelector(`[data-admin-controls="${CSS.escape(id)}"]`);
+  const form = document?.querySelector(`[data-admin-controls="${CSS.escape(id)}"]`);
   const payload = Object.fromEntries(
     [...form.querySelectorAll("[data-field]")].map((field) => [field.dataset.field, field.value.trim()])
   );
@@ -2170,7 +2170,7 @@ async function submitAccessRequest(event) {
 
 async function applyComplianceUpdate(button) {
   const kind = button.dataset.complianceApply;
-  const form = document.querySelector(`[data-compliance-form="${CSS.escape(kind)}"]`);
+  const form = document?.querySelector(`[data-compliance-form="${CSS.escape(kind)}"]`);
   const id = form.dataset.recordId;
   const payload = {};
   form.querySelectorAll("[data-field]").forEach((field) => {
@@ -2257,7 +2257,7 @@ function bindEvents() {
   $("#close-access").addEventListener("click", closeAccessPrompt);
 
   const focusWorkspaceSearch = () => {
-    const activeView = document.querySelector(".view.is-active");
+    const activeView = document?.querySelector(".view.is-active");
     const input = activeView?.querySelector(".filter");
     if (input) {
       input.focus();
