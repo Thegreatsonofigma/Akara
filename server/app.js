@@ -43,6 +43,24 @@ let idleMenuTimer = null;
 let stellarIntegrityTimer = null;
 let smartMatchingTimer = null;
 
+function deploymentReadiness() {
+  const commit = String(
+    process.env.RAILWAY_GIT_COMMIT_SHA
+      || process.env.RAILWAY_GIT_COMMIT
+      || process.env.GIT_COMMIT_SHA
+      || process.env.VERCEL_GIT_COMMIT_SHA
+      || "unknown"
+  ).trim();
+
+  return {
+    build: commit === "" ? "unknown" : commit.slice(0, 12),
+    conversation: {
+      memory: "enabled",
+      ai: config.openaiApiKey ? "configured" : "fallback-only",
+    },
+  };
+}
+
 function isMainMenuReply(reply = "") {
   return /^\*(Find offers and trade with more confidence|Choose your next move|Hi .+, choose your next move)\*/i
     .test(String(reply || "").trim());
@@ -517,7 +535,11 @@ const server = http.createServer(async (req, res) => {
     const onLocalHost = isLocalHost(req);
 
     if (req.method === "GET" && url.pathname === "/health") {
-      return jsonResponse(res, 200, { ok: true, service: "akara-whatsapp-webhook" });
+      return jsonResponse(res, 200, {
+        ok: true,
+        service: "akara-whatsapp-webhook",
+        ...deploymentReadiness(),
+      });
     }
 
     if (req.method === "GET" && url.pathname === "/webhook") {
@@ -606,8 +628,16 @@ const server = http.createServer(async (req, res) => {
 function startServer() {
   validateStellarIntegrityConfiguration();
   server.listen(config.port, config.host, () => {
+    const readiness = deploymentReadiness();
     console.log(`Akara webhook server listening on http://${config.host}:${config.port}`);
     console.log(`Akara send mode: ${config.sendMode}`);
+    console.log(`Akara build: ${readiness.build}`);
+    console.log(
+      `Conversation intelligence: memory=${readiness.conversation.memory} ai=${readiness.conversation.ai}`
+    );
+    if (!config.openaiApiKey) {
+      console.warn("OPENAI_API_KEY is not configured; conversation intelligence is using deterministic fallback only.");
+    }
   });
   startIdleMenuScheduler();
   startSmartMatchingScheduler();
@@ -620,4 +650,5 @@ module.exports = {
   sendIdleMenus,
   runSmartMatchingSweep,
   verifyMetaWebhookSignature,
+  deploymentReadiness,
 };
