@@ -23,7 +23,7 @@
     "check": "node --check server/index.js && node --check server/app.js && node --check server/admin.js && node --check server/website.js && node --check server/router.js && node --check server/nlp/interpreter.js && node --check server/nlp/history.js && node --check server/nlp/conversation-policy.js && node --check server/db/conversation.js && node --check server/lib/admin-auth.js && node --check server/lib/listing-card.js && node --check server/lib/matching-engine.js && node --check server/lib/integrity-crypto.js && node --check server/lib/stellar.js && node --check server/db/integrity.js && node --check server/db/market.js && node --check server/db/quotes.js && node --check server/db/credentials.js && node --check server/db/liquidity.js && node --check server/flows/listing.js && node --check server/flows/search.js && node --check scripts/check-stellar-readiness.js && node --check admin/app.js"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^14.6.1",
+    "@stellar/stellar-sdk": "^16.1.0",
     "opentype.js": "^2.0.0",
     "sharp": "0.35.3",
     "tesseract.js": "^7.0.0"
