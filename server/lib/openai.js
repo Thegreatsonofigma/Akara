@@ -1,8 +1,11 @@
-const { config } = require("../config");
-
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 
+function getConfig() {
+  return require("../config").config;
+}
+
 function isOpenAiEnabled() {
+  const config = getConfig();
   return Boolean(config.openaiApiKey);
 }
 
@@ -11,7 +14,8 @@ function isReasoningModel(model) {
 }
 
 async function openAiGenerate(prompt, options = {}) {
-  if (!isOpenAiEnabled()) {
+  const config = getConfig();
+  if (!config.openaiApiKey) {
     throw new Error("OpenAI is not configured. Set OPENAI_API_KEY in .env.");
   }
 
