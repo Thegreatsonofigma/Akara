@@ -14,9 +14,11 @@ process.env.WHATSAPP_ACCESS_TOKEN = "test-whatsapp-access-token";
 process.env.WHATSAPP_PHONE_NUMBER_ID = "1234567890";
 process.env.AKARA_PUBLIC_URL = "https://api.tryakara.test";
 process.env.AKARA_SHARE_URL = "https://api.tryakara.test";
+process.env.RAILWAY_GIT_COMMIT_SHA = "536c6c342daea8ab198a703b63eab0060f870c5d";
+process.env.OPENAI_API_KEY = "replace_with_test_key";
 
 const crypto = require("node:crypto");
-const { verifyMetaWebhookSignature } = require("../app");
+const { deploymentReadiness, verifyMetaWebhookSignature } = require("../app");
 const { config } = require("../config");
 
 let passed = 0;
@@ -35,6 +37,18 @@ async function run() {
     "Railway overrides a copied localhost binding",
     config.host === "0.0.0.0",
     config.host
+  );
+
+  const readiness = deploymentReadiness();
+  check(
+    "health readiness exposes a short deployment commit",
+    readiness.build === "536c6c342dae",
+    readiness.build
+  );
+  check(
+    "health readiness reports deterministic fallback without an OpenAI key",
+    readiness.conversation.ai === "fallback-only",
+    readiness.conversation.ai
   );
 
   const body = Buffer.from(JSON.stringify({
