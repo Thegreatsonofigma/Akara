@@ -1,13 +1,20 @@
-// Rolling per-user conversation memory. The interpreter reads this so the
-// model sees what "it", "that offer", or "same but 20k" refer to. Kept in
-// process memory: losing it on restart only costs conversational context,
-// never money or state, and the session table still holds the flow state.
+const {
+  appendConversationTurn,
+  listConversationTurns,
+  deleteConversationTurns,
+} = require("../db/conversation");
+
+// A bounded in-process cache keeps message routing fast. Safe conversation
+// turns are also persisted briefly so a deployment or restart does not make
+// Akara forget what "it", "that offer", or "same but 20k" means.
 
 const MAX_TURNS = 34;
 const MAX_USERS = 2000;
 const MAX_TEXT_LENGTH = 1000;
 
 const conversations = new Map(); // phone -> [{ role: "user"|"assistant", text, at }]
+const hydrated = new Set();
+const hydrating = new Map();
 
 function recordMessage(phone, role, text) {
   const key = String(phone || "").trim();
@@ -47,7 +54,54 @@ function historyTranscript(phone, limit = 20) {
 }
 
 function clearHistory(phone) {
-  conversations.delete(String(phone || "").trim());
+  const key = String(phone || "").trim();
+  conversations.delete(key);
+  hydrated.delete(key);
+  hydrating.delete(key);
+}
+
+async function hydrateHistory(phone) {
+  const key = String(phone || "").trim();
+  if (!key || hydrated.has(key)) return recentHistory(key, MAX_TURNS);
+  if (hydrating.has(key)) return hydrating.get(key);
+
+  const task = (async () => {
+    try {
+      const stored = await listConversationTurns(key, MAX_TURNS);
+      const local = recentHistory(key, MAX_TURNS);
+      const newestStoredAt = stored.at(-1)?.at || 0;
+      const newerLocal = local.filter((turn) => turn.at > newestStoredAt);
+      const combined = [...stored, ...newerLocal].slice(-MAX_TURNS);
+      if (combined.length) conversations.set(key, combined);
+    } catch (error) {
+      console.warn("Conversation memory hydration unavailable.");
+    } finally {
+      hydrated.add(key);
+      hydrating.delete(key);
+    }
+    return recentHistory(key, MAX_TURNS);
+  })();
+
+  hydrating.set(key, task);
+  return task;
+}
+
+async function recordAndPersistMessage(phone, role, text, metadata = {}) {
+  recordMessage(phone, role, text);
+  try {
+    await appendConversationTurn(phone, role, text, metadata);
+  } catch (error) {
+    console.warn("Conversation memory persistence unavailable.");
+  }
+}
+
+async function clearConversationMemory(phone) {
+  clearHistory(phone);
+  try {
+    await deleteConversationTurns(phone);
+  } catch (error) {
+    console.warn("Conversation memory deletion unavailable.");
+  }
 }
 
 module.exports = {
@@ -55,4 +109,7 @@ module.exports = {
   recentHistory,
   historyTranscript,
   clearHistory,
+  hydrateHistory,
+  recordAndPersistMessage,
+  clearConversationMemory,
 };

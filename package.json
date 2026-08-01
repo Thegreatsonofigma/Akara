@@ -10,7 +10,7 @@
   "scripts": {
     "prestart": "node scripts/check-production-env.js",
     "start": "node server/index.js",
-    "test": "node server/test/run-tests.js && node server/test/verification-test.js && node server/test/integrity-test.js && node server/test/stellar-config-test.js && node server/test/webhook-security-test.js && node server/test/security-hardening-test.js && node server/test/admin-reports-test.js && node server/test/admin-access-test.js",
+    "test": "node server/test/run-tests.js && node server/test/verification-test.js && node server/test/integrity-test.js && node server/test/stellar-config-test.js && node server/test/webhook-security-test.js && node server/test/security-hardening-test.js && node server/test/admin-reports-test.js && node server/test/admin-access-test.js && node server/test/conversation-intelligence-test.js",
     "test:verification": "node server/test/verification-test.js",
     "test:integrity": "node server/test/integrity-test.js",
     "test:admin": "node server/test/admin-reports-test.js && node server/test/admin-access-test.js",
@@ -20,7 +20,7 @@
     "prelaunch:purge-storage": "node scripts/prelaunch-cleanup.js --purge-storage",
     "stellar:backfill": "node scripts/backfill-stellar-integrity.js",
     "stellar:readiness": "node scripts/check-stellar-readiness.js",
-    "check": "node --check server/index.js && node --check server/app.js && node --check server/admin.js && node --check server/website.js && node --check server/lib/admin-auth.js && node --check server/lib/listing-card.js && node --check server/lib/matching-engine.js && node --check server/lib/integrity-crypto.js && node --check server/lib/stellar.js && node --check server/db/integrity.js && node --check server/db/market.js && node --check server/db/quotes.js && node --check server/db/credentials.js && node --check server/db/liquidity.js && node --check server/flows/listing.js && node --check server/flows/search.js && node --check scripts/check-stellar-readiness.js && node --check admin/app.js"
+    "check": "node --check server/index.js && node --check server/app.js && node --check server/admin.js && node --check server/website.js && node --check server/router.js && node --check server/nlp/interpreter.js && node --check server/nlp/history.js && node --check server/nlp/conversation-policy.js && node --check server/db/conversation.js && node --check server/lib/admin-auth.js && node --check server/lib/listing-card.js && node --check server/lib/matching-engine.js && node --check server/lib/integrity-crypto.js && node --check server/lib/stellar.js && node --check server/db/integrity.js && node --check server/db/market.js && node --check server/db/quotes.js && node --check server/db/credentials.js && node --check server/db/liquidity.js && node --check server/flows/listing.js && node --check server/flows/search.js && node --check scripts/check-stellar-readiness.js && node --check admin/app.js"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^14.6.1",

@@ -56,6 +56,23 @@ const RESPONSE_SCHEMA = {
   additionalProperties: false,
   properties: {
     action: { type: "string", enum: ACTIONS },
+    secondary_actions: {
+      type: "array",
+      items: { type: "string", enum: ACTIONS },
+      maxItems: 3,
+    },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    needs_clarification: { type: "boolean" },
+    clarifying_question: { type: ["string", "null"] },
+    conversation_mode: {
+      type: "string",
+      enum: ["social", "informational", "transactional", "mixed"],
+    },
+    should_show_menu: { type: "boolean" },
+    language_style: {
+      type: "string",
+      enum: ["standard", "casual", "pidgin"],
+    },
     have_currency: { type: ["string", "null"] },
     have_amount: { type: ["number", "null"] },
     want_currency: { type: ["string", "null"] },
@@ -71,6 +88,13 @@ const RESPONSE_SCHEMA = {
   },
   required: [
     "action",
+    "secondary_actions",
+    "confidence",
+    "needs_clarification",
+    "clarifying_question",
+    "conversation_mode",
+    "should_show_menu",
+    "language_style",
     "have_currency",
     "have_amount",
     "want_currency",
@@ -87,12 +111,23 @@ const SYSTEM_PROMPT = [
   "You interpret WhatsApp messages sent to Akara, a peer-to-peer currency exchange assistant.",
   "Akara lets verified users post exchange offers (listings), find matching offers, open trades, save payout details, and view transaction history.",
   "Akara does not hold funds; money moves directly between users through bank or mobile money.",
-  "Akara is free to use right now. If someone asks about fees or cost, tell them it is free and that inviting or referring a friend to swap with them earns 10 more free trades.",
+  "Akara is free to use right now. If someone asks about fees or cost, say the service fee is currently free. Do not add referral copy unless the user asks about referrals.",
   "Supported currencies: NGN (naira), RWF (Rwandan franc), XAF (Central African franc), KES (Kenyan shilling), GHS (Ghanaian cedi).",
   "",
   "You receive the recent conversation transcript and the user's newest message. Use the transcript to resolve references like \"it\", \"that one\", \"the second offer\", \"same as before\", and to fill in currency or amount details the user already gave earlier.",
   "",
-  "Classify the user's newest message into exactly one action:",
+  "Choose one primary action for routing. If the message also contains other clear requests, place up to three of them in secondary_actions in the order they appear.",
+  "Meaning and conversation context matter more than keywords. A message can be social and transactional at the same time.",
+  "Never ask again for an amount, currency, choice, or correction that is already clear in the newest message, transcript, or active flow.",
+  "The newest correction always overrides stale transcript values. Acknowledge the corrected value naturally in answer.",
+  "When a request is clear, route it now. Never say you will search and then ask the user to repeat what they already said.",
+  "Set needs_clarification only when a safe route is genuinely impossible. Ask one concise question in clarifying_question.",
+  "Set conversation_mode to social, informational, transactional, or mixed based on the whole newest message.",
+  "Set should_show_menu only when the user asks what Akara can do, is ending an ordinary conversation, or greets Akara with no active task. Do not show it during an active transaction or data-entry flow.",
+  "Set language_style to pidgin, casual, or standard so Akara can answer in the user's natural register.",
+  "You interpret intent and write conversational acknowledgement only. You never execute a transaction, approve verification, mutate a listing, or change money-sensitive state.",
+  "",
+  "Primary actions:",
   "- create_listing: they state money they have and want to exchange (posting/making an offer, listing, ad, or post).",
   "- find_offer: they are looking for someone to exchange with for a currency, amount, or pair, or asking who needs/wants a currency they hold (\"I also need naira\", \"who needs naira? 50k for 54k rwf\", \"anyone want NGN?\"). A greeting before the request does not make it a greeting. When they say they need or want a currency, put it in want_currency even if no amount or have_currency is given. A demand question is find_offer even when it quotes full amounts or a rate; the money they hold is the have side, so still extract the slots.",
   "- browse_offers: they want to see available offers, deals, or rates without giving a full pair.",
@@ -144,6 +179,53 @@ function cleanAmount(value) {
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 
+function normalizeInterpretation(result = {}) {
+  if (!ACTIONS.includes(result.action)) return null;
+
+  const secondaryActions = Array.isArray(result.secondary_actions)
+    ? result.secondary_actions
+        .filter((action) => ACTIONS.includes(action) && action !== result.action)
+        .filter((action, index, values) => values.indexOf(action) === index)
+        .slice(0, 3)
+    : [];
+  const confidence = Number(result.confidence);
+  const conversationMode = ["social", "informational", "transactional", "mixed"].includes(result.conversation_mode)
+    ? result.conversation_mode
+    : (["greeting", "thanks", "wellbeing"].includes(result.action) ? "social" : "transactional");
+  const languageStyle = ["standard", "casual", "pidgin"].includes(result.language_style)
+    ? result.language_style
+    : "standard";
+  const clarifyingQuestion = typeof result.clarifying_question === "string"
+    ? result.clarifying_question.trim()
+    : "";
+
+  return {
+    action: result.action,
+    secondary_actions: secondaryActions,
+    confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0.7,
+    needs_clarification: Boolean(result.needs_clarification && clarifyingQuestion),
+    clarifying_question: clarifyingQuestion,
+    conversation_mode: conversationMode,
+    should_show_menu: Boolean(result.should_show_menu),
+    language_style: languageStyle,
+    details: {
+      have_currency: normalizeCurrency(result.have_currency || ""),
+      want_currency: normalizeCurrency(result.want_currency || ""),
+      have_amount: cleanAmount(result.have_amount),
+      want_amount: cleanAmount(result.want_amount),
+      payment_currency: normalizeCurrency(result.payment_currency || ""),
+      settings_target: ["listing", "payout"].includes(result.settings_target)
+        ? result.settings_target
+        : null,
+      settings_operation: ["edit", "close", "share", "pause", "reopen", "delete"].includes(result.settings_operation)
+        ? result.settings_operation
+        : null,
+      settings_item_number: cleanAmount(result.settings_item_number),
+    },
+    answer: typeof result.answer === "string" ? result.answer.trim() : "",
+  };
+}
+
 // Sends one OpenAI call to classify a free-form message into an Akara action
 // plus any exchange details. `context` carries the user's session state and
 // the recent conversation transcript so mid-flow answers, interruptions, and
@@ -175,26 +257,7 @@ async function interpretMessage(text, context = {}) {
       }
     );
 
-    if (!ACTIONS.includes(result.action)) return null;
-
-    return {
-      action: result.action,
-      details: {
-        have_currency: normalizeCurrency(result.have_currency || ""),
-        want_currency: normalizeCurrency(result.want_currency || ""),
-        have_amount: cleanAmount(result.have_amount),
-        want_amount: cleanAmount(result.want_amount),
-        payment_currency: normalizeCurrency(result.payment_currency || ""),
-        settings_target: ["listing", "payout"].includes(result.settings_target)
-          ? result.settings_target
-          : null,
-        settings_operation: ["edit", "close", "share", "pause", "reopen", "delete"].includes(result.settings_operation)
-          ? result.settings_operation
-          : null,
-        settings_item_number: cleanAmount(result.settings_item_number),
-      },
-      answer: typeof result.answer === "string" ? result.answer.trim() : "",
-    };
+    return normalizeInterpretation(result);
   } catch (error) {
     console.error("OpenAI interpretation failed:", error.message);
     return null;
@@ -209,4 +272,6 @@ module.exports = {
   interpretMessage,
   isFreshRequestAction,
   FRESH_ACTIONS,
+  normalizeInterpretation,
+  ACTIONS,
 };

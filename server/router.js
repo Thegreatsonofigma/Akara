@@ -38,7 +38,16 @@ const {
   selectedOptionNumber,
 } = require("./nlp/intents");
 const { interpretMessage, isFreshRequestAction } = require("./nlp/interpreter");
-const { recordMessage, historyTranscript } = require("./nlp/history");
+const {
+  historyTranscript,
+  hydrateHistory,
+  recordAndPersistMessage,
+} = require("./nlp/history");
+const {
+  shouldPersistConversation,
+  shouldAskClarifyingQuestion,
+  shouldApplyContextualAnswer,
+} = require("./nlp/conversation-policy");
 const { isVerified, isOnHold } = require("./db/users");
 const { getSession, upsertSession, clearSession, clearFailedMessage } = require("./db/sessions");
 const { extractListingCode, extractDealCode } = require("./db/listings");
@@ -327,11 +336,6 @@ async function resolveQuotedReply(text, user, incoming = {}) {
   return null;
 }
 
-// Actions whose written answer may be sent to the user as-is. Add
-// conversational actions here (e.g. "greeting", "thanks", "wellbeing") to let
-// the model speak for them too; functional actions must never be listed.
-const ANSWER_ACTIONS = new Set(["question", "unknown", "greeting", "thanks", "wellbeing"]);
-
 // Actions that do NOT interrupt the named flow: the flow's own handler knows
 // how to process them (numbers in a results list, confirmations in settings,
 // payment updates in a deal room). Every other fresh action cancels the flow
@@ -375,9 +379,10 @@ async function conversationalReply(interpreted, text, user, session, options = {
   });
 
   const activeFlow = session?.current_flow || "";
+  const atSafeBoundary = !activeFlow || !RESUMABLE_CONVERSATION_FLOWS.has(activeFlow);
   const shouldShowMainMenu = isVerified(user)
     && !options.suppressNudge
-    && (!activeFlow || !RESUMABLE_CONVERSATION_FLOWS.has(activeFlow));
+    && atSafeBoundary;
 
   if (shouldShowMainMenu) {
     if (activeFlow) await clearSession(user, user.whatsapp_phone);
@@ -1225,45 +1230,46 @@ async function routeMessage(text, user, session, incoming = {}) {
   // flow, the recent conversation, and the newest message. When OpenAI is off
   // or fails, dispatch runs with action "unknown" and the deterministic
   // checks carry the routing.
+  const emptyInterpretation = {
+    action: "unknown",
+    secondary_actions: [],
+    confidence: 0,
+    needs_clarification: false,
+    clarifying_question: "",
+    conversation_mode: "informational",
+    should_show_menu: false,
+    language_style: "standard",
+    details: {},
+    answer: "",
+  };
   const interpreted = (incoming.media?.id && !command)
-    ? { action: "unknown", details: {}, answer: "" }
+    ? emptyInterpretation
     : (await interpretMessage(text, {
         flow: session?.current_flow || null,
         step: session?.current_step || null,
         verified: isVerified(user),
         transcript: historyTranscript(user.whatsapp_phone),
-      })) || { action: "unknown", details: {}, answer: "" };
-  console.log({ interpreted });
+      })) || emptyInterpretation;
+
+  incoming.interpretation = {
+    action: interpreted.action,
+    secondary_actions: interpreted.secondary_actions || [],
+    confidence: interpreted.confidence ?? null,
+    conversation_mode: interpreted.conversation_mode || null,
+    language_style: interpreted.language_style || null,
+  };
+  console.log(
+    `[router] intent=${interpreted.action} confidence=${interpreted.confidence ?? "n/a"} mode=${interpreted.conversation_mode || "n/a"}`
+  );
+
+  if (shouldAskClarifyingQuestion(interpreted, session, incoming)) {
+    return interpreted.clarifying_question;
+  }
 
   const reply = await routeInterpreted(interpreted, text, user, session, incoming);
-
-  // The interpreter writes a short answer describing what the user asked for;
-  // it becomes the reply's caption (or head text) so every message opens with
-  // language fitted to the conversation. Question/unknown answers are already
-  // full replies on their own, so they are never woven into another reply.
-  // Unverified users and the verification flow only ever get predetermined
-  // copy — never a model-written caption or heading.
-  const skipAnswer = ANSWER_ACTIONS.has(interpreted.action)
-    || interpreted.action === "flow_reply"
-    || interpreted.action === "add_payout"
-    || interpreted.action === "create_listing"
-    || interpreted.action === "find_offer"
-    || interpreted.action === "browse_offers"
-    || interpreted.action === "reserve_listing"
-    || interpreted.action === "trade_action"
-    || interpreted.action === "settings_action"
-    || interpreted.action === "view_profile"
-    || interpreted.action === "view_trust_record"
-    || interpreted.action === "my_listings"
-    || interpreted.action === "my_deals"
-    || interpreted.action === "get_support"
-    || interpreted.action === "menu"
-    || interpreted.action === "greeting"
-    || interpreted.action === "wellbeing"
-    || !isVerified(user)
-    || session?.current_flow === "verification"
-    || session?.current_flow === "payment_profile";
-  return skipAnswer ? reply : applyInterpretedAnswer(reply, interpreted.answer);
+  return shouldApplyContextualAnswer(interpreted, isVerified(user), session, reply)
+    ? applyInterpretedAnswer(reply, interpreted.answer)
+    : reply;
 }
 
 function normalizeInteractiveCommand(command) {
@@ -1397,12 +1403,29 @@ function describeOutgoingForHistory(reply) {
 }
 
 async function buildReply(text, user, session, incoming = {}) {
+  await hydrateHistory(user.whatsapp_phone);
   const reply = await routeMessage(text, user, session, incoming);
 
-  // Recorded after routing so the interpreter's transcript never contains the
-  // message it is currently classifying.
-  recordMessage(user.whatsapp_phone, "user", describeIncomingForHistory(text, incoming));
-  recordMessage(user.whatsapp_phone, "assistant", describeOutgoingForHistory(reply));
+  // Sensitive KYC, payout, receipt and live-trade details are intentionally
+  // excluded. General conversational context expires automatically after a
+  // short retention window and is only available to the trusted backend.
+  if (shouldPersistConversation(session, incoming)) {
+    await recordAndPersistMessage(
+      user.whatsapp_phone,
+      "user",
+      describeIncomingForHistory(text, incoming),
+      {
+        intent: incoming.interpretation?.action || null,
+        conversation_mode: incoming.interpretation?.conversation_mode || null,
+        language_style: incoming.interpretation?.language_style || null,
+      }
+    );
+    await recordAndPersistMessage(
+      user.whatsapp_phone,
+      "assistant",
+      describeOutgoingForHistory(reply)
+    );
+  }
 
   return reply;
 }
