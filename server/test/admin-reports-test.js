@@ -131,10 +131,6 @@ async function run() {
     { id: crypto.randomUUID(), deal_id: dealOneId, ocr_status: "matched", ocr_matched: true, ocr_currency: "KES", ocr_expected_currency: "KES", created_at: daysAgo(2) },
     { id: crypto.randomUUID(), deal_id: dealTwoId, ocr_status: "mismatch", ocr_matched: false, ocr_currency: "NGN", ocr_expected_currency: "NGN", created_at: daysAgo(1) }
   );
-  __table("fees").push(
-    { id: crypto.randomUUID(), currency: "KES", amount: 100, status: "pending", created_at: daysAgo(2) },
-    { id: crypto.randomUUID(), currency: "NGN", amount: 250, status: "paid", created_at: daysAgo(1) }
-  );
   __table("audit_events").push({
     id: crypto.randomUUID(),
     entity_type: "support_request",

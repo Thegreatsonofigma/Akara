@@ -376,18 +376,16 @@ Buttons:
 
 Rules:
 
-- If both parties mark received, deal becomes completed_pending_fee.
+- If both parties mark received, the deal is completed and closed.
 - If one party reports, deal becomes disputed.
 
-## Screen 18: Fee Collection
+## Screen 18: Completion
 
 Bot:
 
 Deal RJ-2041 is completed.
 
-Service fee: 100 RWF.
-
-Pay to:
+Service fee: Free.
 
 MoMo: Akara fee number
 

@@ -157,7 +157,7 @@ export const LEGAL_DOCS: LegalDoc[] = [
       {
         heading: "Fees",
         paragraphs: [
-          "Akara is free during launch. Fees may apply later and will be shown clearly before a trade is opened.",
+          "Akara is permanently free to use and does not charge service, subscription, usage, or monthly fees. Users remain responsible for charges imposed by their bank, mobile-money provider, network, or another third-party provider.",
         ],
       },
       {

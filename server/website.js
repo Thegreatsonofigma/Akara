@@ -65,7 +65,7 @@ const legalPages = [
       ["Verification Requirement", "Users may browse basic information, but must be verified before creating listings, opening trades, adding payout accounts, or completing exchanges."],
       ["User Responsibilities", "Users must provide accurate information, use their own payout account, confirm payout details, upload true receipts, avoid bypassing Akara, and cooperate with safety reviews."],
       ["Trade Rules", "A trade expires after 30 minutes. After payment is marked sent, the user cannot cancel and must raise a dispute if something is wrong."],
-      ["Fees", "Akara is free during the launch period. Fees may apply later and will be shown clearly before a user opens or completes a trade."],
+      ["Fees", "Akara is permanently free to use. Akara does not charge service, subscription, usage, or monthly fees."],
       ["Safety Action", "Akara may restrict accounts, pause trades, suspend listings, require admin review, or ban users for confirmed misuse."],
     ],
   },

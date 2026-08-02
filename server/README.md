@@ -148,7 +148,6 @@ The server currently supports:
 - `my deals`
 - `sent`
 - `received`
-- `fee paid`
 - `dispute`
 - `cancel deal`
 - `cancel`

@@ -238,7 +238,7 @@ function verificationStartButtonPayload(body = "Start verification to continue o
 }
 
 function referralPitch() {
-  return "🎁 Invite a friend or refer a friend to swap with you and get 10 more free trades.";
+  return "Share your offer with someone who may want the exchange.";
 }
 
 function feeIncludedText() {

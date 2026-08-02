@@ -47,16 +47,18 @@ function capabilitiesAssistantReply() {
 function feeAssistantReply() {
   return [
     title("Service fee"),
-    "Akara is free to use. No one needs to send a separate fee inside a trade.",
+    "Akara is permanently free.",
+    "",
+    caption("No service charge, subscription, usage limit, fee balance, invoice, or monthly bill."),
   ].join("\n");
 }
 
 function referralAssistantReply() {
   return [
-    title("Free trades 🎁"),
-    "Invite a friend or refer a friend to swap with you and get 10 more free trades.",
+    title("Invite someone"),
+    "Share an offer link with someone who may want the exchange.",
     "",
-    "Share one of your offer links, or tell a friend to message Akara on WhatsApp and trade with you.",
+    caption("Akara is permanently free for everyone. Referrals do not unlock or extend usage."),
     "",
     action("make offer"),
     action("my listings"),

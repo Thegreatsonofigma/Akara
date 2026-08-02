@@ -68,7 +68,7 @@ const statusLabels = {
   maker_sent: "Maker payment sent",
   taker_sent: "Taker payment sent",
   partially_confirmed: "Partially confirmed",
-  completed_pending_fee: "Completed, fee pending",
+  completed_pending_fee: "Completed",
   closed: "Completed",
   disputed: "Disputed",
   pending_input: "Needs user input",
@@ -783,7 +783,6 @@ function renderReports(data) {
   renderRankedBars("#report-payout-methods", data.distributions?.payoutMethods || {}, { limit: 4 });
   renderRankedBars("#report-payout-currencies", data.distributions?.payoutCurrencies || {}, { limit: 5 });
   renderCurrencyVolumes("#report-currency-volume", data.currencyVolume || []);
-  renderCurrencyVolumes("#report-fee-volume", data.feeVolume || [], "recorded service fees");
   renderRankedBars("#report-user-countries", data.distributions?.countries || {}, { limit: 6 });
   renderRankedBars("#report-support-status", data.distributions?.supportStatus || {}, { limit: 5 });
 

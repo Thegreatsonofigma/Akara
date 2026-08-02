@@ -229,7 +229,7 @@ Trade rules:
 
 ## 11. Fees
 
-Akara is free during the launch period. Fees may apply later and must be shown clearly before a user opens or completes a trade.
+Akara is permanently free to use. Akara does not create service-fee balances, invoices, subscriptions, usage limits, or monthly bills. A user's bank or mobile-money provider may apply its own independent charges.
 
 ## 12. User Rights
 

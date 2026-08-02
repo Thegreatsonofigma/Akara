@@ -896,7 +896,7 @@ async function run() {
 	  );
 
 	  reply = await send(ALICE, "get_support", {
-	    interpret: { action: "question", answer: "Akara is free to use for swapping currencies." },
+	    interpret: { action: "question", answer: "Akara is permanently free to use for currency exchange." },
 	  });
 	  check("support menu action cannot be hijacked by fee copy", reply.includes("*Akara support*") && !reply.includes("free to use"), reply);
 
@@ -925,11 +925,11 @@ async function run() {
 	  // ---------- service fee + referral copy
   scenario("service fee copy");
   reply = await send(ALICE, "how much do you charge?");
-  check("fee answer stays simple", reply.includes("Akara is free to use") && !reply.includes("10 more free trades"), reply);
+  check("fee answer stays simple", reply.includes("Akara is permanently free") && !reply.includes("10 more free trades"), reply);
   check("fee answer not 'free for now'", !reply.toLowerCase().includes("free for now"), reply);
 
   reply = await send(ALICE, "how do i get free trades?");
-  check("referral question answered", reply.includes("Invite a friend or refer a friend"), reply);
+  check("referral question answered", reply.includes("Invite someone"), reply);
 
   scenario("receipt evidence parser");
   let receiptCheck = await analyzeReceiptEvidence(
@@ -1894,9 +1894,9 @@ async function run() {
 
   reply = await send(ALICE, "make offer");
   reply = await send(ALICE, "is akara free?", {
-    interpret: { action: "question", answer: "Akara is free — invite a friend to swap and get 10 more free trades." },
+    interpret: { action: "question", answer: "Akara is permanently free to use for currency exchange." },
   });
-  check("question answered mid-flow", reply.includes("Akara is free"), reply);
+  check("question answered mid-flow", reply.includes("Akara is permanently free"), reply);
   check("flow survives a question", (await sessionFlow(ALICE)) === "create_listing");
 
   reply = await send(ALICE, "i wan move 51k naira make i get 55k rwf", {
