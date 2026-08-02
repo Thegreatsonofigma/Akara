@@ -49,7 +49,7 @@ const FAQ_ITEMS: FAQItem[] = [
   {
     question: "Is Akara free?",
     answer:
-      "Yes, Akara is free during launch. If fees apply later, they will be shown clearly before you open a trade.",
+      "Yes. Akara is permanently free to use, with no service charge, subscription, usage limit, or monthly bill. Your bank or mobile-money provider may still apply its own charges.",
   },
   {
     question: "Can businesses use Akara?",

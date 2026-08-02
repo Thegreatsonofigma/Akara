@@ -42,7 +42,6 @@ const {
 const { storeDealProof, dealUserHasProof, sendDealProofToUser } = require("../lib/receipts");
 const { sendExchangeCompletionCard } = require("../lib/listing-card");
 const { analyzeReceiptEvidence } = require("../lib/receipt-ocr");
-const { FEE_BILLING_THRESHOLD, feeLedgerNote, recordDealFees } = require("../db/fees");
 const { recordCompletedDealIntegrity } = require("../db/integrity");
 const { markLiquidityRouteDealCompleted } = require("../db/liquidity");
 const { applyDisputeHolds, releaseDisputeHolds } = require("../db/dispute-holds");
@@ -467,12 +466,7 @@ async function recordReminderSent(dealId, actorUserId, targetUserId) {
 
 async function notifyExchangeCompleteForOtherUser(otherUserId, deal, otherRole) {
   const target = await getUserById(otherUserId);
-  const { youReceive } = dealPartySummary(otherRole, deal);
-  await notifyDealUser(otherUserId, [
-    exchangeCompleteMessage(deal, otherRole),
-    "",
-    feeLedgerNote(youReceive.currency),
-  ].join("\n"));
+  await notifyDealUser(otherUserId, exchangeCompleteMessage(deal, otherRole));
   if (target?.whatsapp_phone) {
     await sendExchangeCompletionCard(
       target.whatsapp_phone,
@@ -537,9 +531,6 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
   const otherRole = otherDealRole(role);
   const dealCode = displayReference(deal.deal_code, "deal");
   const completedDeal = await getDealById(dealId) || updatedDeal || deal;
-  await recordDealFees(completedDeal).catch((error) => {
-    console.error(`[deal] fee ledger failed for ${dealCode}: ${error.message}`);
-  });
   await Promise.all([
     syncCompletedDealsCount(completedDeal.maker_user_id),
     syncCompletedDealsCount(completedDeal.taker_user_id),
@@ -569,15 +560,11 @@ async function maybeCompleteDeal(user, dealId, deal, role, otherUserId, extraLin
   }
   await clearSession(user, user.whatsapp_phone);
 
-  const { youSend } = dealPartySummary(role, deal);
-  const { youReceive } = dealPartySummary(role, completedDeal);
   return {
     completed: true,
     reply: [
       exchangeCompleteMessage(completedDeal, role),
       ...extraLines,
-      "",
-      feeLedgerNote(youReceive.currency),
     ].filter(Boolean).join("\n\n"),
   };
 }
@@ -652,13 +639,11 @@ async function handleDealRoom(text, user, session, incoming = {}) {
 
   if (command === "fee paid" || /\bfee\b.*\b(paid|sent|settled)\b/.test(command) || /\b(paid|sent|settled)\b.*\bfee\b/.test(command)) {
     return [
-      title("Fee account"),
+      title("Service fee"),
       "",
-      fieldBlock("Transaction ref", dealCode),
+      "Akara is permanently free.",
       "",
-      "Service fees are tracked in your Akara Fee Account.",
-      `Pay only with your Akara fee reference after ${FEE_BILLING_THRESHOLD} completed trades.`,
-      "Never send exchange money to Akara's fee account.",
+      caption("No fee account, invoice, subscription, or monthly bill."),
     ].join("\n");
   }
 

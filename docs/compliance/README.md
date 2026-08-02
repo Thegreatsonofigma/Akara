@@ -48,4 +48,4 @@ Use the official regulator and government sites below when filing, confirming ob
 - Verification: users may browse basic information, but must verify before creating listings, opening Akara Trades, adding payout accounts, or completing exchanges.
 - KYC provider: a third-party KYC provider such as Didit until a final provider is selected.
 - Payout rule: Akara does not allow third-party payout accounts at launch. Saved payout names should match the user's verified legal name, with minor spelling differences sent to admin review.
-- Launch fee: free during launch. Any future fee must be shown before a trade is opened or completed.
+- Service fee: permanently free, with no subscription, usage limit, invoice, or monthly bill.

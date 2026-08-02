@@ -39,24 +39,9 @@ The MVP starts with NGN <-> RWF and later expands to XAF <-> RWF, GHS <-> RWF, a
 - In-chat collection of full government ID documents.
 - Fully automated dispute resolution.
 
-## Success Fee
+## Free Access
 
-Akara should charge a small success fee from both sides after a successful match.
-
-Recommended MVP fee:
-
-- NGN side: 100 NGN.
-- RWF side: 100 RWF.
-
-Fee timing:
-
-1. Both users confirm the deal is completed.
-2. Akara marks the deal as "completed_pending_fee".
-3. Bot sends each party a fee instruction.
-4. User confirms fee payment.
-5. Admin can manually verify the fee in the dashboard.
-
-This avoids custody while teaching users from day one that Akara is a paid trust layer.
+Akara is permanently free to use. Completed exchanges close immediately after both recipients confirm receipt. Akara does not create fee balances, invoices, subscriptions, usage restrictions, or monthly bills.
 
 ## Trust And Accountability
 
@@ -252,4 +237,3 @@ If you are building mostly alone:
 ## Next Build Step
 
 Start with the WhatsApp state machine and database schema. Once those are stable, the backend is mostly implementation work.
-

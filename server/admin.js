@@ -629,7 +629,6 @@ async function getAdminReports() {
     disputes,
     verifications,
     proofs,
-    fees,
     supportEvents,
   ] = await Promise.all([
     listAllAdminRows(
@@ -656,7 +655,6 @@ async function getAdminReports() {
       "id,deal_id,ocr_status,ocr_matched,ocr_currency,ocr_expected_currency,created_at",
       "id,deal_id,created_at"
     ),
-    listAllAdminRows("fees", "id,currency,amount,status,created_at"),
     listAllAdminRows(
       "audit_events",
       "id,event_payload,created_at",
@@ -728,9 +726,6 @@ async function getAdminReports() {
     addCurrencyAmount(currencyVolume, deal.have_currency, deal.have_amount);
     addCurrencyAmount(currencyVolume, deal.want_currency, deal.want_amount);
   });
-
-  const feeVolume = {};
-  fees.forEach((fee) => addCurrencyAmount(feeVolume, fee.currency, fee.amount));
 
   const days = buildRecentDays(30);
   const activity = days.map((day) => ({
@@ -828,9 +823,6 @@ async function getAdminReports() {
     },
     corridors,
     currencyVolume: Object.entries(currencyVolume)
-      .map(([currency, amount]) => ({ currency, amount: Math.round(amount * 100) / 100 }))
-      .sort((left, right) => right.amount - left.amount),
-    feeVolume: Object.entries(feeVolume)
       .map(([currency, amount]) => ({ currency, amount: Math.round(amount * 100) / 100 }))
       .sort((left, right) => right.amount - left.amount),
     insights,
@@ -1043,7 +1035,7 @@ async function getAdminUserDetails(userId) {
   user.admin_ban_reason = user.admin_ban_reason || null;
   user.swap_restricted_currencies = user.swap_restricted_currencies || [];
 
-  const [payouts, listings, deals, verifications, fees, penalties, userEvents] = await Promise.all([
+  const [payouts, listings, deals, verifications, penalties, userEvents] = await Promise.all([
     listAllAdminRows(
       "payment_profiles",
       "id,currency,method,account_name,bank_name,momo_network,is_default,created_at,updated_at",
@@ -1066,11 +1058,6 @@ async function getAdminUserDetails(userId) {
       "verification_requests",
       "id,status,id_type,id_country,document_ocr_status,document_ocr_name,document_name_match,document_country_match,document_type_match,automated_decision,admin_decision,created_at,reviewed_at",
       "id,status,id_type,id_country,automated_decision,admin_decision,created_at,reviewed_at",
-      { filter: `user_id=eq.${filterValue(userId)}`, order: "created_at.desc" }
-    ),
-    listAllAdminRows(
-      "fees",
-      "id,deal_id,currency,amount,status,created_at",
       { filter: `user_id=eq.${filterValue(userId)}`, order: "created_at.desc" }
     ),
     listAllAdminRows(
@@ -1147,7 +1134,6 @@ async function getAdminUserDetails(userId) {
     disputes,
     proofs,
     verifications,
-    fees,
     penalties,
     timeline,
   };

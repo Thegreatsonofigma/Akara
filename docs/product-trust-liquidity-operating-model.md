@@ -366,15 +366,15 @@ You can continue this exchange. I will show the next step now.
 - Standard resolution: 24 to 72 hours.
 - Critical fraud: restrict account immediately, then review evidence.
 
-## 8. Fee Model
+## 8. Free Access Model
 
 ### Goal
 
-Make revenue feel fair and predictable without creating custody obligations.
+Keep Akara accessible without adding billing or custody obligations.
 
-### Launch Fee
+### Service Fee
 
-Service fee: Free during launch.
+Service fee: Free.
 
 User-facing copy:
 
@@ -384,23 +384,7 @@ Service fee: Free
 
 No extra referral copy inside trade or listing review screens.
 
-### Akara Fee Account
-
-When fees are enabled, Akara should use an invoice ledger, not a wallet.
-
-Each completed trade creates a fee entry for both users. The entry belongs to the user's Akara Fee Account and carries a unique fee payment reference. This is only a receivable record owed to Akara; it is not user balance, wallet value, escrow money, or exchange principal.
-
-Example:
-
-| Activity | Fee balance |
-| --- | --- |
-| First completed trade | RWF 100 |
-| Second completed trade | RWF 200 |
-| Third completed trade | RWF 300 |
-
-Users pay accumulated fees daily, weekly, or after 5 completed trades into Akara's official business bank or mobile money account using their unique Akara fee reference.
-
-Akara's service-fee account must never receive users' exchange money.
+Akara does not create fee balances, invoices, subscriptions, monthly summaries, or usage restrictions. Banks and mobile-money providers may still apply their own charges independently of Akara.
 
 ### Receipt Evidence Checks
 
@@ -419,46 +403,12 @@ Receipt states:
 
 Final proof remains recipient confirmation, supported by receipt evidence and admin review where needed.
 
-### Post-Launch Options
+### Free Access Principles
 
-Option A: Success fee through a licensed partner
-
-- Both users pay a small fee after successful exchange.
-- Simple to understand.
-- Only enforceable cleanly through a licensed payment, wallet, escrow, or remittance partner.
-- Akara should not collect success fees through manual chat transfers.
-
-Option B: Listing boost fee
-
-- User pays to promote a listing.
-- Easier to charge without custody.
-- Should not make normal listings invisible.
-
-Option C: Subscription for frequent users
-
-- Monthly access for higher limits, faster reviews, and priority support.
-- Better for heavy users, expats, and informal liquidity providers.
-
-Option D: Partner-supported fee
-
-- Licensed partner handles money movement and deducts Akara fee automatically.
-- Best long-term model if Akara moves beyond no-custody coordination.
-
-### Recommended Path
-
-1. Launch with fees visible but free during the first rollout.
-2. Track completed trades and volume.
-3. Enable the Akara Fee Account ledger after user trust and support flows are stable.
-4. Add listing boosts as the first optional no-custody revenue feature.
-5. Add automatic success-fee deduction only through a licensed partner rail.
-
-### Fee Principles
-
-- Always show fees before a trade opens.
-- Never hide fee obligations inside long text.
-- Do not ask users to pay fees to random numbers.
-- No admin follow-up language for fees in user chat.
-- Fee payments must be separate from exchange principal and clearly referenced.
+- Never create an Akara fee balance or invoice for a user.
+- Never restrict listings or exchanges based on payment to Akara.
+- Never ask users to send exchange money or service charges to Akara.
+- Continue showing `Service fee: Free` where a trade summary needs that field.
 
 ## Implementation Backlog
 
