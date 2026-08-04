@@ -57,6 +57,18 @@ function positiveNumberEnv(name, fallback) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function jsonArrayEnv(name) {
+  const value = optionalEnv(name);
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) throw new Error("must be a JSON array");
+    return parsed;
+  } catch (error) {
+    throw new Error(`Invalid ${name}: ${error.message}`);
+  }
+}
+
 loadEnv(path.join(rootDir, ".env"));
 
 const isRailwayRuntime = Boolean(
@@ -133,6 +145,16 @@ const config = {
     100,
     positiveNumberEnv("AKARA_NEGOTIATION_MAX_GAP_PERCENT", 40)
   ),
+  instantLiquidityEnabled: booleanEnv("AKARA_INSTANT_LIQUIDITY_ENABLED", false),
+  instantLiquidityQuoteTimeoutMs: Math.min(
+    10000,
+    Math.max(500, positiveIntegerEnv("AKARA_INSTANT_LIQUIDITY_QUOTE_TIMEOUT_MS", 2500))
+  ),
+  instantLiquidityMinimumValidityMs: Math.max(
+    30000,
+    positiveIntegerEnv("AKARA_INSTANT_LIQUIDITY_MINIMUM_VALIDITY_MS", 60000)
+  ),
+  liquidityPartners: jsonArrayEnv("AKARA_LIQUIDITY_PARTNERS_JSON"),
   coinProfileApiUrl: optionalEnv("COIN_PROFILE_API_URL"),
   coinProfileApiKey: optionalEnv("COIN_PROFILE_API_KEY"),
   coinProfileUsername: optionalEnv("COIN_PROFILE_USERNAME"),

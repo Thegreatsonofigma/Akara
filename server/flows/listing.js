@@ -43,7 +43,9 @@ const {
 const { mainMenu, feeIncludedText, listingShareCopy, explainMissingListing, currencyListReply } = require("../messages/copy");
 const { startPaymentProfileForCurrency } = require("./payment-profile");
 const { createLockedQuote, attachQuoteToDeal, cancelLockedQuote } = require("../db/quotes");
+const { releaseExpiredInstantReservations } = require("../db/instant-fulfillment");
 const { getBlockingOpenDealForUser, dealReservationExpiresAt } = require("../db/deals");
+const { offerInstantFulfillment } = require("./instant-fulfillment");
 const {
   buildClearingPlan,
   buildNegotiationPlan,
@@ -341,6 +343,26 @@ async function deliverListingLive(user, listing, listingCode, message) {
     console.error(`[listing] card send failed for ${listingCode}: ${error.message}`);
     return message;
   }
+}
+
+async function deliverListingWithInstantOption(user, listing, heading) {
+  const shareUrl = listingShareUrl(listing);
+  const liveMessage = listingLiveMessage(
+    heading,
+    listing.listing_code,
+    listing,
+    shareUrl
+  );
+  const deliveryReply = await deliverListingLive(
+    user,
+    listing,
+    listing.listing_code,
+    liveMessage
+  );
+  const instantReply = await offerInstantFulfillment(user, listing);
+  if (instantReply) return deliveryReply ? [deliveryReply, instantReply] : instantReply;
+  await clearSession(user, user.whatsapp_phone);
+  return deliveryReply;
 }
 
 function tradeOpenedMessage({
@@ -846,10 +868,7 @@ async function publishListing(user, context) {
     const currentListing = await listingById(listing.id);
     if (currentListing?.status !== "active") return "";
 
-    await clearSession(user, user.whatsapp_phone);
-    const shareUrl = listingShareUrl(listing);
-    const liveMessage = listingLiveMessage("Listing updated ✅", listing.listing_code || context.listing_code, listing, shareUrl);
-    return deliverListingLive(user, listing, listing.listing_code || context.listing_code, liveMessage);
+    return deliverListingWithInstantOption(user, listing, "Listing updated ✅");
   }
 
   const listing = await createListingRecord(user, context);
@@ -864,6 +883,8 @@ async function publishListing(user, context) {
     const negotiationReply = await tryStartReciprocalNegotiation(user, listing);
     if (negotiationReply) return deliveryReply ? [deliveryReply, negotiationReply] : negotiationReply;
 
+    const instantReply = await offerInstantFulfillment(user, listing);
+    if (instantReply) return deliveryReply ? [deliveryReply, instantReply] : instantReply;
     await clearSession(user, user.whatsapp_phone);
     return deliveryReply;
   }
@@ -875,10 +896,7 @@ async function publishListing(user, context) {
   const currentListing = await listingById(listing.id);
   if (currentListing?.status !== "active") return "";
 
-  await clearSession(user, user.whatsapp_phone);
-  const shareUrl = listingShareUrl(listing);
-  const liveMessage = listingLiveMessage("Your listing is live ✅", listingCode, listing, shareUrl);
-  return deliverListingLive(user, listing, listingCode, liveMessage);
+  return deliverListingWithInstantOption(user, listing, "Your listing is live ✅");
 }
 
 async function publishBulkListings(user, listings) {
@@ -1319,6 +1337,11 @@ async function sendMatchingReply(phone, reply) {
 }
 
 async function performSmartMatchingSweep(options = {}) {
+  try {
+    await releaseExpiredInstantReservations();
+  } catch (error) {
+    if (!/(instant_fulfillment_quotes|does not exist|relation|42P01)/i.test(error.message)) throw error;
+  }
   const requestedBatchSize = Number(options.batchSize || config.matchingSweepBatchSize);
   const batchSize = Number.isFinite(requestedBatchSize)
     ? Math.max(1, Math.min(500, Math.floor(requestedBatchSize)))

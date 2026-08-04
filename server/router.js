@@ -97,6 +97,7 @@ const {
   shouldLeaveDealRoomForFreshCommand,
   isExplicitTradeRecallIntent,
 } = require("./flows/deal-room");
+const { handleInstantFulfillment } = require("./flows/instant-fulfillment");
 const {
   getMyListingsReply,
   getMyDealsReply,
@@ -348,6 +349,7 @@ const FLOW_COMPATIBLE_ACTIONS = {
   negotiation: new Set(["flow_reply", "reserve_listing", "trade_action"]),
   settings: new Set(["settings_action", "add_payout"]),
   deal_room: new Set(["trade_action", "reserve_listing"]),
+  instant_fulfillment: new Set(["flow_reply", "unknown"]),
   support: new Set(["flow_reply", "get_support"]),
 };
 
@@ -359,6 +361,7 @@ const RESUMABLE_CONVERSATION_FLOWS = new Set([
   "negotiation",
   "payment_profile",
   "deal_room",
+  "instant_fulfillment",
   "verification",
   "kyc_upgrade",
   "support",
@@ -904,6 +907,10 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
 
   if (session?.current_flow === "negotiation") {
     return handleNegotiation(text, user, session);
+  }
+
+  if (session?.current_flow === "instant_fulfillment") {
+    return handleInstantFulfillment(text, user, session);
   }
 
   if (session?.current_flow === "settings") {
