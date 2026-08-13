@@ -1773,6 +1773,50 @@ async function run() {
     if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
   }
 
+  // ---------- active negotiation supplies missing currency context
+  scenario("contextual negotiation replies");
+  const contextualListing = seedListing(charlieRow, {
+    code: "AKR-LIST-093",
+    have_currency: "NGN",
+    have_amount: 2000,
+    want_currency: "RWF",
+    want_amount: 2500,
+    listing_type: "negotiable",
+  });
+
+  reply = await send(ALICE, "open AKR-LIST-093");
+  check("contextual proposal fixture opens negotiation", reply.includes("*Negotiable listing*"), reply);
+  reply = await send(ALICE, "I can pay 2,000 for 2,000 naira", {
+    interpret: { action: "question", answer: "This looks like a question." },
+  });
+  check(
+    "active negotiation accepts a natural proposal without counter wording or a quote",
+    reply.includes("*Proposal sent*") && reply.includes("2,000 RWF") && reply.includes("2,000 NGN"),
+    reply
+  );
+
+  reply = await send(CHARLIE, "1,900 naira for 2,100");
+  check(
+    "owner can counter with one contextual currency and no counter keyword",
+    reply.includes("*Counter sent*") && reply.includes("2,100 RWF") && reply.includes("1,900 NGN"),
+    reply
+  );
+
+  reply = await send(ALICE, "2,050 for 1,900");
+  check(
+    "active trade context assigns both currencies when neither is repeated",
+    reply.includes("*Proposal sent*") && reply.includes("2,050 RWF") && reply.includes("1,900 NGN"),
+    reply
+  );
+  reply = await send(CHARLIE, "decline");
+  check("contextual negotiation can still be declined normally", reply.includes("Proposal declined"), reply);
+  for (const phone of [ALICE, CHARLIE]) {
+    const savedSession = __table("message_sessions").find((row) => row.whatsapp_phone === phone);
+    if (savedSession) Object.assign(savedSession, { current_flow: null, current_step: null, context_json: {} });
+  }
+  const contextualListingIndex = __table("listings").indexOf(contextualListing);
+  if (contextualListingIndex >= 0) __table("listings").splice(contextualListingIndex, 1);
+
   // ---------- a counter may improve what the listing owner receives
   scenario("executable higher counter");
   const higherCounterMakerPhone = "250700000071";

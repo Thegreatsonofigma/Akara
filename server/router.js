@@ -71,6 +71,7 @@ const {
   handleCreateListing,
   handleBulkListing,
   handleNegotiation,
+  looksLikeNegotiationProposal,
 } = require("./flows/listing");
 const {
   continueSearchOrShowMatches,
@@ -684,10 +685,11 @@ async function dispatchInterpretedAction(interpreted, text, user, session, incom
   if (quotedReply) return quotedReply;
 
   if (session?.current_flow === "negotiation"
-      && !["greeting", "thanks", "wellbeing", "question"].includes(interpretedAction)
-      && !isGreeting(text)
-      && !isThanksMessage(text)
-      && !isWellbeingQuestion(text)) {
+      && (looksLikeNegotiationProposal(text)
+        || (!["greeting", "thanks", "wellbeing", "question"].includes(interpretedAction)
+          && !isGreeting(text)
+          && !isThanksMessage(text)
+          && !isWellbeingQuestion(text)))) {
     return handleNegotiation(text, user, session);
   }
 
