@@ -2,7 +2,7 @@ const { supabaseRequest, filterValue } = require("../lib/supabase");
 const { sendWhatsAppText, sendWhatsAppButtons } = require("../lib/whatsapp");
 const { config } = require("../config");
 const { title, caption, action, labeled, fieldBlock, formatMoney, moneyNumber, positiveMoney, formatCooldown } = require("../lib/format");
-const { compactText } = require("../nlp/slang");
+const { compactText, normalizeExchangeText } = require("../nlp/slang");
 const { normalizeCurrency, parseAmount, parseCurrencyAmountPairs } = require("../nlp/currency");
 const {
   parseListingDetails,
@@ -2140,14 +2140,49 @@ function parseBareNegotiationAmount(text) {
   return isOnlyAnAmount || hasProposalLanguage ? amount : null;
 }
 
-function parseNegotiationProposal(text, listing) {
-  const pairs = parseCurrencyAmountPairs(text);
-  if (!pairs.length) {
-    const amount = parseBareNegotiationAmount(text);
-    if (!amount) return null;
-    return { want_amount: amount };
-  }
+function negotiationAmountMentions(text) {
+  const normalized = normalizeExchangeText(
+    String(text || "").replace(/\bAKR-(?:LIST|TXN)-[A-Z0-9-]+\b/gi, " ")
+  );
+  const amountPattern = /\b\d[\d,]*(?:\.\d+)?(?:\s*(?:k|m|thousand|grand|million)\b)?/gi;
+  const mentions = [];
+  let match;
 
+  while ((match = amountPattern.exec(normalized))) {
+    const amount = parseAmount(match[0]);
+    if (amount) mentions.push({ amount, index: match.index });
+  }
+  return mentions;
+}
+
+function hasContextualAmountPair(text) {
+  const command = compactText(text);
+  return negotiationAmountMentions(text).length === 2
+    && /\b(for|in exchange for|to get|and get|and receive)\b/.test(command);
+}
+
+function looksLikeNegotiationProposal(text) {
+  if (hasContextualAmountPair(text) || parseBareNegotiationAmount(text)) return true;
+
+  const pairs = parseCurrencyAmountPairs(text);
+  if (!pairs.length) return false;
+
+  const command = compactText(text);
+  return !/^(what|how|when|where|why|who|can you|could you|is|are|do|does)\b/.test(command);
+}
+
+function proposalSideForSingleAmount(text, participantRole) {
+  const command = compactText(text);
+  const outgoing = /\b(pay|send|give)\b/.test(command);
+  const incoming = /\b(receive|get|want|need)\b/.test(command);
+
+  if (outgoing && !incoming) return participantRole === "maker" ? "have_amount" : "want_amount";
+  if (incoming && !outgoing) return participantRole === "maker" ? "want_amount" : "have_amount";
+  return "want_amount";
+}
+
+function parseNegotiationProposal(text, listing, participantRole = "taker") {
+  const pairs = parseCurrencyAmountPairs(text);
   const proposal = {};
   for (const pair of pairs) {
     if (pair.currency === listing.want_currency) {
@@ -2159,6 +2194,35 @@ function parseNegotiationProposal(text, listing) {
         error: `This listing trades ${listing.want_currency} for ${listing.have_currency}, so counter with an amount in ${listing.want_currency}, ${listing.have_currency}, or both.`,
       };
     }
+  }
+
+  const mentions = negotiationAmountMentions(text);
+  if (hasContextualAmountPair(text)) {
+    if (!pairs.length) {
+      const outgoingSide = participantRole === "maker" ? "have_amount" : "want_amount";
+      const incomingSide = participantRole === "maker" ? "want_amount" : "have_amount";
+      proposal[outgoingSide] = mentions[0].amount;
+      proposal[incomingSide] = mentions[1].amount;
+      return proposal;
+    }
+
+    if (pairs.length === 1) {
+      const pair = pairs[0];
+      const explicitMentionIndex = mentions
+        .map((mention, index) => ({ index, distance: Math.abs(mention.index - pair.index) }))
+        .sort((left, right) => left.distance - right.distance)[0]?.index;
+      const contextualMention = mentions.find((_, index) => index !== explicitMentionIndex);
+      if (contextualMention) {
+        const missingSide = pair.currency === listing.want_currency ? "have_amount" : "want_amount";
+        proposal[missingSide] = contextualMention.amount;
+      }
+    }
+  }
+
+  if (!pairs.length) {
+    const amount = parseBareNegotiationAmount(text);
+    if (!amount) return null;
+    proposal[proposalSideForSingleAmount(text, participantRole)] = amount;
   }
   return proposal;
 }
@@ -2532,7 +2596,7 @@ function mergedOfferPatch(listing, offer, proposal) {
 async function handleNegotiation(text, user, session) {
   const context = session.context_json || {};
   const command = compactText(text);
-  const messageProposal = parseCurrencyAmountPairs(text).length || parseBareNegotiationAmount(text);
+  const messageProposal = looksLikeNegotiationProposal(text);
 
   if (["change proposal", "change_proposal"].includes(command)) {
     const offer = context.offer_id ? await getNegotiableOfferById(context.offer_id) : null;
@@ -2605,7 +2669,7 @@ async function handleNegotiation(text, user, session) {
       return "That negotiable listing is no longer live. Type find offers to browse again.";
     }
 
-    const proposal = parseNegotiationProposal(text, listing);
+    const proposal = parseNegotiationProposal(text, listing, "taker");
     if (proposal?.error) return proposal.error;
 
     if (!proposal && /\b(accept|take|open|deal|start|go ahead|posted|same terms|terms)\b/.test(command)) {
@@ -2670,7 +2734,7 @@ async function handleNegotiation(text, user, session) {
       return "I could not find the trader who sent that proposal.";
     }
 
-    const proposal = parseNegotiationProposal(text, listing);
+    const proposal = parseNegotiationProposal(text, listing, "maker");
     if (proposal?.error) return proposal.error;
 
     if (!proposal && /\b(accept|approve|agree|yes|deal|open)\b/.test(command)) {
@@ -2770,7 +2834,7 @@ async function handleNegotiation(text, user, session) {
       return "That negotiable listing is no longer live.";
     }
 
-    const proposal = parseNegotiationProposal(text, listing);
+    const proposal = parseNegotiationProposal(text, listing, "taker");
     if (proposal?.error) return proposal.error;
 
     if (session.current_step === "taker_waiting" && offer.status === "pending" && !proposal) {
@@ -3089,6 +3153,7 @@ module.exports = {
   handleCreateListing,
   handleBulkListing,
   handleNegotiation,
+  looksLikeNegotiationProposal,
   requeueCancelledAutoMatch,
   runSmartMatchingSweep,
   runPendingMatchReminderSweep,
