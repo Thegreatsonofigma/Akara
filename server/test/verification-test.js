@@ -335,7 +335,10 @@ async function run() {
   reply = await send(U1, "1");
   check("edited verified name returns to payout review", reply.includes("Review payout detail") && reply.includes("John Doe"), reply);
 
-  reply = await send(U1, "save payout");
+  // The interpreter legitimately classifies "save payout" as add_payout.
+  // While verification is collecting its required payout, that action must
+  // stay inside the verification flow instead of hitting the KYC wall.
+  reply = await send(U1, "save payout", { interpret: { action: "add_payout" } });
   check("payout saved", reply.includes("Payout detail saved"), reply);
   check("saved payout asks another or submit", reply.toLowerCase().includes("another") && reply.toLowerCase().includes("submit"), reply);
   check("payout-name match alone does not auto-verify", userRow(U1).verification_status !== "verified_auto", userRow(U1).verification_status);

@@ -1092,6 +1092,22 @@ function paymentProfileInterrupt(interpretedAction) {
     && !["add_payout", "settings_action"].includes(interpretedAction);
 }
 
+// Payout collection is the final verification requirement. The interpreter
+// correctly classifies phrases such as "save payout" as add_payout and
+// "edit payout" as settings_action, so those actions must remain inside KYC
+// while it is on a payout or review step. Other fresh requests still hit the
+// verification wall, and payout actions cannot leak into identity fields.
+function verificationActionInterruptsFlow(interpretedAction, currentStep) {
+  if (!isFreshRequestAction(interpretedAction) || interpretedAction === "verify") return false;
+
+  const isPayoutAction = ["add_payout", "settings_action"].includes(interpretedAction);
+  const step = String(currentStep || "");
+  const isPayoutOrReviewStep = step.startsWith("payment_")
+    || ["review_submission", "review_edit_menu"].includes(step);
+
+  return !(isPayoutAction && isPayoutOrReviewStep);
+}
+
 function isPaymentProfileInteractiveCommand(command) {
   return /^(?:payout_currency:[a-z]{3}|payout_network:.+|payout_bank:.+|payout_bank_page:\d+|payout_bank_search|confirm_account_owner|wrong_account|edit_account_number|edit_account_bank|retry_account_check|retry_bank_search|submit|another|edit)$/i
     .test(String(command || ""));
@@ -1338,7 +1354,10 @@ async function routeInterpreted(interpreted, text, user, session, incoming = {})
         `Type ${action("cancel")} to pause.`,
       ].join("\n");
     }
-    if (!incoming.media?.id && isFreshRequestAction(interpreted.action) && interpreted.action !== "verify") {
+    if (!incoming.media?.id && verificationActionInterruptsFlow(
+      interpreted.action,
+      session.current_step
+    )) {
       return [
         "Verification comes first 🔐",
         "",
