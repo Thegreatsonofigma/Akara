@@ -57,6 +57,13 @@ function positiveNumberEnv(name, fallback) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function csvEnv(name) {
+  return optionalEnv(name)
+    .split(",")
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean);
+}
+
 loadEnv(path.join(rootDir, ".env"));
 
 const isRailwayRuntime = Boolean(
@@ -133,6 +140,18 @@ const config = {
     100,
     positiveNumberEnv("AKARA_NEGOTIATION_MAX_GAP_PERCENT", 40)
   ),
+  fincraEnabled: booleanEnv("AKARA_FINCRA_ENABLED", false),
+  fincraEnvironment: optionalEnv("AKARA_FINCRA_ENVIRONMENT", "sandbox").toLowerCase(),
+  fincraApiKey: optionalEnv("AKARA_FINCRA_API_KEY"),
+  fincraBusinessId: optionalEnv("AKARA_FINCRA_BUSINESS_ID"),
+  fincraWebhookSecret: optionalEnv("AKARA_FINCRA_WEBHOOK_SECRET"),
+  fincraAllowMutations: booleanEnv("AKARA_FINCRA_ALLOW_MUTATIONS", false),
+  fincraLiveAcknowledged: booleanEnv("AKARA_FINCRA_LIVE_ACK", false),
+  fincraTimeoutMs: Math.min(
+    15000,
+    Math.max(1000, positiveIntegerEnv("AKARA_FINCRA_TIMEOUT_MS", 5000))
+  ),
+  fincraCorridors: csvEnv("AKARA_FINCRA_CORRIDORS"),
   coinProfileApiUrl: optionalEnv("COIN_PROFILE_API_URL"),
   coinProfileApiKey: optionalEnv("COIN_PROFILE_API_KEY"),
   coinProfileUsername: optionalEnv("COIN_PROFILE_USERNAME"),
@@ -153,6 +172,23 @@ const config = {
 
 if (config.requireWebhookSignature && !config.metaAppSecret) {
   throw new Error("Missing required environment variable: META_APP_SECRET");
+}
+
+if (!["sandbox", "live"].includes(config.fincraEnvironment)) {
+  throw new Error("AKARA_FINCRA_ENVIRONMENT must be sandbox or live");
+}
+
+if (config.fincraEnvironment === "live" && !config.fincraLiveAcknowledged) {
+  throw new Error("AKARA_FINCRA_LIVE_ACK=true is required before using the live Fincra API");
+}
+
+if (config.fincraEnabled) {
+  const missingFincra = [];
+  if (!config.fincraApiKey) missingFincra.push("AKARA_FINCRA_API_KEY");
+  if (!config.fincraBusinessId) missingFincra.push("AKARA_FINCRA_BUSINESS_ID");
+  if (missingFincra.length) {
+    throw new Error(`Fincra is enabled but missing: ${missingFincra.join(", ")}`);
+  }
 }
 
 if (process.env.NODE_ENV === "production") {
