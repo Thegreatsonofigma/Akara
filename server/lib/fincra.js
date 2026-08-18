@@ -22,6 +22,12 @@ const CHECKOUT_PAYMENT_METHODS = new Set([
   "payattitude",
 ]);
 
+const CHECKOUT_DEFAULT_PAYMENT_METHODS = new Set([
+  "bank_transfer",
+  "card",
+  "payattitude",
+]);
+
 class FincraError extends Error {
   constructor(message, options = {}) {
     super(message);
@@ -402,6 +408,9 @@ class FincraClient {
     if (redirectUrl) body.redirectUrl = redirectUrl;
     if (input.defaultPaymentMethod) {
       const method = String(input.defaultPaymentMethod).toLowerCase();
+      if (!CHECKOUT_DEFAULT_PAYMENT_METHODS.has(method)) {
+        throw new TypeError("checkout contains an unsupported default payment method");
+      }
       if (!body.paymentMethods.includes(method)) {
         throw new TypeError("default payment method must be enabled for checkout");
       }

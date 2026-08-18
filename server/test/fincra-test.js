@@ -261,7 +261,7 @@ async function run() {
       phoneNumber: "+254700000000",
     },
     paymentMethods: ["mobile_money", "bank_transfer"],
-    defaultPaymentMethod: "mobile_money",
+    defaultPaymentMethod: "bank_transfer",
     redirectUrl: "https://tryakara.com/payment-return",
   });
   await checkoutClient.verifyCheckout("AKR-COLLECT-123");
@@ -281,7 +281,7 @@ async function run() {
     feeBearer: "business",
     settlementDestination: "wallet",
     redirectUrl: "https://tryakara.com/payment-return",
-    defaultPaymentMethod: "mobile_money",
+    defaultPaymentMethod: "bank_transfer",
   });
   assert.equal(checkoutFetch.calls[1].options.headers["api-key"], "sandbox-secret");
   assert.equal(checkoutFetch.calls[1].options.headers["x-business-id"], "business-123");

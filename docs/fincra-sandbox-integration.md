@@ -77,6 +77,43 @@ Run the offline client tests:
 node server/test/fincra-test.js
 ```
 
+## Real sandbox checkout
+
+Real sandbox checkout testing requires credentials from the Fincra dashboard. Put them only in the untracked local `.env`; never commit or paste them into chat, logs, or frontend code:
+
+```dotenv
+AKARA_FINCRA_ENABLED=true
+AKARA_FINCRA_ENVIRONMENT=sandbox
+AKARA_FINCRA_API_KEY=...
+AKARA_FINCRA_PUBLIC_KEY=...
+AKARA_FINCRA_BUSINESS_ID=...
+AKARA_FINCRA_WEBHOOK_SECRET=...
+AKARA_FINCRA_ALLOW_MUTATIONS=true
+AKARA_FINCRA_ALLOW_COLLECTIONS=true
+AKARA_FINCRA_ALLOW_PAYOUTS=false
+AKARA_FINCRA_SANDBOX_CHECKOUT_ACK=I_UNDERSTAND_THIS_CREATES_A_SANDBOX_CHECKOUT
+```
+
+First confirm the authenticated sandbox business and rates without moving funds:
+
+```bash
+npm run fincra:check
+```
+
+Then initiate one hosted sandbox checkout:
+
+```bash
+npm run fincra:sandbox:checkout -- initiate
+```
+
+The harness saves only the reference, currency, amount, and creation time in the ignored `.sandbox/fincra-checkout.json` file. It does not save credentials or a hosted checkout token. After completing the sandbox payment, independently query Fincra using:
+
+```bash
+npm run fincra:sandbox:checkout -- verify
+```
+
+The verification command reports success only when the independently returned merchant reference, currency, amount, and provider status all match the saved checkout. Payout stays disabled throughout this test.
+
 After sandbox credentials are configured locally, run the read-only connectivity check:
 
 ```bash
