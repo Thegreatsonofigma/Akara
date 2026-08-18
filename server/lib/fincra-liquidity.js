@@ -29,8 +29,11 @@ function createFincraClient(config, dependencies = {}) {
   return new FincraClient({
     environment: config.fincraEnvironment,
     apiKey: config.fincraApiKey,
+    publicKey: config.fincraPublicKey,
     businessId: config.fincraBusinessId,
     allowMutations: config.fincraAllowMutations,
+    allowCollections: config.fincraAllowCollections,
+    allowPayouts: config.fincraAllowPayouts,
     liveAcknowledged: config.fincraLiveAcknowledged,
     timeoutMs: config.fincraTimeoutMs,
     fetchImpl: dependencies.fetchImpl,

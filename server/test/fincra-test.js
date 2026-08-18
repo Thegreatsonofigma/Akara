@@ -13,6 +13,19 @@ const {
   supportsFincraCorridor,
   getFincraPartnerQuote,
 } = require("../lib/fincra-liquidity");
+const {
+  FULFILLMENT_STATUS,
+  createCollectFirstFulfillment,
+  markCollectionInitiated,
+  noteCollectionWebhook,
+  applyVerifiedCollection,
+  approvePayout,
+  assertPayoutInitiable,
+  buildMobileMoneyPayoutRequest,
+  markPayoutInitiated,
+  notePayoutWebhook,
+  applyVerifiedPayout,
+} = require("../lib/fincra-fulfillment");
 
 function response(payload, status = 200) {
   return {
@@ -198,6 +211,308 @@ async function run() {
     "https://sandboxapi.fincra.com/conversions/reference/conversion-123"
   );
 
+  const collectionBlockedClient = new FincraClient({
+    apiKey: "sandbox-secret",
+    publicKey: "sandbox-public",
+    businessId: "business-123",
+    allowMutations: true,
+  });
+  assert.throws(
+    () => collectionBlockedClient.initiateCheckout({
+      currency: "KES",
+      amount: 10000,
+      reference: "AKR-COLLECT-123",
+      customer: { name: "Test User", email: "test@example.com" },
+    }),
+    (error) => error instanceof FincraError && error.errorType === "COLLECTIONS_DISABLED"
+  );
+
+  const checkoutFetch = mockFetch([
+    response({
+      success: true,
+      data: { reference: "checkout-123", status: "initiated" },
+    }),
+    response({
+      success: true,
+      data: {
+        MerchantReference: "AKR-COLLECT-123",
+        transactionReference: "checkout-123",
+        status: "successful",
+        currency: "KES",
+        amount: 10000,
+      },
+    }),
+  ]);
+  const checkoutClient = new FincraClient({
+    apiKey: "sandbox-secret",
+    publicKey: "sandbox-public",
+    businessId: "business-123",
+    allowMutations: true,
+    allowCollections: true,
+    fetchImpl: checkoutFetch,
+  });
+  await checkoutClient.initiateCheckout({
+    currency: "KES",
+    amount: "10000",
+    reference: "AKR-COLLECT-123",
+    customer: {
+      name: "Test User",
+      email: "test@example.com",
+      phoneNumber: "+254700000000",
+    },
+    paymentMethods: ["mobile_money", "bank_transfer"],
+    defaultPaymentMethod: "mobile_money",
+    redirectUrl: "https://tryakara.com/payment-return",
+  });
+  await checkoutClient.verifyCheckout("AKR-COLLECT-123");
+  assert.equal(checkoutFetch.calls[0].options.headers["x-pub-key"], "sandbox-public");
+  assert.equal(checkoutFetch.calls[0].options.headers["api-key"], undefined);
+  assert.equal(checkoutFetch.calls[0].options.headers["x-business-id"], "business-123");
+  assert.deepEqual(JSON.parse(checkoutFetch.calls[0].options.body), {
+    currency: "KES",
+    amount: 10000,
+    customer: {
+      name: "Test User",
+      email: "test@example.com",
+      phoneNumber: "+254700000000",
+    },
+    paymentMethods: ["mobile_money", "bank_transfer"],
+    reference: "AKR-COLLECT-123",
+    feeBearer: "business",
+    settlementDestination: "wallet",
+    redirectUrl: "https://tryakara.com/payment-return",
+    defaultPaymentMethod: "mobile_money",
+  });
+  assert.equal(checkoutFetch.calls[1].options.headers["api-key"], "sandbox-secret");
+  assert.equal(checkoutFetch.calls[1].options.headers["x-business-id"], "business-123");
+
+  const payoutBlockedClient = new FincraClient({
+    apiKey: "sandbox-secret",
+    businessId: "business-123",
+    allowMutations: true,
+  });
+  assert.throws(
+    () => payoutBlockedClient.initiateMobileMoneyPayout({
+      sourceCurrency: "KES",
+      destinationCurrency: "GHS",
+      amount: "10000",
+      quoteReference: "quote-payout-123",
+      description: "Akara exchange",
+      customerReference: "AKR-PAYOUT-123",
+      beneficiary: {
+        firstName: "Test",
+        lastName: "User",
+        phone: "+233200000000",
+        mobileMoneyCode: "MTN",
+      },
+    }),
+    (error) => error instanceof FincraError && error.errorType === "PAYOUTS_DISABLED"
+  );
+
+  const payoutFetch = mockFetch([
+    response({
+      success: true,
+      data: {
+        reference: "payout-123",
+        customerReference: "AKR-PAYOUT-123",
+        status: "processing",
+      },
+    }),
+    response({
+      success: true,
+      data: {
+        reference: "payout-123",
+        customerReference: "AKR-PAYOUT-123",
+        status: "successful",
+      },
+    }),
+  ]);
+  const payoutClient = new FincraClient({
+    apiKey: "sandbox-secret",
+    businessId: "business-123",
+    allowMutations: true,
+    allowPayouts: true,
+    fetchImpl: payoutFetch,
+  });
+  await payoutClient.initiateMobileMoneyPayout({
+    sourceCurrency: "KES",
+    destinationCurrency: "GHS",
+    amount: "10000",
+    quoteReference: "quote-payout-123",
+    description: "Akara exchange fulfillment-123",
+    customerReference: "AKR-PAYOUT-123",
+    beneficiary: {
+      firstName: "Test",
+      lastName: "User",
+      type: "individual",
+      phone: "+233200000000",
+      mobileMoneyCode: "mtn",
+    },
+  });
+  await payoutClient.verifyPayout("payout-123");
+  assert.deepEqual(JSON.parse(payoutFetch.calls[0].options.body), {
+    business: "business-123",
+    sourceCurrency: "KES",
+    destinationCurrency: "GHS",
+    amount: "10000",
+    description: "Akara exchange fulfillment-123",
+    customerReference: "AKR-PAYOUT-123",
+    paymentDestination: "mobile_money_wallet",
+    beneficiary: {
+      firstName: "Test",
+      lastName: "User",
+      type: "individual",
+      phone: "+233200000000",
+      mobileMoneyCode: "MTN",
+    },
+    quoteReference: "quote-payout-123",
+  });
+  assert.equal(
+    payoutFetch.calls[1].url,
+    "https://sandboxapi.fincra.com/disbursements/payouts/reference/payout-123"
+  );
+
+  const flowNow = new Date("2026-08-18T12:00:00.000Z");
+  let fulfillment = createCollectFirstFulfillment({
+    id: "fulfillment-123",
+    userId: "user-123",
+    paymentProfileId: "profile-123",
+    sourceCurrency: "KES",
+    sourceAmount: "10000",
+    destinationCurrency: "GHS",
+    destinationAmount: "580",
+    collectionReference: "AKR-COLLECT-123",
+    payoutCustomerReference: "AKR-PAYOUT-123",
+  }, flowNow);
+  assert.equal(fulfillment.status, FULFILLMENT_STATUS.CREATED);
+  assert.throws(
+    () => assertPayoutInitiable(fulfillment),
+    (error) => error instanceof FincraError && error.errorType === "PAYOUT_NOT_READY"
+  );
+
+  fulfillment = markCollectionInitiated(fulfillment, {
+    success: true,
+    data: { reference: "checkout-123", status: "initiated" },
+  }, flowNow);
+  fulfillment = noteCollectionWebhook(fulfillment, {
+    event: "charge.successful",
+    data: { MerchantReference: "AKR-COLLECT-123", status: "successful" },
+  }, flowNow);
+  assert.equal(fulfillment.status, FULFILLMENT_STATUS.COLLECTION_VERIFICATION_REQUIRED);
+  assert.throws(
+    () => approvePayout(fulfillment, {
+      kycVerified: true,
+      riskApproved: true,
+      payoutDetailsVerified: true,
+    }),
+    (error) => error instanceof FincraError && error.errorType === "COLLECTION_NOT_VERIFIED"
+  );
+
+  fulfillment = applyVerifiedCollection(fulfillment, {
+    success: true,
+    data: {
+      MerchantReference: "AKR-COLLECT-123",
+      transactionReference: "checkout-123",
+      status: "successful",
+      currency: "KES",
+      amount: 10000,
+    },
+  }, flowNow);
+  assert.equal(fulfillment.status, FULFILLMENT_STATUS.COLLECTION_CONFIRMED);
+  assert.throws(
+    () => approvePayout(fulfillment, {
+      kycVerified: true,
+      riskApproved: false,
+      payoutDetailsVerified: true,
+    }),
+    (error) => error instanceof FincraError && error.errorType === "PAYOUT_APPROVAL_INCOMPLETE"
+  );
+  fulfillment = approvePayout(fulfillment, {
+    kycVerified: true,
+    riskApproved: true,
+    payoutDetailsVerified: true,
+  }, flowNow);
+  assert.equal(fulfillment.status, FULFILLMENT_STATUS.PAYOUT_READY);
+
+  const payoutRequest = buildMobileMoneyPayoutRequest(fulfillment, {
+    firstName: "Test",
+    lastName: "User",
+    type: "individual",
+    phone: "+233200000000",
+    mobileMoneyCode: "MTN",
+  }, {
+    reference: "quote-payout-123",
+    sourceCurrency: "KES",
+    destinationCurrency: "GHS",
+    sourceAmount: 10000,
+    destinationAmount: 590,
+    expiresAt: "2026-08-18T12:00:30.000Z",
+  }, flowNow);
+  assert.equal(payoutRequest.amount, "10000");
+  assert.equal(payoutRequest.quoteReference, "quote-payout-123");
+  assert.throws(
+    () => buildMobileMoneyPayoutRequest(fulfillment, {}, {
+      reference: "expired-quote",
+      sourceCurrency: "KES",
+      destinationCurrency: "GHS",
+      sourceAmount: 10000,
+      destinationAmount: 590,
+      expiresAt: "2026-08-18T11:59:59.000Z",
+    }, flowNow),
+    (error) => error instanceof FincraError && error.errorType === "QUOTE_EXPIRED"
+  );
+
+  fulfillment = markPayoutInitiated(fulfillment, {
+    success: true,
+    data: {
+      reference: "payout-123",
+      customerReference: "AKR-PAYOUT-123",
+      status: "processing",
+    },
+  }, flowNow);
+  fulfillment = notePayoutWebhook(fulfillment, {
+    event: "payout.successful",
+    data: {
+      reference: "payout-123",
+      customerReference: "AKR-PAYOUT-123",
+      status: "successful",
+    },
+  }, flowNow);
+  assert.equal(fulfillment.status, FULFILLMENT_STATUS.PAYOUT_VERIFICATION_REQUIRED);
+  fulfillment = applyVerifiedPayout(fulfillment, {
+    success: true,
+    data: {
+      reference: "payout-123",
+      customerReference: "AKR-PAYOUT-123",
+      status: "successful",
+    },
+  }, flowNow);
+  assert.equal(fulfillment.status, FULFILLMENT_STATUS.COMPLETED);
+
+  let mismatchedCollection = createCollectFirstFulfillment({
+    id: "fulfillment-amount-mismatch",
+    userId: "user-123",
+    paymentProfileId: "profile-123",
+    sourceCurrency: "KES",
+    sourceAmount: "10000",
+    destinationCurrency: "GHS",
+    destinationAmount: "580",
+    collectionReference: "AKR-COLLECT-MISMATCH",
+    payoutCustomerReference: "AKR-PAYOUT-MISMATCH",
+  }, flowNow);
+  mismatchedCollection = markCollectionInitiated(mismatchedCollection, {
+    data: { reference: "checkout-mismatch", status: "initiated" },
+  }, flowNow);
+  mismatchedCollection = applyVerifiedCollection(mismatchedCollection, {
+    data: {
+      MerchantReference: "AKR-COLLECT-MISMATCH",
+      status: "successful",
+      currency: "KES",
+      amount: 9999,
+    },
+  }, flowNow);
+  assert.equal(mismatchedCollection.status, FULFILLMENT_STATUS.MANUAL_REVIEW);
+
   const errorFetch = mockFetch([response({
     success: false,
     message: "Invalid authentication credentials",
@@ -225,7 +540,7 @@ async function run() {
   assert.equal(verifyFincraWebhookSignature(rawBody, invalidSignature, webhookSecret), false);
   assert.equal(verifyFincraWebhookSignature(rawBody, "not-a-signature", webhookSecret), false);
 
-  console.log("Fincra client tests passed: sandbox URLs, auth, rates, quotes, safety gates, conversions, and webhooks.");
+  console.log("Fincra tests passed: sandbox auth, quotes, collect-first safety gates, mobile payouts, verification, and webhooks.");
 }
 
 run().catch((error) => {

@@ -15,6 +15,13 @@ const RATE_FILTERS = new Set([
   "perPage",
 ]);
 
+const CHECKOUT_PAYMENT_METHODS = new Set([
+  "bank_transfer",
+  "card",
+  "mobile_money",
+  "payattitude",
+]);
+
 class FincraError extends Error {
   constructor(message, options = {}) {
     super(message);
@@ -46,6 +53,66 @@ function decimalAmount(value) {
     throw new TypeError("amount must be a positive decimal value");
   }
   return normalized;
+}
+
+function integerAmount(value) {
+  const normalized = decimalAmount(value);
+  const amount = Number(normalized);
+  if (!Number.isSafeInteger(amount) || amount > 2147483647) {
+    throw new TypeError("amount must be a positive whole number for Fincra Checkout");
+  }
+  return amount;
+}
+
+function optionalHttpsUrl(value, label) {
+  if (value == null || value === "") return null;
+  const normalized = requiredText(value, label);
+  let url;
+  try {
+    url = new URL(normalized);
+  } catch {
+    throw new TypeError(`${label} must be a valid HTTPS URL`);
+  }
+  if (url.protocol !== "https:") {
+    throw new TypeError(`${label} must be a valid HTTPS URL`);
+  }
+  return url.toString();
+}
+
+function customerDetails(value) {
+  const customer = value && typeof value === "object" ? value : {};
+  const normalized = {
+    name: requiredText(customer.name, "customer name"),
+    email: requiredText(customer.email, "customer email"),
+  };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized.email)) {
+    throw new TypeError("customer email must be valid");
+  }
+  if (customer.phoneNumber || customer.phone) {
+    normalized.phoneNumber = requiredText(
+      customer.phoneNumber || customer.phone,
+      "customer phone number"
+    );
+  }
+  return normalized;
+}
+
+function mobileMoneyBeneficiary(value) {
+  const beneficiary = value && typeof value === "object" ? value : {};
+  const type = String(beneficiary.type || "individual").toLowerCase();
+  if (!["individual", "corporate"].includes(type)) {
+    throw new TypeError("beneficiary type must be individual or corporate");
+  }
+  return {
+    firstName: requiredText(beneficiary.firstName, "beneficiary first name"),
+    lastName: requiredText(beneficiary.lastName, "beneficiary last name"),
+    type,
+    phone: requiredText(beneficiary.phone, "beneficiary phone"),
+    mobileMoneyCode: requiredText(
+      beneficiary.mobileMoneyCode,
+      "beneficiary mobile money code"
+    ).toUpperCase(),
+  };
 }
 
 function referencePath(value, label) {
@@ -145,7 +212,10 @@ class FincraClient {
 
     this.apiKey = requiredText(options.apiKey, "Fincra API key");
     this.businessId = String(options.businessId || "").trim();
+    this.publicKey = String(options.publicKey || "").trim();
     this.allowMutations = options.allowMutations === true;
+    this.allowCollections = options.allowCollections === true;
+    this.allowPayouts = options.allowPayouts === true;
     this.timeoutMs = Math.min(15000, Math.max(1000, Number(options.timeoutMs || 5000)));
     this.fetchImpl = options.fetchImpl || globalThis.fetch;
     this.now = options.now || (() => Date.now());
@@ -154,6 +224,24 @@ class FincraClient {
 
   business(value) {
     return requiredText(value || this.businessId, "Fincra business ID");
+  }
+
+  requirePermission(scope) {
+    if (!this.allowMutations) {
+      throw new FincraError("Fincra mutating calls are disabled", {
+        errorType: "MUTATIONS_DISABLED",
+      });
+    }
+    if (scope === "collection" && !this.allowCollections) {
+      throw new FincraError("Fincra collection calls are disabled", {
+        errorType: "COLLECTIONS_DISABLED",
+      });
+    }
+    if (scope === "payout" && !this.allowPayouts) {
+      throw new FincraError("Fincra payout calls are disabled", {
+        errorType: "PAYOUTS_DISABLED",
+      });
+    }
   }
 
   async request(pathname, options = {}) {
@@ -170,12 +258,16 @@ class FincraClient {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     timeout.unref?.();
     try {
+      const authHeaders = options.auth === "public"
+        ? { "x-pub-key": requiredText(this.publicKey, "Fincra public key") }
+        : { "api-key": this.apiKey };
       const response = await this.fetchImpl(new URL(pathname, this.baseUrl), {
         method,
         headers: {
           accept: "application/json",
           "content-type": "application/json",
-          "api-key": this.apiKey,
+          ...authHeaders,
+          ...(options.headers || {}),
         },
         body: options.body == null ? undefined : JSON.stringify(options.body),
         signal: controller.signal,
@@ -285,6 +377,92 @@ class FincraClient {
   verifyConversion(conversionReference) {
     const reference = referencePath(conversionReference, "conversion reference");
     return this.request(`/conversions/reference/${reference}`);
+  }
+
+
+  initiateCheckout(input = {}) {
+    this.requirePermission("collection");
+    const paymentMethods = Array.isArray(input.paymentMethods) && input.paymentMethods.length
+      ? input.paymentMethods.map((value) => String(value).toLowerCase())
+      : ["bank_transfer", "mobile_money"];
+    if (paymentMethods.some((method) => !CHECKOUT_PAYMENT_METHODS.has(method))) {
+      throw new TypeError("checkout contains an unsupported payment method");
+    }
+
+    const body = {
+      currency: currencyCode(input.currency, "checkout currency"),
+      amount: integerAmount(input.amount),
+      customer: customerDetails(input.customer),
+      paymentMethods: [...new Set(paymentMethods)],
+      reference: referencePath(input.reference, "checkout reference"),
+      feeBearer: "business",
+      settlementDestination: "wallet",
+    };
+    const redirectUrl = optionalHttpsUrl(input.redirectUrl, "checkout redirect URL");
+    if (redirectUrl) body.redirectUrl = redirectUrl;
+    if (input.defaultPaymentMethod) {
+      const method = String(input.defaultPaymentMethod).toLowerCase();
+      if (!body.paymentMethods.includes(method)) {
+        throw new TypeError("default payment method must be enabled for checkout");
+      }
+      body.defaultPaymentMethod = method;
+    }
+    if (input.quoteReference) {
+      body.quoteReference = requiredText(input.quoteReference, "quote reference");
+    }
+
+    return this.request("/checkout/payments", {
+      method: "POST",
+      auth: "public",
+      requireMutationPermission: true,
+      headers: { "x-business-id": this.business(input.business) },
+      body,
+    });
+  }
+
+  verifyCheckout(merchantReference, business) {
+    const reference = referencePath(merchantReference, "checkout merchant reference");
+    return this.request(`/checkout/payments/merchant-reference/${reference}`, {
+      headers: { "x-business-id": this.business(business) },
+    });
+  }
+
+  initiateMobileMoneyPayout(input = {}) {
+    this.requirePermission("payout");
+    const sourceCurrency = currencyCode(input.sourceCurrency, "source currency");
+    const destinationCurrency = currencyCode(
+      input.destinationCurrency,
+      "destination currency"
+    );
+    const body = {
+      business: this.business(input.business),
+      sourceCurrency,
+      destinationCurrency,
+      amount: decimalAmount(input.amount),
+      description: requiredText(input.description, "payout description"),
+      customerReference: referencePath(input.customerReference, "customer reference"),
+      paymentDestination: "mobile_money_wallet",
+      beneficiary: mobileMoneyBeneficiary(input.beneficiary),
+    };
+    if (sourceCurrency !== destinationCurrency) {
+      body.quoteReference = requiredText(input.quoteReference, "quote reference");
+    }
+
+    return this.request("/disbursements/payouts", {
+      method: "POST",
+      requireMutationPermission: true,
+      body,
+    });
+  }
+
+  verifyPayout(payoutReference) {
+    const reference = referencePath(payoutReference, "payout reference");
+    return this.request(`/disbursements/payouts/reference/${reference}`);
+  }
+
+  verifyPayoutByCustomerReference(customerReference) {
+    const reference = referencePath(customerReference, "payout customer reference");
+    return this.request(`/disbursements/payouts/customer-reference/${reference}`);
   }
 }
 

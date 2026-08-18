@@ -143,10 +143,14 @@ const config = {
   fincraEnabled: booleanEnv("AKARA_FINCRA_ENABLED", false),
   fincraEnvironment: optionalEnv("AKARA_FINCRA_ENVIRONMENT", "sandbox").toLowerCase(),
   fincraApiKey: optionalEnv("AKARA_FINCRA_API_KEY"),
+  fincraPublicKey: optionalEnv("AKARA_FINCRA_PUBLIC_KEY"),
   fincraBusinessId: optionalEnv("AKARA_FINCRA_BUSINESS_ID"),
   fincraWebhookSecret: optionalEnv("AKARA_FINCRA_WEBHOOK_SECRET"),
   fincraAllowMutations: booleanEnv("AKARA_FINCRA_ALLOW_MUTATIONS", false),
+  fincraAllowCollections: booleanEnv("AKARA_FINCRA_ALLOW_COLLECTIONS", false),
+  fincraAllowPayouts: booleanEnv("AKARA_FINCRA_ALLOW_PAYOUTS", false),
   fincraLiveAcknowledged: booleanEnv("AKARA_FINCRA_LIVE_ACK", false),
+  fincraLivePayoutAcknowledged: booleanEnv("AKARA_FINCRA_LIVE_PAYOUT_ACK", false),
   fincraTimeoutMs: Math.min(
     15000,
     Math.max(1000, positiveIntegerEnv("AKARA_FINCRA_TIMEOUT_MS", 5000))
@@ -186,9 +190,35 @@ if (config.fincraEnabled) {
   const missingFincra = [];
   if (!config.fincraApiKey) missingFincra.push("AKARA_FINCRA_API_KEY");
   if (!config.fincraBusinessId) missingFincra.push("AKARA_FINCRA_BUSINESS_ID");
+  if (config.fincraAllowCollections && !config.fincraPublicKey) {
+    missingFincra.push("AKARA_FINCRA_PUBLIC_KEY");
+  }
+  if (
+    (config.fincraAllowCollections || config.fincraAllowPayouts)
+    && !config.fincraWebhookSecret
+  ) {
+    missingFincra.push("AKARA_FINCRA_WEBHOOK_SECRET");
+  }
   if (missingFincra.length) {
     throw new Error(`Fincra is enabled but missing: ${missingFincra.join(", ")}`);
   }
+}
+
+if (
+  (config.fincraAllowCollections || config.fincraAllowPayouts)
+  && !config.fincraAllowMutations
+) {
+  throw new Error(
+    "AKARA_FINCRA_ALLOW_MUTATIONS=true is required before enabling collections or payouts"
+  );
+}
+
+if (
+  config.fincraEnvironment === "live"
+  && config.fincraAllowPayouts
+  && !config.fincraLivePayoutAcknowledged
+) {
+  throw new Error("AKARA_FINCRA_LIVE_PAYOUT_ACK=true is required before live payouts");
 }
 
 if (process.env.NODE_ENV === "production") {

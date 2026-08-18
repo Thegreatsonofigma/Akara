@@ -35,6 +35,7 @@ const { mainMenuListPayload, mainMenu, greetingMenuBody } = require("./messages/
 const { handleWebsiteRoute } = require("./website");
 const { anchorPendingRecords, integrityRecordingEnabled } = require("./db/integrity");
 const { validateStellarIntegrityConfiguration } = require("./lib/stellar");
+const { handleFincraWebhook } = require("./fincra-webhook");
 
 const activeInboundMessageIds = new Set();
 const DEFAULT_IDLE_MENU_AFTER_MS = 5 * 60 * 1000;
@@ -548,6 +549,10 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/webhook") {
       return await handleWebhookPost(req, res);
+    }
+
+    if (req.method === "POST" && url.pathname === "/webhooks/fincra") {
+      return await handleFincraWebhook(req, res);
     }
 
     const receiptMatch = url.pathname.match(/^\/r\/([0-9a-f]{8}|[0-9a-f-]{36})$/i);
