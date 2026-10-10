@@ -14,6 +14,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@emnapi/core": "1.11.3",
+    "@emnapi/runtime": "1.11.3",
     "@phosphor-icons/react": "^2.1.10",
     "motion": "^12.42.2",
     "next": "16.4.0",
