@@ -4,6 +4,8 @@ import { SITE, BUSINESS, MANDATORY_WORDING } from "@/lib/site";
 import { SpectrumBar } from "@/components/ui/SpectrumBar";
 
 const PRODUCT_LINKS = [
+  { label: "All Akara products", href: "/products" },
+  { label: "Dooowring", href: "/dooowring" },
   { label: "How it works", href: "/#how-it-works" },
   { label: "Supported currencies", href: "/#currencies" },
   { label: "Safety", href: "/#safety" },

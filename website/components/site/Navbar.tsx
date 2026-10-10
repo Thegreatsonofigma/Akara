@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn";
 import { SITE } from "@/lib/site";
 
 const NAV_LINKS = [
+  { label: "Products", href: "/products" },
   { label: "How it works", href: "/#how-it-works" },
   { label: "Safety", href: "/#safety" },
   { label: "Currencies", href: "/#currencies" },

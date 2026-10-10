@@ -8,6 +8,18 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: projectRoot,
   },
+  async rewrites() {
+    return [
+      {
+        source: "/dooowring",
+        destination: "https://dooowring.xyz/dooowring/",
+      },
+      {
+        source: "/dooowring/:path*",
+        destination: "https://dooowring.xyz/dooowring/:path*",
+      },
+    ];
+  },
   async headers() {
     return [
       {
