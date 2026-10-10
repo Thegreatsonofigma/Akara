@@ -1,0 +1,25 @@
+{
+  "name": "Dooowring — Laundry & Home Cleaning",
+  "short_name": "Dooowring",
+  "description": "Book laundry pickup and home cleaning across Kigali with upfront pricing and MoMo payment.",
+  "start_url": "/dooowring/",
+  "scope": "/dooowring/",
+  "display": "standalone",
+  "background_color": "#F7F5EF",
+  "theme_color": "#0060D6",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/dooowring/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/dooowring/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

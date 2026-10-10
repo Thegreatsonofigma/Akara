@@ -1,0 +1,1 @@
+import{f as r}from"./index-BKmon7aR.js";function e(i,t="/account"){if(!i)return t;try{const n=new URL(i,window.location.origin);return n.origin!==window.location.origin?t:`${r(n.pathname)}${n.search}${n.hash}`}catch{return t}}export{e as s};

@@ -9,16 +9,21 @@ const nextConfig: NextConfig = {
     root: projectRoot,
   },
   async rewrites() {
-    return [
-      {
-        source: "/dooowring",
-        destination: "https://dooowring.xyz/dooowring/",
-      },
-      {
-        source: "/dooowring/:path*",
-        destination: "https://dooowring.xyz/dooowring/:path*",
-      },
-    ];
+    return {
+      beforeFiles: [
+        {
+          source: "/dooowring",
+          destination: "/dooowring/index.html",
+        },
+      ],
+      afterFiles: [],
+      fallback: [
+        {
+          source: "/dooowring/:path*",
+          destination: "/dooowring/index.html",
+        },
+      ],
+    };
   },
   async headers() {
     return [
