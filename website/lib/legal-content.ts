@@ -875,7 +875,7 @@ export const LEGAL_DOCS: LegalDoc[] = [
       {
         heading: "Support Channels",
         paragraphs: [
-          "Users can reach Akara through the official WhatsApp Business number, support@tryakara.com, and channels listed on https://tryakara.com. If the domain email is not active, tryakara@gmail.com may be used temporarily.",
+          "Users can reach Akara through the official WhatsApp Business number, support@tryakara.com, and channels listed on https://www.tryakara.com. If the domain email is not active, tryakara@gmail.com may be used temporarily.",
         ],
       },
       {

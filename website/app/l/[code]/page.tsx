@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { WhatsAppRedirect } from "@/components/listing/WhatsAppRedirect";
+import Link from "next/link";
 import {
   akaraWhatsAppUrl,
   formatListingAmount,
@@ -14,7 +14,7 @@ type ListingPageProps = {
   params: Promise<{ code: string }>;
 };
 
-const siteUrl = "https://tryakara.com";
+const siteUrl = "https://www.tryakara.com";
 
 export async function generateMetadata({ params }: ListingPageProps): Promise<Metadata> {
   const { code: rawCode } = await params;
@@ -73,15 +73,17 @@ export default async function ListingPage({ params }: ListingPageProps) {
         padding: "24px",
         textAlign: "center",
       }}>
-        <WhatsAppRedirect url={whatsappUrl} />
         <div>
-          <strong style={{ display: "block", fontSize: "20px" }}>Opening Akara on WhatsApp</strong>
-          <a
-            href={whatsappUrl}
+          <strong style={{ display: "block", fontSize: "20px" }}>Listing unavailable</strong>
+          <p style={{ margin: "10px auto 0", maxWidth: "420px", color: "#a8a8a8", fontSize: "14px", lineHeight: 1.6 }}>
+            This listing may have expired or the link may be incomplete. Akara will never redirect you or ask for personal information from an unavailable listing.
+          </p>
+          <Link
+            href="/"
             style={{ display: "inline-block", marginTop: "18px", color: "#9DFF1E", fontWeight: 800 }}
           >
-            Continue to WhatsApp
-          </a>
+            Return to Akara
+          </Link>
         </div>
       </main>
     );
@@ -101,7 +103,6 @@ export default async function ListingPage({ params }: ListingPageProps) {
       justifyContent: "center",
       padding: "24px",
     }}>
-      <WhatsAppRedirect url={whatsappUrl} />
       <div style={{ width: "min(1120px, 100%)" }}>
         {/* The image is also the exact Open Graph preview WhatsApp requests. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -121,7 +122,7 @@ export default async function ListingPage({ params }: ListingPageProps) {
           <div>
             <strong style={{ display: "block", fontSize: "18px" }}>{code}</strong>
             <span style={{ color: "#a8a8a8", fontSize: "14px" }}>
-              Opening this listing inside your Akara WhatsApp chat.
+              Review the listing here, then choose whether to open the official Akara WhatsApp chat.
             </span>
           </div>
           <a
@@ -138,7 +139,7 @@ export default async function ListingPage({ params }: ListingPageProps) {
               textDecoration: "none",
             }}
           >
-            Continue to WhatsApp
+            Open in WhatsApp
           </a>
         </div>
       </div>

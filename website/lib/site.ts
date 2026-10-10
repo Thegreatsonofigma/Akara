@@ -1,7 +1,7 @@
 export const SITE = {
   name: "Akara",
   legalName: "Akara Fintech Solutions",
-  url: "https://tryakara.com",
+  url: "https://www.tryakara.com",
   title: "Akara | Currency exchange on WhatsApp for Africa",
   description:
     "Akara helps verified users list, discover, coordinate, and track peer-to-peer currency exchange on WhatsApp across NGN, RWF, GHS, KES, and XAF. Akara does not hold funds.",
