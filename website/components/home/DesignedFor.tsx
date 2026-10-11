@@ -13,10 +13,10 @@ import { Reveal } from "@/components/motion/Reveal";
 import { IMAGES, type StockImage } from "@/lib/images";
 
 const TONES = {
-  brand: { tile: "bg-brand text-black", wash: "bg-brand/50" },
-  electric: { tile: "bg-electric text-white", wash: "bg-electric/50" },
-  acid: { tile: "bg-acid text-black", wash: "bg-acid/40" },
-  pink: { tile: "bg-pink text-white", wash: "bg-pink/45" },
+  brand: { tile: "bg-brand text-black", wash: "bg-brand/25" },
+  electric: { tile: "bg-electric text-white", wash: "bg-electric/25" },
+  acid: { tile: "bg-acid text-black", wash: "bg-acid/20" },
+  pink: { tile: "bg-pink text-white", wash: "bg-pink/20" },
 } as const;
 
 const AUDIENCES: Array<{
@@ -72,38 +72,42 @@ const AUDIENCES: Array<{
 
 export function DesignedFor() {
   return (
-    <section className="border-t border-hairline py-20 sm:py-28">
+    <section className="relative overflow-hidden border-t border-hairline py-20 sm:py-28">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(circle_at_50%_0%,rgba(157,255,30,0.075),transparent_68%)]"
+      />
       <Container>
         <SectionHeader
           eyebrow="Designed for"
           title="Built for how money really moves."
           copy="Six lives Akara was made to fit. Meet them."
+          align="left"
+          className="relative max-w-3xl"
         />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="relative grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {AUDIENCES.map((audience, i) => {
             const tone = TONES[audience.tone];
             return (
               <Reveal key={audience.title} delay={i * 0.06} className="h-full">
-                <div className="group relative aspect-[4/5] overflow-hidden rounded-[1.75rem] bg-surface-2 ring-1 ring-white/10 transition-all duration-500 hover:ring-white/25 hover:shadow-[0_24px_64px_rgba(0,0,0,0.6)]">
+                <article className="group relative min-h-[360px] overflow-hidden rounded-[1.75rem] bg-surface-2 shadow-[0_20px_56px_rgba(0,0,0,0.3)] ring-1 ring-inset ring-white/10 transition duration-500 hover:-translate-y-1 hover:ring-white/25 md:aspect-[4/3] md:min-h-0">
                   <Image
                     src={audience.image.src}
                     alt={audience.image.alt}
                     fill
                     sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                    className="object-cover grayscale transition-all duration-700 ease-out group-hover:scale-[1.04] group-hover:grayscale-0 group-active:scale-[1.04] group-active:grayscale-0"
+                    className="object-cover transition duration-700 ease-out group-hover:scale-[1.035]"
                   />
-                  {/* duotone wash: fades out on hover or tap to reveal true color */}
                   <div
                     aria-hidden="true"
-                    className={`absolute inset-0 mix-blend-multiply transition-opacity duration-700 group-hover:opacity-0 group-active:opacity-0 ${tone.wash}`}
+                    className={`absolute inset-0 mix-blend-color transition-opacity duration-700 group-hover:opacity-0 ${tone.wash}`}
                   />
-                  {/* black bed for the layered text */}
                   <div
                     aria-hidden="true"
-                    className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/25 to-transparent"
+                    className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/5"
                   />
                   <span
-                    className={`absolute left-5 top-5 flex size-11 items-center justify-center rounded-xl ${tone.tile}`}
+                    className={`absolute left-5 top-5 flex size-11 items-center justify-center rounded-[0.9rem] shadow-[0_10px_24px_rgba(0,0,0,0.25)] ${tone.tile}`}
                   >
                     <audience.icon
                       size={22}
@@ -111,15 +115,15 @@ export function DesignedFor() {
                       aria-hidden="true"
                     />
                   </span>
-                  <div className="absolute inset-x-0 bottom-0 p-6">
-                    <p className="text-xl font-bold text-white">
+                  <div className="absolute inset-x-0 bottom-0 p-6 sm:p-7">
+                    <p className="text-xl font-bold tracking-[-0.02em] text-white sm:text-2xl">
                       {audience.title}
                     </p>
-                    <p className="mt-1.5 text-[13.5px] leading-snug text-white/80">
+                    <p className="mt-2 max-w-sm text-sm leading-relaxed text-white/75">
                       {audience.copy}
                     </p>
                   </div>
-                </div>
+                </article>
               </Reveal>
             );
           })}
